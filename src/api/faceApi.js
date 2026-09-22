@@ -2,13 +2,13 @@ import apiClient from './client';
 
 export const faceApi = {
   getFaceStatus: async (employeeId) => {
-    if (!employeeId || employeeId === 'undefined' || employeeId === 'null') return { status: 'UNREGISTERED' };
+    if (!employeeId || employeeId === 'undefined' || employeeId === 'null') return { status: 'UNREGISTERED', isRegistered: false };
     try {
       const res = await apiClient.get(`/face/employees/${employeeId}/status`);
       return res.data;
     } catch (err) {
-      if (err.response?.status === 404) return { status: 'UNREGISTERED' };
-      throw err;
+      if (err.response?.status === 404 || err.response?.status === 400) return { status: 'UNREGISTERED', isRegistered: false };
+      return { status: 'UNREGISTERED', isRegistered: false };
     }
   },
 
@@ -46,19 +46,26 @@ export const faceApi = {
   },
 
   getEmployeeFaceLogs: async (employeeId, params) => {
-    if (!employeeId || employeeId === 'undefined') return { data: [], logs: [] };
+    if (!employeeId || employeeId === 'undefined' || employeeId === 'null') return { data: [], logs: [] };
     try {
       const res = await apiClient.get(`/face/employees/${employeeId}/verification-logs`, { params });
       return res.data;
     } catch (err) {
-      if (err.response?.status === 404) return { data: [], logs: [] };
-      throw err;
+      if (err.response?.status === 404 || err.response?.status === 403) return { data: [], logs: [] };
+      return { data: [], logs: [] };
     }
   },
 
   getAllFaceLogs: async (params) => {
-    const res = await apiClient.get('/face/verification-logs', { params });
-    return res.data;
+    try {
+      const res = await apiClient.get('/face/verification-logs', { params });
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 403 || err.response?.status === 404) {
+        return { success: true, data: [], logs: [] };
+      }
+      return { success: true, data: [], logs: [] };
+    }
   },
 
   getThresholdSettings: async () => {

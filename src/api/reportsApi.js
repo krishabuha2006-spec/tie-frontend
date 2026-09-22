@@ -43,8 +43,15 @@ export const reportsApi = {
         }
       }
     }
-    const res = await apiClient.get(`/reports/${encodeURIComponent(reportKey)}`, { params: cleanParams });
-    return res.data;
+    try {
+      const res = await apiClient.get(`/reports/${encodeURIComponent(reportKey)}`, { params: cleanParams });
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 400 || err.response?.status === 404) {
+        return { success: false, data: null, rows: [] };
+      }
+      throw err;
+    }
   },
 
   // GET /reports/:reportKey/export

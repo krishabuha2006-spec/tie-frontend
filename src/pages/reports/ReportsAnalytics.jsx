@@ -135,29 +135,9 @@ export const ReportsAnalytics = () => {
   const [submittingDef, setSubmittingDef] = useState(false);
 
   const fetchReportFromBackendApi = async (rKey, category, f) => {
-    // 1. Try dedicated report API endpoint first
-    try {
-      const query = {
-        from: f.startDate,
-        to: f.endDate,
-        year: Number(f.startDate?.split('-')[0]) || new Date().getFullYear(),
-      };
-      if (rKey.includes('leave-balance') || rKey.includes('balance')) {
-        delete query.from;
-        delete query.to;
-      }
-      const res = await reportsApi.getReportData(rKey, query);
-      const data = res?.data || res;
-      if (data && ((Array.isArray(data.rows) && data.rows.length > 0) || (Array.isArray(data) && data.length > 0))) {
-        return data;
-      }
-    } catch {
-      // Backend custom report key not implemented, query live module API
-    }
-
     const cat = category?.toUpperCase() || '';
 
-    // 2. Real Backend ATTENDANCE Data
+    // 1. Real Backend ATTENDANCE Data
     if (cat === 'ATTENDANCE' || rKey.includes('attendance')) {
       try {
         const attRes = await attendanceApi.getAllOfficeAttendance({ from: f.startDate, to: f.endDate }).catch(() =>
@@ -172,7 +152,7 @@ export const ReportsAnalytics = () => {
               const emp = item.employee || {};
               const empName = emp.basicInfo?.fullName || emp.name || item.employeeName || 'Employee';
               const empCode = emp.employeeCode || emp.code || '—';
-              const dept = emp.employmentInfo?.department?.name || emp.department?.name || emp.department || '—';
+              const dept = emp.employmentInfo?.department?.name || emp.department?.name || (typeof emp.department === 'string' ? emp.department : 'General');
               const date = item.date ? String(item.date).substring(0, 10) : '—';
               const punchIn = item.checkIn?.time || item.punchIn || item.firstPunch || '—';
               const punchOut = item.checkOut?.time || item.punchOut || item.lastPunch || '—';
@@ -189,7 +169,7 @@ export const ReportsAnalytics = () => {
       } catch {}
     }
 
-    // 3. Real Backend LEAVE Data
+    // 2. Real Backend LEAVE Data
     if (cat === 'LEAVE' || rKey.includes('leave')) {
       try {
         const leaveRes = await leaveHolidayApi.getLeaveRequests({ from: f.startDate, to: f.endDate }).catch(() =>
@@ -201,7 +181,7 @@ export const ReportsAnalytics = () => {
             const emp = item.employee || {};
             const empName = emp.basicInfo?.fullName || emp.name || item.employeeName || 'Employee';
             const empCode = emp.employeeCode || emp.code || '—';
-            const leaveType = item.leaveType?.name || item.leaveType?.code || item.leaveType || 'General Leave';
+            const leaveType = item.leaveType?.name || item.leaveType?.code || (typeof item.leaveType === 'string' ? item.leaveType : 'General Leave');
             const fromDate = item.startDate ? String(item.startDate).substring(0, 10) : (item.fromDate ? String(item.fromDate).substring(0, 10) : '—');
             const toDate = item.endDate ? String(item.endDate).substring(0, 10) : (item.toDate ? String(item.toDate).substring(0, 10) : '—');
             const days = item.daysCount || item.days || item.numberOfDays || 1;
@@ -218,7 +198,7 @@ export const ReportsAnalytics = () => {
       } catch {}
     }
 
-    // 4. Real Backend PAYROLL Data
+    // 3. Real Backend PAYROLL Data
     if (cat === 'PAYROLL' || rKey.includes('payroll')) {
       try {
         const payRes = await payrollApi.getPayrollRuns();
@@ -238,6 +218,31 @@ export const ReportsAnalytics = () => {
             columns: ['Pay Period (M/Y)', 'Date Range', 'Employees Count', 'Total Gross Outlay', 'Statutory Deductions', 'Net Disbursed', 'Run Status'],
             rows,
             summary: { total: rows.length, period: `${f.startDate} to ${f.endDate}` },
+          };
+        }
+      } catch {}
+    }
+
+    // 4. Real Backend LOANS Data
+    if (rKey.includes('loan')) {
+      try {
+        const loanRes = await assetsLoansApi.getLoanApplications();
+        const list = Array.isArray(loanRes) ? loanRes : loanRes?.data || loanRes?.loans || [];
+        if (list.length > 0) {
+          const rows = list.map((item) => {
+            const emp = item.employee || {};
+            const empName = emp.basicInfo?.fullName || emp.name || 'Employee';
+            const empCode = emp.employeeCode || emp.code || '—';
+            const amount = item.amount || item.loanAmount ? `₹${Number(item.amount || item.loanAmount).toLocaleString('en-IN')}` : '₹0';
+            const term = item.tenureMonths || item.termMonths ? `${item.tenureMonths || item.termMonths} mos` : '—';
+            const emi = item.monthlyEmi || item.emi ? `₹${Number(item.monthlyEmi || item.emi).toLocaleString('en-IN')}` : '—';
+            const status = item.status || 'PENDING';
+            return [empCode, empName, amount, term, emi, status];
+          });
+          return {
+            columns: ['Employee Code', 'Employee Name', 'Loan Principal', 'Tenure', 'Monthly Deduction', 'Approval Status'],
+            rows,
+            summary: { total: rows.length, period: 'Employee Loans Ledger' },
           };
         }
       } catch {}
@@ -269,10 +274,10 @@ export const ReportsAnalytics = () => {
       } catch {}
     }
 
-    // 6. Real Backend TASKS Data
+    // 6. Real Backend TASKS & OPERATIONS Data
     if (rKey.includes('task') || rKey.includes('site') || cat === 'OPERATIONS') {
       try {
-        const taskRes = await taskApi.getTasks();
+        const taskRes = await projectTaskApi.getSiteTasks();
         const list = Array.isArray(taskRes) ? taskRes : taskRes?.data || taskRes?.tasks || [];
         if (list.length > 0) {
           const rows = list.map((item) => {
@@ -292,17 +297,34 @@ export const ReportsAnalytics = () => {
       } catch {}
     }
 
-    // 7. Real Backend EMPLOYEES Data
+    // 7. Real Backend EMPLOYEES & ORGANIZATION DIRECTORY Data
     try {
       const empRes = await employeeApi.getEmployees({ limit: 100 });
       const list = Array.isArray(empRes) ? empRes : empRes?.data?.employees || empRes?.data || empRes?.employees || [];
       if (list.length > 0) {
         const rows = list.map((item) => {
-          const code = item.employeeCode || item.code || '—';
+          const code = item.employeeCode || item.basicInfo?.employeeCode || item.employmentInfo?.employeeCode || item.code || '—';
           const name = item.basicInfo?.fullName || item.name || `${item.firstName || ''} ${item.lastName || ''}`.trim() || 'Employee';
-          const dept = item.employmentInfo?.department?.name || item.department?.name || item.department || '—';
-          const desig = item.employmentInfo?.designation || item.designation || '—';
-          const email = item.basicInfo?.email || item.email || '—';
+          const dept = item.employmentInfo?.department?.name || item.department?.name || (typeof item.department === 'string' ? item.department : null) || 'General Operations';
+          
+          let desig = 'Staff';
+          const rawDesig = item.employmentInfo?.designation || item.designation;
+          if (typeof rawDesig === 'object' && rawDesig !== null) {
+            desig = rawDesig.name || rawDesig.title || rawDesig.designationName || rawDesig.code || 'Staff';
+          } else if (typeof rawDesig === 'string' && rawDesig.trim()) {
+            if (rawDesig.startsWith('{') && rawDesig.endsWith('}')) {
+              try {
+                const parsed = JSON.parse(rawDesig);
+                desig = parsed.name || parsed.title || parsed.designationName || parsed.code || 'Staff';
+              } catch {
+                desig = rawDesig;
+              }
+            } else {
+              desig = rawDesig;
+            }
+          }
+
+          const email = item.basicInfo?.email || item.email || item.employmentInfo?.officialEmail || '—';
           const status = item.status || 'ACTIVE';
           return [code, name, dept, desig, email, status];
         });
@@ -430,6 +452,50 @@ export const ReportsAnalytics = () => {
   const categories = ['ALL', ...new Set(catalog.map(r => r.category?.toUpperCase()).filter(Boolean))];
   const catCounts = catalog.reduce((a, r) => { const c = r.category?.toUpperCase() || 'DEFAULT'; a[c] = (a[c] || 0) + 1; return a; }, {});
 
+  const formatCellValue = (val) => {
+    if (val === null || val === undefined || val === '') return '—';
+    if (typeof val === 'boolean') {
+      return (
+        <span className="sbadge" style={{ background: val ? '#dcfce7' : '#fee2e2', color: val ? '#16a34a' : '#dc2626' }}>
+          {val ? 'Yes' : 'No'}
+        </span>
+      );
+    }
+    if (typeof val === 'object' && val !== null) {
+      if (val.name) return val.name;
+      if (val.designationName) return val.designationName;
+      if (val.fullName) return val.fullName;
+      if (val.title) return val.title;
+      if (val.code) return val.code;
+      if (val.label) return val.label;
+      if (val instanceof Date) return val.toLocaleDateString();
+      if (Array.isArray(val)) {
+        return val.map((v) => (typeof v === 'object' ? v.name || v.title || v.code || '—' : String(v))).join(', ');
+      }
+      return val.employeeCode || val.email || '—';
+    }
+    const strVal = String(val).trim();
+    if (strVal.startsWith('{') && strVal.endsWith('}')) {
+      try {
+        const p = JSON.parse(strVal);
+        if (p.name) return p.name;
+        if (p.designationName) return p.designationName;
+        if (p.title) return p.title;
+        if (p.code) return p.code;
+      } catch {}
+    }
+    if (strVal === 'ACTIVE' || strVal === 'PRESENT' || strVal === 'APPROVED') {
+      return <span className="sbadge" style={{ background: '#dcfce7', color: '#16a34a' }}>{strVal}</span>;
+    }
+    if (strVal === 'PENDING' || strVal === 'LATE' || strVal === 'DRAFT') {
+      return <span className="sbadge" style={{ background: '#fef3c7', color: '#d97706' }}>{strVal}</span>;
+    }
+    if (strVal === 'REJECTED' || strVal === 'INACTIVE' || strVal === 'TERMINATED') {
+      return <span className="sbadge" style={{ background: '#fee2e2', color: '#dc2626' }}>{strVal}</span>;
+    }
+    return strVal;
+  };
+
   const renderTable = () => {
     if (!reportData) return null;
     let columns = [], rows = [];
@@ -451,10 +517,7 @@ export const ReportsAnalytics = () => {
               <tr key={ri}>
                 {(Array.isArray(row) ? row : Object.values(row)).map((val, ci) => (
                   <td key={ci}>
-                    {typeof val === 'boolean'
-                      ? <span className="sbadge" style={{ background: val ? '#dcfce7' : '#fee2e2', color: val ? '#16a34a' : '#dc2626' }}>{val ? 'Yes' : 'No'}</span>
-                      : typeof val === 'object' && val !== null ? JSON.stringify(val)
-                      : String(val ?? '—')}
+                    {formatCellValue(val)}
                   </td>
                 ))}
               </tr>

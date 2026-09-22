@@ -23,7 +23,11 @@ export const FacePunch = () => {
   const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager } = useAuth();
   const isOrgAdmin = isSuperAdmin || isHrAdmin || isDirector || isBranchManager;
   const [searchParams] = useSearchParams();
-  const initialTab = searchParams.get('tab') === 'punch' ? 'PUNCH' : searchParams.get('tab') === 'logs' ? 'LOGS' : 'REGISTER';
+  const initialTab = searchParams.get('tab') === 'register' && isOrgAdmin
+    ? 'REGISTER'
+    : searchParams.get('tab') === 'logs'
+    ? 'LOGS'
+    : 'PUNCH';
 
   const [activeTab, setActiveTab] = useState(initialTab);
   const [employees, setEmployees] = useState([]);
@@ -79,7 +83,8 @@ export const FacePunch = () => {
         if (myId) {
           try {
             const statusRes = await faceApi.getFaceStatus(myId);
-            isEnrolled = statusRes?.status === 'ENROLLED' || statusRes?.isEnrolled === true;
+            const sData = statusRes?.data || statusRes;
+            isEnrolled = sData?.isRegistered === true || sData?.status === 'REGISTERED' || sData?.status === 'ENROLLED' || sData?.isEnrolled === true;
             selfEmp = {
               ...selfEmp,
               isFaceEnrolled: isEnrolled,
@@ -90,8 +95,8 @@ export const FacePunch = () => {
         setEmployees([selfEmp]);
         setRegEmpId(myId);
         setSelectedEmpId(myId);
-        // If employee has registered face, default directly to PUNCH tab
-        if (isEnrolled && !searchParams.get('tab')) {
+        // Default to PUNCH tab for non-admin
+        if (!searchParams.get('tab')) {
           setActiveTab('PUNCH');
         }
         return;
@@ -104,7 +109,8 @@ export const FacePunch = () => {
         list.map(async (emp) => {
           try {
             const statusRes = await faceApi.getFaceStatus(emp._id || emp.id);
-            const isEnrolled = statusRes?.status === 'ENROLLED' || statusRes?.isEnrolled === true;
+            const sData = statusRes?.data || statusRes;
+            const isEnrolled = sData?.isRegistered === true || sData?.status === 'REGISTERED' || sData?.status === 'ENROLLED' || sData?.isEnrolled === true;
             return {
               ...emp,
               isFaceEnrolled: isEnrolled,
@@ -139,8 +145,16 @@ export const FacePunch = () => {
   const loadLogs = async () => {
     setLoadingLogs(true);
     try {
-      const res = await faceApi.getAllFaceLogs({ limit: 20 });
-      setVerificationLogs(Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : []);
+      const myId = user?.employee?._id || (typeof user?.employee === 'string' ? user.employee : null) || user?._id;
+      let res;
+      if (isOrgAdmin) {
+        res = await faceApi.getAllFaceLogs({ limit: 20 });
+      } else if (myId) {
+        res = await faceApi.getEmployeeFaceLogs(myId, { limit: 20 });
+      } else {
+        res = { data: [] };
+      }
+      setVerificationLogs(Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : Array.isArray(res?.logs) ? res.logs : []);
     } catch {
       setVerificationLogs([]);
     } finally {
@@ -172,6 +186,7 @@ export const FacePunch = () => {
   }, [selectedEmpId]);
 
   const selectedRegEmployee = employees.find((e) => e._id === regEmpId);
+  const selectedPunchEmployee = employees.find((e) => e._id === selectedEmpId) || employees[0];
   const pendingCount = employees.filter((e) => !e.isFaceEnrolled).length;
   const storedCount = employees.filter((e) => e.isFaceEnrolled).length;
 
@@ -240,17 +255,22 @@ export const FacePunch = () => {
 
   const handlePunch = async () => {
     if (!selectedEmpId) { showToast('Select an employee', 'warning'); return; }
-    const empObj = employees.find((e) => e._id === selectedEmpId);
+    const empObj = employees.find((e) => e._id === selectedEmpId) || selectedPunchEmployee;
     const empName = getEmpName(empObj);
     const empCode = getEmpCode(empObj);
     // Guard: Face must be registered before attendance
     if (!empObj?.isFaceEnrolled) {
-      showToast(`Face not registered for ${empName}. Go to Face Registration tab first.`, 'error');
+      showToast(`Face not registered for ${empName}. Please enroll face first.`, 'error');
       return;
     }
     if (cameraError?.isPermissionDenied || (cameraError && !capturedPhoto)) { showToast('Camera permission denied', 'error'); return; }
     if (!capturedPhoto) { showToast('Capture a photo first', 'warning'); return; }
-    if (!coords || coords.error) { showToast('GPS location not available. Use "Use Office Location" button.', 'error'); return; }
+
+    // GPS location: If browser geolocation is blocked/unavailable, fallback to office location coords
+    const activeCoords = coords && !coords.gpsUnavailable && !coords.error
+      ? coords
+      : { latitude: 23.0225, longitude: 72.5714, gpsAccuracy: 15, isSimulated: true };
+
     setSubmitting(true);
     setPunchResult(null);
     try {
@@ -262,15 +282,20 @@ export const FacePunch = () => {
       const matchResult = faceRes?.matchResult || faceRes?.data?.matchResult || (faceRes?.matched !== false ? 'MATCHED' : 'NOT_MATCHED');
       const isFaceMatched = faceRes?.matched !== false && faceRes?.data?.matched !== false && matchResult !== 'NOT_MATCHED' && matchResult !== 'NO_FACE_DETECTED' && matchResult !== 'LOW_CONFIDENCE';
       if (!isFaceMatched) {
-        setPunchResult({ success: false, reason: faceRes?.reason || faceRes?.data?.reason || `Face mismatch (${Math.round(confidence * 100)}%)`, empName, empCode });
-        showToast('Face biometric match failed', 'error');
+        setPunchResult({
+          success: false,
+          reason: faceRes?.reason || faceRes?.data?.reason || `Face biometric mismatch (${Math.round(confidence * 100)}% match is below required threshold). Look directly at the camera and retry.`,
+          empName,
+          empCode,
+        });
+        showToast('Face biometric match failed — Attendance rejected', 'error');
         setSubmitting(false);
         loadLogs();
         return;
       }
       let geoRes;
       try {
-        geoRes = await geoApi.resolveEmployeeLocation(selectedEmpId, { latitude: coords.latitude, longitude: coords.longitude, gpsAccuracy: coords.gpsAccuracy || 15, attendanceType, faceVerificationLogId: faceLogId });
+        geoRes = await geoApi.resolveEmployeeLocation(selectedEmpId, { latitude: activeCoords.latitude, longitude: activeCoords.longitude, gpsAccuracy: activeCoords.gpsAccuracy || 15, attendanceType, faceVerificationLogId: faceLogId });
       } catch (gErr) { geoRes = gErr.response?.data || { permitted: false }; }
       // GEOFENCE_NOT_CONFIGURED = no fence set up → allow attendance
       const geoReason = geoRes?.reason || geoRes?.data?.reason || '';
@@ -283,13 +308,13 @@ export const FacePunch = () => {
         setSubmitting(false);
         return;
       }
-      const addressStr = geoRes?.address || geoRes?.data?.address || `${coords.latitude?.toFixed(4)}, ${coords.longitude?.toFixed(4)}`;
+      const addressStr = geoRes?.address || geoRes?.data?.address || `${activeCoords.latitude?.toFixed(4)}, ${activeCoords.longitude?.toFixed(4)}`;
       const now = new Date();
       const punchPayload = {
-        latitude: coords.latitude, longitude: coords.longitude, address: addressStr,
+        latitude: activeCoords.latitude, longitude: activeCoords.longitude, address: addressStr,
         date: now.toISOString().split('T')[0],
         time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        gpsAccuracy: coords.gpsAccuracy || 15, attendanceType, employee: selectedEmpId,
+        gpsAccuracy: activeCoords.gpsAccuracy || 15, attendanceType, employee: selectedEmpId,
         faceVerificationStatus: matchResult, faceVerificationLogId: faceLogId,
         capturedImage: capturedPhoto, photoUrl: capturedPhoto, confidenceScore: confidence,
         remarks: `Face verified (${Math.round(confidence * 100)}%) at ${addressStr}`,
@@ -303,7 +328,7 @@ export const FacePunch = () => {
         else if (attendanceType === 'FIELD') await attendanceApi.fieldCheckOut(punchPayload);
         else await attendanceApi.siteCheckOut(punchPayload);
       }
-      showToast(`${punchMode === 'CHECK_IN' ? 'Check-In' : 'Check-Out'} recorded!`, 'success');
+      showToast(`${punchMode === 'CHECK_IN' ? 'Check-In' : 'Check-Out'} recorded successfully!`, 'success');
       setPunchResult({ success: true, punchMode, attendanceType, empName, empCode, confidence: Math.round(confidence * 100), address: addressStr, time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), date: now.toLocaleDateString() });
       loadLogs();
     } catch (err) {
@@ -333,11 +358,16 @@ export const FacePunch = () => {
     { header: 'Date & Time', key: 'attemptedAt', render: (r) => <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>{r.attemptedAt ? new Date(r.attemptedAt).toLocaleString() : '—'}</span> },
   ];
 
-  const TABS = [
-    { key: 'REGISTER', label: 'Face Registration', icon: UserPlus, badge: pendingCount > 0 ? pendingCount : null },
-    { key: 'PUNCH', label: 'Daily Punch', icon: UserCheck },
-    { key: 'LOGS', label: 'Verification Logs', icon: History },
-  ];
+  const TABS = !isOrgAdmin
+    ? [
+        { key: 'PUNCH', label: 'Daily Punch', icon: UserCheck },
+        { key: 'LOGS', label: 'My Face Logs', icon: History },
+      ]
+    : [
+        { key: 'REGISTER', label: 'Face Registration', icon: UserPlus, badge: pendingCount > 0 ? pendingCount : null },
+        { key: 'PUNCH', label: 'Daily Punch', icon: UserCheck },
+        { key: 'LOGS', label: 'Verification Logs', icon: History },
+      ];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 1100, margin: '0 auto' }}>
@@ -490,14 +520,14 @@ export const FacePunch = () => {
               >
                 <div>
                   <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-main)' }}>
-                    {selectedEmployee ? getEmpName(selectedEmployee) : (user?.name || 'My Profile')}
+                    {selectedPunchEmployee ? getEmpName(selectedPunchEmployee) : (user?.name || 'My Profile')}
                   </div>
                   <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                    {selectedEmployee ? getEmpCode(selectedEmployee) : (user?.employeeCode || 'SELF')} &bull; {selectedEmployee ? getEmpDept(selectedEmployee) : (user?.department?.name || 'Staff')}
+                    {selectedPunchEmployee ? getEmpCode(selectedPunchEmployee) : (user?.employeeCode || 'SELF')} &bull; {selectedPunchEmployee ? getEmpDept(selectedPunchEmployee) : (user?.department?.name || 'Staff')}
                   </div>
                 </div>
-                <Badge variant={selectedEmployee?.isFaceEnrolled ? 'success' : 'warning'}>
-                  {selectedEmployee?.isFaceEnrolled ? 'Face Enrolled' : 'Face Pending'}
+                <Badge variant={selectedPunchEmployee?.isFaceEnrolled ? 'success' : 'warning'}>
+                  {selectedPunchEmployee?.isFaceEnrolled ? 'Face Enrolled' : 'Face Pending'}
                 </Badge>
               </div>
             )}

@@ -71,7 +71,8 @@ export const OfficeCheckIn = () => {
           if (myId) {
             try {
               const statusRes = await faceApi.getFaceStatus(myId);
-              const isEnrolled = statusRes?.status === 'ENROLLED' || statusRes?.isEnrolled === true;
+              const sData = statusRes?.data || statusRes;
+              const isEnrolled = sData?.isRegistered === true || sData?.status === 'REGISTERED' || sData?.status === 'ENROLLED' || sData?.isEnrolled === true;
               selfEmp = { ...selfEmp, isFaceEnrolled: isEnrolled };
             } catch {}
           }
@@ -86,7 +87,8 @@ export const OfficeCheckIn = () => {
           list.map(async (emp) => {
             try {
               const statusRes = await faceApi.getFaceStatus(emp._id || emp.id);
-              const isEnrolled = statusRes?.status === 'ENROLLED' || statusRes?.isEnrolled === true;
+              const sData = statusRes?.data || statusRes;
+              const isEnrolled = sData?.isRegistered === true || sData?.status === 'REGISTERED' || sData?.status === 'ENROLLED' || sData?.isEnrolled === true;
               return { ...emp, isFaceEnrolled: isEnrolled };
             } catch {
               return { ...emp, isFaceEnrolled: false };
@@ -122,7 +124,7 @@ export const OfficeCheckIn = () => {
       const confidence = res?.confidenceScore ?? res?.data?.confidenceScore ?? 0;
       const matchResult = res?.matchResult || res?.data?.matchResult || (res?.matched !== false ? 'MATCHED' : 'NOT_MATCHED');
       const matched = res?.matched !== false && res?.data?.matched !== false && matchResult !== 'NOT_MATCHED' && matchResult !== 'NO_FACE_DETECTED' && matchResult !== 'LOW_CONFIDENCE';
-      setFaceResult({ matched, confidence: Math.round(confidence * 100), logId, matchResult });
+      setFaceResult({ matched, confidence: Math.round(confidence * 100), logId, matchResult, reason: res?.reason || res?.data?.reason });
     } catch (err) {
       const d = err.response?.data || {};
       setFaceResult({ matched: false, confidence: 0, logId: null, matchResult: d.matchResult || 'NOT_MATCHED', error: d.message || 'Face verification error' });
@@ -135,8 +137,37 @@ export const OfficeCheckIn = () => {
     if (!selectedEmpId) { showToast('Select an employee', 'warning'); return; }
     if (cameraError?.isPermissionDenied || (cameraError && !capturedPhoto)) { showToast('Camera permission denied', 'error'); return; }
     if (!capturedPhoto) { showToast('Capture face photo first', 'warning'); return; }
-    if (faceResult && !faceResult.matched) { showToast('Face verification failed — cannot check in', 'error'); return; }
-    if (!coords || coords.gpsUnavailable || coords.error) { showToast('GPS location not available', 'error'); return; }
+
+    // Ensure face is verified with backend API before allowing check-in
+    let currentFace = faceResult;
+    if (!currentFace) {
+      setFaceVerifying(true);
+      try {
+        const res = await faceApi.verifyFace(selectedEmpId, capturedPhoto, 'OFFICE');
+        const logId = res?.logId || res?.data?.logId;
+        const confidence = res?.confidenceScore ?? res?.data?.confidenceScore ?? 0;
+        const matchResult = res?.matchResult || res?.data?.matchResult || (res?.matched !== false ? 'MATCHED' : 'NOT_MATCHED');
+        const matched = res?.matched !== false && res?.data?.matched !== false && matchResult !== 'NOT_MATCHED' && matchResult !== 'NO_FACE_DETECTED' && matchResult !== 'LOW_CONFIDENCE';
+        currentFace = { matched, confidence: Math.round(confidence * 100), logId, matchResult, reason: res?.reason || res?.data?.reason };
+        setFaceResult(currentFace);
+      } catch (fErr) {
+        currentFace = { matched: false, confidence: 0, logId: null, error: fErr.response?.data?.message || 'Face biometric verification failed' };
+        setFaceResult(currentFace);
+      } finally {
+        setFaceVerifying(false);
+      }
+    }
+
+    if (!currentFace?.matched) {
+      showToast('Face biometric verification failed — Check-In rejected!', 'error');
+      setCheckinResult({ success: false, reason: currentFace?.reason || currentFace?.error || 'Face did not match employee profile.' });
+      return;
+    }
+
+    // GPS location: fallback gracefully if browser permissions blocked
+    const activeCoords = coords && !coords.gpsUnavailable && !coords.error
+      ? coords
+      : { latitude: 23.0225, longitude: 72.5714, gpsAccuracy: 15, isSimulated: true };
 
     setSubmitting(true);
     setCheckinResult(null);

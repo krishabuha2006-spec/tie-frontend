@@ -91,6 +91,14 @@ export const leaveHolidayApi = {
   },
 
   // Alias for backward compatibility
+  getMyLeaves: async (params) => {
+    return await leaveHolidayApi.getMyLeaveRequests(params);
+  },
+
+  getLeaveRequests: async (params) => {
+    return await leaveHolidayApi.getMyLeaveRequests(params);
+  },
+
   getAllLeaveRequests: async (params) => {
     try {
       const res = await apiClient.get('/leave/requests/pending-approval', { params });

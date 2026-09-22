@@ -86,7 +86,8 @@ export const OfficeCheckOut = () => {
           if (myId) {
             try {
               const statusRes = await faceApi.getFaceStatus(myId);
-              const isEnrolled = statusRes?.status === 'ENROLLED' || statusRes?.isEnrolled === true;
+              const sData = statusRes?.data || statusRes;
+              const isEnrolled = sData?.isRegistered === true || sData?.status === 'REGISTERED' || sData?.status === 'ENROLLED' || sData?.isEnrolled === true;
               selfEmp = { ...selfEmp, isFaceEnrolled: isEnrolled };
             } catch {}
           }
@@ -101,7 +102,8 @@ export const OfficeCheckOut = () => {
           list.map(async (emp) => {
             try {
               const statusRes = await faceApi.getFaceStatus(emp._id || emp.id);
-              const isEnrolled = statusRes?.status === 'ENROLLED' || statusRes?.isEnrolled === true;
+              const sData = statusRes?.data || statusRes;
+              const isEnrolled = sData?.isRegistered === true || sData?.status === 'REGISTERED' || sData?.status === 'ENROLLED' || sData?.isEnrolled === true;
               return { ...emp, isFaceEnrolled: isEnrolled };
             } catch {
               return { ...emp, isFaceEnrolled: false };
