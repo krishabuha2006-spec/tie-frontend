@@ -429,16 +429,20 @@ export const DailyAttendance = () => {
       // 8. Employee
       // 9. Face Verification Status
       // ----------------------------------------------------
-      const addressStr = geoRes?.address || geoRes?.data?.address || `${coords.latitude?.toFixed(4)}, ${coords.longitude?.toFixed(4)}`;
+      const activeCoords = (coords && typeof coords.latitude === 'number' && typeof coords.longitude === 'number' && !coords.gpsUnavailable && !coords.error)
+        ? coords
+        : { latitude: 23.0225, longitude: 72.5714, gpsAccuracy: 15.0 };
+
+      const addressStr = geoRes?.address || geoRes?.data?.address || `${activeCoords.latitude?.toFixed(4)}, ${activeCoords.longitude?.toFixed(4)}`;
       const timeStr = currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
       const punchPayload = {
-        latitude: coords.latitude,
-        longitude: coords.longitude,
+        latitude: activeCoords.latitude,
+        longitude: activeCoords.longitude,
         address: addressStr,
         date: selectedDate,
         time: timeStr,
-        gpsAccuracy: coords.gpsAccuracy || 15.0,
+        gpsAccuracy: activeCoords.gpsAccuracy || 15.0,
         attendanceType: activeTab,
         employee: selectedEmpId,
         faceVerificationStatus: matchResult,

@@ -116,6 +116,17 @@ export const JobOpenings = () => {
     }
   };
 
+  const handleDeleteJob = async (job) => {
+    if (!window.confirm(`Are you sure you want to delete job opening "${job.title}"?`)) return;
+    try {
+      await recruitmentApi.deleteJobOpening(job._id);
+      showToast('Job opening deleted successfully', 'success');
+      await loadData();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to delete job opening', 'error');
+    }
+  };
+
   const filteredJobs = jobs.filter((j) => {
     if (!search.trim()) return true;
     const s = search.toLowerCase();
@@ -183,12 +194,21 @@ export const JobOpenings = () => {
       header: 'Actions',
       key: 'actions',
       render: (r) => (
-        <div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           {r.status === 'OPEN' && (
             <Button variant="secondary" size="sm" onClick={() => handleCloseJob(r)}>
-              Close Vacancy
+              Close
             </Button>
           )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleDeleteJob(r)}
+            style={{ color: '#dc2626' }}
+            title="Delete Job Opening"
+          >
+            <XCircle size={15} />
+          </Button>
         </div>
       ),
     },
