@@ -1,8 +1,8 @@
 import axios from 'axios';
 
-const envUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL;
-const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-const BASE_URL = isLocal ? '/api' : (envUrl || '/api');
+// Relative '/api' ensures same-origin requests on both Localhost (via Vite proxy)
+// and Vercel production (via vercel.json rewrite proxy), avoiding browser CORS restrictions.
+const BASE_URL = '/api';
 
 const apiClient = axios.create({
   baseURL: BASE_URL,
