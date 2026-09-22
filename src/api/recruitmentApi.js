@@ -47,8 +47,14 @@ export const recruitmentApi = {
     }
   },
   getJobOpeningById: async (id) => {
-    const res = await apiClient.get(`/job-openings/${id}`);
-    return res.data;
+    try {
+      const res = await apiClient.get(`/job-openings/${id}`);
+      return res.data;
+    } catch (err) {
+      const status = err?.response?.status;
+      if (status === 409 || status === 404 || status === 403) return null;
+      throw err;
+    }
   },
   createJobOpening: async (data) => {
     const payload = {
@@ -87,7 +93,7 @@ export const recruitmentApi = {
       return res.data;
     } catch (err) {
       const status = err?.response?.status;
-      if (status === 403 || status === 502 || status === 404 || status === 500) {
+      if (status === 403 || status === 409 || status === 502 || status === 404 || status === 500) {
         return { data: [], candidates: [] };
       }
       throw err;

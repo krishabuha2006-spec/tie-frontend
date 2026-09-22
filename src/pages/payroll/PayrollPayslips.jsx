@@ -35,7 +35,10 @@ export const PayrollPayslips = () => {
   const [branches, setBranches] = useState([]);
   const [employees, setEmployees] = useState([]);
 
-  // 1. Payroll Runs State
+  // Stable refs to avoid stale closures without causing re-renders
+  const selectedRunRef = React.useRef(null);
+  const runsRef = React.useRef([]);
+
   const [runs, setRuns] = useState([]);
   const [loadingRuns, setLoadingRuns] = useState(false);
   const [selectedRun, setSelectedRun] = useState(null);
@@ -105,16 +108,20 @@ export const PayrollPayslips = () => {
       const res = await payrollApi.getPayrollRuns();
       const list = toList(res);
       setRuns(list);
-      if (list.length > 0 && !selectedRun) {
+      runsRef.current = list;
+      // Only set selectedRun if none is selected yet
+      if (list.length > 0 && !selectedRunRef.current) {
+        selectedRunRef.current = list[0];
         setSelectedRun(list[0]);
       }
     } catch (err) {
       console.error('Error fetching payroll runs:', err);
       setRuns([]);
+      runsRef.current = [];
     } finally {
       setLoadingRuns(false);
     }
-  }, [selectedRun]);
+  }, []); // stable — no deps that change
 
   // Load line items when a run is selected
   useEffect(() => {
@@ -223,14 +230,14 @@ export const PayrollPayslips = () => {
   const loadPayslips = useCallback(async () => {
     setLoadingPayslips(true);
     try {
-      // If regular employee, get self payslips; if admin/manager, query runs or me
       const meRes = await payrollApi.getMyPayslips().catch(() => ({ data: [] }));
       let allPayslips = toList(meRes);
 
-      // If manager and we have payroll runs, query payslips for the recent runs
-      if (isManagerOrAdmin && runs.length > 0) {
+      // Use ref to read runs without adding it as a dependency
+      const currentRuns = runsRef.current;
+      if (isManagerOrAdmin && currentRuns.length > 0) {
         const runPayslips = await Promise.allSettled(
-          runs.slice(0, 5).map((r) => payrollApi.getPayslipsForRun(r._id))
+          currentRuns.slice(0, 5).map((r) => payrollApi.getPayslipsForRun(r._id))
         );
         runPayslips.forEach((p) => {
           if (p.status === 'fulfilled') {
@@ -251,7 +258,7 @@ export const PayrollPayslips = () => {
     } finally {
       setLoadingPayslips(false);
     }
-  }, [isManagerOrAdmin, runs]);
+  }, [isManagerOrAdmin]); // removed `runs` dep — use runsRef instead
 
   // --------------------------------------------------------------------------
   // 3. BACKEND API: Salary Structures
@@ -325,7 +332,8 @@ export const PayrollPayslips = () => {
     } else if (activeTab === 'structures') {
       loadSalaryStructures();
     }
-  }, [activeTab, loadPayrollRuns, loadPayslips, loadSalaryStructures]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]); // Only re-run when tab actually changes — callbacks are stable now
 
   // Overall KPIs
   const totalGrossSum = runs.reduce((acc, r) => acc + (r.summary?.totalGross || 0), 0);
