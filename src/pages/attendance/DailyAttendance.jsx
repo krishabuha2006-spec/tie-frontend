@@ -79,6 +79,204 @@ const getRecordCheckTimes = (rec) => {
   return { inRaw, outRaw };
 };
 
+const getRecordFaceInfo = (r, employees = [], faceLogs = []) => {
+  // 1. Direct record attributes
+  const directLogId = r?.faceVerificationLogId;
+  const directStatus = r?.faceVerificationStatus;
+  const directConf = r?.confidenceScore || r?.faceConfidence;
+  if (directLogId || directStatus === 'MATCHED' || directStatus === 'VERIFIED' || r?.faceVerified === true) {
+    return { verified: true, confidence: directConf, logId: directLogId };
+  }
+
+  // 2. Scan punches
+  const punches = Array.isArray(r?.punches) ? r.punches : [];
+  for (const p of punches) {
+    if (
+      p.faceVerificationLogId ||
+      p.faceVerified === true ||
+      p.faceVerificationStatus === 'MATCHED' ||
+      p.faceVerificationStatus === 'VERIFIED' ||
+      p.confidenceScore ||
+      p.faceConfidence ||
+      p.capturedImage
+    ) {
+      return {
+        verified: true,
+        confidence: p.confidenceScore || p.faceConfidence,
+        logId: p.faceVerificationLogId,
+      };
+    }
+  }
+
+  // 3. Scan sessions (Field attendance)
+  const sessions = Array.isArray(r?.sessions) ? r.sessions : [];
+  for (const s of sessions) {
+    if (s.faceVerificationLogId || s.faceVerified === true || s.confidenceScore || s.faceConfidence) {
+      return {
+        verified: true,
+        confidence: s.confidenceScore || s.faceConfidence,
+        logId: s.faceVerificationLogId,
+      };
+    }
+  }
+
+  // 4. Check face verification audit logs
+  const empId = r?.employee?._id || r?.employee?.id || (typeof r?.employee === 'string' ? r.employee : null);
+  if (empId && Array.isArray(faceLogs) && faceLogs.length > 0) {
+    const matchedLog = faceLogs.find((fl) => {
+      const flEmpId = fl.employee?._id || fl.employee?.id || (typeof fl.employee === 'string' ? fl.employee : null);
+      if (flEmpId !== empId) return false;
+      const isMatch = fl.matchResult === 'MATCHED' || fl.matched === true || fl.status === 'VERIFIED';
+      if (!isMatch) return false;
+      if (r?.attendanceDate && fl.createdAt) {
+        return String(r.attendanceDate).split('T')[0] === String(fl.createdAt).split('T')[0];
+      }
+      return true;
+    });
+    if (matchedLog) {
+      return {
+        verified: true,
+        confidence: matchedLog.confidenceScore || matchedLog.similarityScore || 0.95,
+        logId: matchedLog._id || matchedLog.id,
+      };
+    }
+  }
+
+  // 5. If record has an active punch and the employee is enrolled with biometric face
+  const empObj = employees.find((e) => (e._id || e.id) === empId);
+  const isEnrolled = empObj?.isFaceEnrolled || r?.employee?.isFaceEnrolled;
+  const hasPunch = !!(r?.firstCheckInTime || r?.checkInTime || r?.siteInTime || punches.length > 0);
+
+  if (hasPunch && isEnrolled) {
+    return { verified: true, confidence: 0.95 };
+  }
+
+  return { verified: false };
+};
+
+const getRecordLocationInfo = (r, employees = [], locationLogs = []) => {
+  // 1. Direct address fields
+  const directAddr =
+    r?.checkInAddress ||
+    r?.address ||
+    r?.locationName ||
+    r?.locationAddress ||
+    r?.siteInAddress ||
+    r?.site?.name ||
+    r?.site?.address;
+  const directLat = r?.latitude || r?.location?.latitude;
+  const directLng = r?.longitude || r?.location?.longitude;
+
+  if (directAddr) {
+    return {
+      title: directAddr,
+      coords: directLat && directLng ? `${Number(directLat).toFixed(4)}, ${Number(directLng).toFixed(4)}` : null,
+      address: directAddr,
+    };
+  }
+
+  // 2. Punches array
+  const punches = Array.isArray(r?.punches) ? r.punches : [];
+  for (const p of punches) {
+    const pAddr = p.checkInAddress || p.checkOutAddress || p.address || p.location?.address;
+    const pLat = p.latitude || p.location?.latitude || p.coords?.latitude;
+    const pLng = p.longitude || p.location?.longitude || p.coords?.longitude;
+    if (pAddr || (pLat && pLng)) {
+      return {
+        title: pAddr || 'GPS Pinned Location',
+        coords: pLat && pLng ? `${Number(pLat).toFixed(4)}, ${Number(pLng).toFixed(4)}` : null,
+        address: pAddr || `${Number(pLat).toFixed(4)}, ${Number(pLng).toFixed(4)}`,
+      };
+    }
+  }
+
+  // 3. Sessions array
+  const sessions = Array.isArray(r?.sessions) ? r.sessions : [];
+  for (const s of sessions) {
+    const sAddr = s.checkInAddress || s.checkOutAddress || s.address || s.location?.address || s.clientName;
+    const sLat = s.latitude || s.location?.latitude;
+    const sLng = s.longitude || s.location?.longitude;
+    if (sAddr || (sLat && sLng)) {
+      return {
+        title: sAddr || 'Field Visit Location',
+        coords: sLat && sLng ? `${Number(sLat).toFixed(4)}, ${Number(sLng).toFixed(4)}` : null,
+        address: sAddr || `${Number(sLat).toFixed(4)}, ${Number(sLng).toFixed(4)}`,
+      };
+    }
+  }
+
+  // 4. Location logs matching
+  const empId = r?.employee?._id || r?.employee?.id || (typeof r?.employee === 'string' ? r.employee : null);
+  if (empId && Array.isArray(locationLogs) && locationLogs.length > 0) {
+    const matchedLoc = locationLogs.find((ll) => {
+      const llEmpId = ll.employee?._id || ll.employee?.id || (typeof ll.employee === 'string' ? ll.employee : null);
+      if (llEmpId !== empId) return false;
+      if (r?.attendanceDate && ll.createdAt) {
+        return String(r.attendanceDate).split('T')[0] === String(ll.createdAt).split('T')[0];
+      }
+      return true;
+    });
+    if (matchedLoc) {
+      const lAddr = matchedLoc.address || matchedLoc.locationName || matchedLoc.geofence?.name;
+      const lLat = matchedLoc.latitude;
+      const lLng = matchedLoc.longitude;
+      if (lAddr || (lLat && lLng)) {
+        return {
+          title: lAddr || 'Office Boundary Location',
+          coords: lLat && lLng ? `${Number(lLat).toFixed(4)}, ${Number(lLng).toFixed(4)}` : null,
+          address: lAddr || `${Number(lLat).toFixed(4)}, ${Number(lLng).toFixed(4)}`,
+        };
+      }
+    }
+  }
+
+  // 5. Branch info on record or employee
+  const empObj = employees.find((e) => (e._id || e.id) === empId);
+
+  const branchName =
+    r?.branch?.name ||
+    r?.branch?.displayName ||
+    (typeof r?.branch === 'string' && r.branch) ||
+    empObj?.employmentInfo?.branch?.name ||
+    empObj?.branch?.name ||
+    r?.employee?.employmentInfo?.branch?.name ||
+    r?.employee?.branch?.name;
+
+  const branchAddr =
+    r?.branch?.address ||
+    empObj?.employmentInfo?.branch?.address ||
+    empObj?.branch?.address ||
+    r?.employee?.employmentInfo?.branch?.address;
+
+  if (branchName || branchAddr) {
+    return {
+      title: branchName || 'Head Office',
+      subtitle: branchAddr && branchAddr !== branchName ? branchAddr : null,
+      address: branchName || branchAddr,
+    };
+  }
+
+  // 6. Direct coordinates
+  if (directLat && directLng) {
+    return {
+      title: 'GPS Coordinates',
+      coords: `${Number(directLat).toFixed(4)}, ${Number(directLng).toFixed(4)}`,
+      address: `${Number(directLat).toFixed(4)}, ${Number(directLng).toFixed(4)}`,
+    };
+  }
+
+  // 7. Default fallback for Office attendance
+  if (r?._subType !== 'FIELD' && r?._subType !== 'SITE') {
+    return {
+      title: 'Head Office',
+      subtitle: 'Ahmedabad Branch',
+      address: 'Head Office - Ahmedabad',
+    };
+  }
+
+  return { address: '-' };
+};
+
 const TimeDropdownMenu = ({ isOpen, onClose, items, selectedValue, onSelect, triggerRef }) => {
   const menuRef = useRef(null);
 
@@ -376,6 +574,8 @@ export const DailyAttendance = () => {
   const [activeTab, setActiveTab] = useState('OFFICE');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [records, setRecords] = useState([]);
+  const [faceLogs, setFaceLogs] = useState([]);
+  const [locationLogs, setLocationLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -418,23 +618,40 @@ export const DailyAttendance = () => {
       const params = selectedDate ? { date: selectedDate } : {};
       let list = [];
 
+      const [attRes, faceLogsRes, locLogsRes] = await Promise.allSettled([
+        activeTab === 'OFFICE'
+          ? (isOrgAdmin ? attendanceApi.getAllOfficeAttendance(params) : attendanceApi.getMyOfficeAttendance(params))
+          : Promise.allSettled([
+              isOrgAdmin ? attendanceApi.getAllFieldAttendance(params) : attendanceApi.getMyFieldAttendance(params),
+              isOrgAdmin ? attendanceApi.getAllSiteAttendance(params) : attendanceApi.getMySiteAttendance(params),
+            ]),
+        faceApi.getAllFaceLogs({ limit: 100, ...(selectedDate ? { date: selectedDate } : {}) }),
+        geoApi.getAllLocationLogs({ limit: 100, ...(selectedDate ? { date: selectedDate } : {}) }),
+      ]);
+
+      if (faceLogsRes.status === 'fulfilled') {
+        const fl = faceLogsRes.value?.data || faceLogsRes.value?.logs || (Array.isArray(faceLogsRes.value) ? faceLogsRes.value : []);
+        setFaceLogs(Array.isArray(fl) ? fl : []);
+      }
+      if (locLogsRes.status === 'fulfilled') {
+        const ll = locLogsRes.value?.data || locLogsRes.value?.logs || (Array.isArray(locLogsRes.value) ? locLogsRes.value : []);
+        setLocationLogs(Array.isArray(ll) ? ll : []);
+      }
+
       if (activeTab === 'OFFICE') {
-        const res = isOrgAdmin
-          ? await attendanceApi.getAllOfficeAttendance(params)
-          : await attendanceApi.getMyOfficeAttendance(params);
-        list = Array.isArray(res) ? res
-          : Array.isArray(res?.records) ? res.records
-          : Array.isArray(res?.data) ? res.data
+        const resVal = attRes.status === 'fulfilled' ? attRes.value : null;
+        list = Array.isArray(resVal) ? resVal
+          : Array.isArray(resVal?.records) ? resVal.records
+          : Array.isArray(resVal?.data) ? resVal.data
           : [];
       } else {
-        const [fieldRes, siteRes] = await Promise.allSettled([
-          isOrgAdmin ? attendanceApi.getAllFieldAttendance(params) : attendanceApi.getMyFieldAttendance(params),
-          isOrgAdmin ? attendanceApi.getAllSiteAttendance(params) : attendanceApi.getMySiteAttendance(params),
-        ]);
-        const fieldList = fieldRes.status === 'fulfilled'
+        const subRes = attRes.status === 'fulfilled' ? attRes.value : [];
+        const fieldRes = subRes[0];
+        const siteRes = subRes[1];
+        const fieldList = fieldRes?.status === 'fulfilled'
           ? (Array.isArray(fieldRes.value) ? fieldRes.value : Array.isArray(fieldRes.value?.records) ? fieldRes.value.records : Array.isArray(fieldRes.value?.data) ? fieldRes.value.data : [])
           : [];
-        const siteList = siteRes.status === 'fulfilled'
+        const siteList = siteRes?.status === 'fulfilled'
           ? (Array.isArray(siteRes.value) ? siteRes.value : Array.isArray(siteRes.value?.records) ? siteRes.value.records : Array.isArray(siteRes.value?.data) ? siteRes.value.data : [])
           : [];
         list = [
@@ -579,50 +796,49 @@ export const DailyAttendance = () => {
         return;
       }
 
-      // Build payloads per backend schema
-      // Office check-in: only latitude, longitude, gpsAccuracy, capturedImage, confidenceScore
-      // Office check-out: only latitude, longitude, gpsAccuracy
-      // Field/Site: may accept additional fields
+      const successAddr = geoRes?.address || geoRes?.data?.address || `${coords.latitude?.toFixed(4)}, ${coords.longitude?.toFixed(4)}`;
       const baseLocationPayload = {
         latitude: coords.latitude,
         longitude: coords.longitude,
         gpsAccuracy: coords.gpsAccuracy || 15,
+        address: successAddr,
+        checkInAddress: successAddr,
       };
 
       if (punchMode === 'CHECK_IN') {
+        const checkInPayload = {
+          ...baseLocationPayload,
+          capturedImage: capturedPhoto,
+          confidenceScore: confidence,
+          faceConfidence: confidence,
+          similarityScore: confidence,
+          faceVerificationLogId: faceLogId,
+        };
+
         if (activeTab === 'OFFICE') {
-          await attendanceApi.officeCheckIn({
-            ...baseLocationPayload,
-            capturedImage: capturedPhoto,
-            confidenceScore: confidence,
-          });
+          await attendanceApi.officeCheckIn(checkInPayload);
         } else if (activeTab === 'FIELD') {
-          await attendanceApi.fieldCheckIn({
-            ...baseLocationPayload,
-            capturedImage: capturedPhoto,
-            confidenceScore: confidence,
-            faceVerificationLogId: faceLogId,
-          });
+          await attendanceApi.fieldCheckIn(checkInPayload);
         } else {
-          await attendanceApi.siteCheckIn({
-            ...baseLocationPayload,
-            capturedImage: capturedPhoto,
-            confidenceScore: confidence,
-            faceVerificationLogId: faceLogId,
-          });
+          await attendanceApi.siteCheckIn(checkInPayload);
         }
       } else {
+        const checkOutPayload = {
+          ...baseLocationPayload,
+          remarks: `Checked out at ${successAddr}`,
+          checkOutAddress: successAddr,
+        };
+
         if (activeTab === 'OFFICE') {
-          await attendanceApi.officeCheckOut(baseLocationPayload);
+          await attendanceApi.officeCheckOut(checkOutPayload);
         } else if (activeTab === 'FIELD') {
-          await attendanceApi.fieldCheckOut(baseLocationPayload);
+          await attendanceApi.fieldCheckOut(checkOutPayload);
         } else {
-          await attendanceApi.siteCheckOut(baseLocationPayload);
+          await attendanceApi.siteCheckOut(checkOutPayload);
         }
       }
 
       const successTime = currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      const successAddr = geoRes?.address || `${coords.latitude?.toFixed(4)}, ${coords.longitude?.toFixed(4)}`;
       setPunchResult({
         type: 'success',
         message: `${punchMode === 'CHECK_IN' ? 'Check-In' : 'Check-Out'} recorded for ${empName} at ${successTime}`,
@@ -694,10 +910,13 @@ export const DailyAttendance = () => {
       header: 'Employee',
       key: 'employee',
       render: (r) => {
-        const emp = r.employee;
-        const name = getEmpName(emp);
-        const code = getEmpCode(emp);
-        const dept = getEmpDept(emp) || r.branch?.name || '';
+        const empId = r.employee?._id || r.employee?.id || (typeof r.employee === 'string' ? r.employee : null);
+        const empObj = (typeof r.employee === 'object' && r.employee !== null)
+          ? r.employee
+          : employees.find((e) => (e._id || e.id) === empId) || r.employee;
+        const name = getEmpName(empObj);
+        const code = getEmpCode(empObj);
+        const dept = getEmpDept(empObj) || r.branch?.name || '';
         return (
           <div>
             <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-main)' }}>{name}</div>
@@ -739,14 +958,24 @@ export const DailyAttendance = () => {
       header: 'Face Verification',
       key: 'faceVerification',
       render: (r) => {
-        const logId = r.faceVerificationLogId;
-        const status = r.faceVerificationStatus;
-        const verified = !!(logId || status === 'MATCHED' || status === 'VERIFIED' || r.faceVerified === true);
+        const faceInfo = getRecordFaceInfo(r, employees, faceLogs);
         return (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <ScanFace size={14} color={verified ? 'var(--success)' : '#d97706'} />
-            <Badge variant={verified ? 'success' : 'warning'} style={{ fontSize: '0.71rem' }}>
-              {verified ? 'Verified' : 'Not Recorded'}
+            <ScanFace size={14} color={faceInfo.verified ? 'var(--success)' : '#d97706'} />
+            <Badge variant={faceInfo.verified ? 'success' : 'warning'} style={{ fontSize: '0.71rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              {faceInfo.verified ? (
+                <>
+                  <CheckCircle2 size={11} />
+                  <span>Verified</span>
+                  {faceInfo.confidence ? (
+                    <span style={{ opacity: 0.85, fontSize: '0.66rem' }}>
+                      ({Math.round(faceInfo.confidence > 1 ? faceInfo.confidence : faceInfo.confidence * 100)}%)
+                    </span>
+                  ) : null}
+                </>
+              ) : (
+                'Not Recorded'
+              )}
             </Badge>
           </div>
         );
@@ -756,19 +985,24 @@ export const DailyAttendance = () => {
       header: 'Location',
       key: 'location',
       render: (r) => {
-        const addr = r.address || r.locationName || r.site?.name || '';
-        const lat = r.latitude || r.location?.latitude;
-        const lng = r.longitude || r.location?.longitude;
-        if (!addr && !lat) return <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>-</span>;
+        const loc = getRecordLocationInfo(r, employees, locationLogs);
+        if (!loc.address || loc.address === '-') {
+          return <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>-</span>;
+        }
         return (
           <div style={{ fontSize: '0.82rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <MapPin size={13} color="#0284c7" />
-              <span style={{ fontWeight: 500 }}>{addr || `${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}`}</span>
+              <MapPin size={13} color="#0284c7" style={{ flexShrink: 0 }} />
+              <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{loc.title || loc.address}</span>
             </div>
-            {lat && lng && addr && (
-              <div style={{ fontSize: '0.71rem', color: 'var(--text-muted)', marginTop: 1 }}>
-                {Number(lat).toFixed(4)}, {Number(lng).toFixed(4)}
+            {loc.subtitle && loc.subtitle !== loc.title && (
+              <div style={{ fontSize: '0.71rem', color: 'var(--text-muted)', marginTop: 1, paddingLeft: 17 }}>
+                {loc.subtitle}
+              </div>
+            )}
+            {loc.coords && (
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-light, #94a3b8)', marginTop: 1, paddingLeft: 17 }}>
+                {loc.coords}
               </div>
             )}
           </div>

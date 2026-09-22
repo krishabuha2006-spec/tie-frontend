@@ -10,6 +10,11 @@ export const attendanceApi = {
       gpsAccuracy: Number(data.gpsAccuracy) || 15,
       capturedImage: data.capturedImage || data.photoUrl,
       ...(data.confidenceScore != null ? { confidenceScore: Number(data.confidenceScore) } : {}),
+      ...(data.faceConfidence != null ? { faceConfidence: Number(data.faceConfidence) } : {}),
+      ...(data.similarityScore != null ? { similarityScore: Number(data.similarityScore) } : {}),
+      ...(data.faceVerificationLogId ? { faceVerificationLogId: data.faceVerificationLogId } : {}),
+      ...(data.address ? { address: data.address, checkInAddress: data.address } : {}),
+      ...(data.checkInAddress ? { checkInAddress: data.checkInAddress } : {}),
     };
 
     try {
