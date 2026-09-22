@@ -202,7 +202,7 @@ export const DailyAttendance = () => {
     if (!selectedEmpId) { showToast('Select an employee', 'warning'); return; }
     const empName = getEmpName(selectedEmployeeObj);
     if (selectedEmployeeObj && selectedEmployeeObj.isFaceEnrolled === false) {
-      showToast('Face not registered â€” opening enrollment', 'warning');
+      showToast('Face not registered - opening enrollment', 'warning');
       openInlineEnroll(selectedEmployeeObj);
       return;
     }
@@ -250,7 +250,7 @@ export const DailyAttendance = () => {
       const allowed = geoNotConfigured || geoRes?.permitted !== false || geoRes?.withinGeoFence !== false;
       if (!allowed && geoRes?.status === 'OUTSIDE') {
         setPunchResult({ type: 'error', message: 'Outside authorized geofence boundary.' });
-        showToast('Outside geofence â€” blocked', 'error');
+        showToast('Outside geofence - blocked', 'error');
         setSubmittingPunch(false);
         return;
       }
@@ -364,7 +364,7 @@ export const DailyAttendance = () => {
           <div>
             <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-main)' }}>{name}</div>
             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
-              {code}{dept && ` â€¢ ${dept}`}
+              {code}{dept && ` • ${dept}`}
               {r._subType && (
                 <Badge variant={r._subType === 'FIELD' ? 'primary' : 'warning'} style={{ marginLeft: 6, fontSize: '0.68rem' }}>
                   {r._subType}
@@ -381,10 +381,10 @@ export const DailyAttendance = () => {
       render: (r) => {
         const inRaw = r.firstCheckInTime || r.siteInTime || r.sessions?.[0]?.checkInTime;
         const outRaw = r.lastCheckOutTime || r.siteOutTime || r.sessions?.[r.sessions?.length - 1]?.checkOutTime;
-        const inTime = inRaw ? new Date(inRaw).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'â€”';
+        const inTime = inRaw ? new Date(inRaw).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-';
         const outTime = outRaw
           ? new Date(outRaw).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          : (r.isOpen || (r.siteInTime && !r.siteOutTime)) ? 'On Duty' : 'â€”';
+          : (r.isOpen || (r.siteInTime && !r.siteOutTime)) ? 'On Duty' : '-';
         const recDate = r.attendanceDate ? new Date(r.attendanceDate).toLocaleDateString() : '';
         return (
           <div style={{ fontSize: '0.83rem' }}>
@@ -393,7 +393,7 @@ export const DailyAttendance = () => {
               <span style={{ color: 'var(--success)' }}><Clock size={12} style={{ marginRight: 3, verticalAlign: 'middle' }} /><strong>{inTime}</strong></span>
               <span style={{ color: 'var(--text-muted)' }}><Clock size={12} style={{ marginRight: 3, verticalAlign: 'middle' }} />{outTime}</span>
             </div>
-            {r.isLate && <span style={{ fontSize: '0.7rem', color: '#dc2626', fontWeight: 600 }}>âš  Late</span>}
+            {r.isLate && <span style={{ fontSize: '0.7rem', color: '#dc2626', fontWeight: 600 }}>Late</span>}
           </div>
         );
       },
@@ -422,7 +422,7 @@ export const DailyAttendance = () => {
         const addr = r.address || r.locationName || r.site?.name || '';
         const lat = r.latitude || r.location?.latitude;
         const lng = r.longitude || r.location?.longitude;
-        if (!addr && !lat) return <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>â€”</span>;
+        if (!addr && !lat) return <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>-</span>;
         return (
           <div style={{ fontSize: '0.82rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -479,7 +479,7 @@ export const DailyAttendance = () => {
         <div>
           <h2 style={{ fontSize: '1.3rem', fontWeight: 700, margin: 0 }}>Daily Attendance</h2>
           <p style={{ margin: '2px 0 0', fontSize: '0.83rem', color: 'var(--text-muted)' }}>
-            Real-time register â€” Office, Field & Site
+            Real-time register: Office, Field & Site
           </p>
         </div>
         <Button
@@ -573,7 +573,7 @@ export const DailyAttendance = () => {
         />
       </div>
 
-      {/* â”€â”€â”€ MARK ATTENDANCE MODAL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      
       <Modal isOpen={checkInModalOpen} onClose={() => setCheckInModalOpen(false)} title="Mark Attendance" size="lg">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {/* Step bar */}
@@ -608,7 +608,7 @@ export const DailyAttendance = () => {
               />
               {capturedPhoto && (
                 <div style={{ marginTop: 8, padding: '7px 12px', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6, fontSize: '0.8rem', color: '#166534', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <CheckCircle2 size={14} /> Face captured â€” ready for verification
+                  <CheckCircle2 size={14} /> Face captured - ready for verification
                 </div>
               )}
             </div>
@@ -622,7 +622,7 @@ export const DailyAttendance = () => {
                   onChange={(e) => { setSelectedEmpId(e.target.value); setCapturedPhoto(null); setPunchResult(null); }}
                   options={employees.map((e) => ({
                     value: e._id || e.id,
-                    label: `${e.isFaceEnrolled === false ? 'âš  ' : ''}${getEmpCode(e)} â€” ${getEmpName(e)}`,
+                    label: getEmpCode(e) ? `${getEmpCode(e)} - ${getEmpName(e)}` : getEmpName(e),
                   }))}
                   required
                 />
@@ -733,8 +733,8 @@ export const DailyAttendance = () => {
         </div>
       </Modal>
 
-      {/* â”€â”€â”€ SESSIONS MODAL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-      <Modal isOpen={sessionModalOpen} onClose={() => setSessionModalOpen(false)} title={`Sessions â€” ${getEmpName(selectedRecord?.employee)}`}>
+      
+      <Modal isOpen={sessionModalOpen} onClose={() => setSessionModalOpen(false)} title={`Sessions - ${getEmpName(selectedRecord?.employee)}`}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {selectedRecord?.punches?.length > 0 ? (
             selectedRecord.punches.map((p, idx) => (
@@ -744,14 +744,14 @@ export const DailyAttendance = () => {
                   <Badge variant={p.isOpen ? 'warning' : 'success'}>{p.isOpen ? 'Active' : `${p.workingHours || 0} hrs`}</Badge>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)' }}>
-                  <span>In: {p.checkInTime ? new Date(p.checkInTime).toLocaleTimeString() : 'â€”'}</span>
+                  <span>In: {p.checkInTime ? new Date(p.checkInTime).toLocaleTimeString() : '-'}</span>
                   <span>Out: {p.checkOutTime ? new Date(p.checkOutTime).toLocaleTimeString() : 'In Progress'}</span>
                 </div>
               </div>
             ))
           ) : (
             <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.84rem' }}>
-              Single session â€” no multi-punch data.
+              Single session - no multi-punch data.
             </div>
           )}
           <div className="modal-footer" style={{ margin: '10px -20px -20px' }}>
@@ -760,7 +760,7 @@ export const DailyAttendance = () => {
         </div>
       </Modal>
 
-      {/* â”€â”€â”€ ADMIN CORRECTION MODAL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      
       <Modal isOpen={correctModalOpen} onClose={() => setCorrectModalOpen(false)} title="Admin Correction">
         <form onSubmit={handleCorrectSubmit}>
           <div style={{ marginBottom: 12, fontSize: '0.84rem' }}>
@@ -793,8 +793,8 @@ export const DailyAttendance = () => {
         </form>
       </Modal>
 
-      {/* â”€â”€â”€ INLINE FACE ENROLLMENT MODAL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-      <Modal isOpen={inlineEnrollOpen} onClose={() => setInlineEnrollOpen(false)} title={`Face Registration â€” ${getEmpName(inlineEnrollEmployee)}`} size="md">
+      
+      <Modal isOpen={inlineEnrollOpen} onClose={() => setInlineEnrollOpen(false)} title={`Face Registration - ${getEmpName(inlineEnrollEmployee)}`} size="md">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ padding: '10px 14px', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, fontSize: '0.83rem', color: '#1e40af' }}>
             Capture a clear front-facing photo to enroll biometric data for attendance.
@@ -802,7 +802,7 @@ export const DailyAttendance = () => {
           <CameraCapture onCapture={(img) => setInlineFacePhoto(img)} label="Capture Face for Enrollment" />
           {inlineFacePhoto && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#166534', fontSize: '0.83rem', padding: '6px 10px', backgroundColor: '#f0fdf4', borderRadius: 6 }}>
-              <CheckCircle2 size={14} /> Photo captured â€” ready to enroll
+              <CheckCircle2 size={14} /> Photo captured - ready to enroll
             </div>
           )}
           <div className="modal-footer" style={{ margin: '6px -20px -20px' }}>
