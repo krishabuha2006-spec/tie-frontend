@@ -1,11 +1,7 @@
 import apiClient from './client';
 
 export const integrationApi = {
-  // =========================================================================
-  // Module 24: HRMS Cross-Module Integration Layer
-  // =========================================================================
 
-  // POST /integration/contracts/seed
   seedContracts: async () => {
     const res = await apiClient.post('/integration/contracts/seed');
     return res.data;

@@ -7,7 +7,7 @@ import { useToast } from '../../context/ToastContext';
 import {
   DollarSign, FileText, CheckCircle2, Clock, Plus, RefreshCw,
   Download, Printer, Eye, Users, Calendar, AlertCircle, Loader2,
-  ChevronRight, ArrowUpRight, Check, X, ShieldCheck
+  ChevronRight, ArrowUpRight, Check, X, ShieldCheck, Building2
 } from 'lucide-react';
 import Modal from '../../components/common/Modal';
 import Button from '../../components/common/Button';

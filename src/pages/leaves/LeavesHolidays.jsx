@@ -3,6 +3,7 @@ import leaveHolidayApi from '../../api/leaveHolidayApi';
 import employeeApi from '../../api/employeeApi';
 import masterApi from '../../api/masterApi';
 import { useToast } from '../../context/ToastContext';
+import { useConfirm } from '../../context/ConfirmContext';
 import { useAuth } from '../../context/AuthContext';
 import { formatEmployeeOption, extractEmployeeList } from '../../utils/employeeUtils';
 import {
@@ -35,6 +36,7 @@ import Select from '../../components/common/Select';
 import Badge from '../../components/common/Badge';
 
 export const LeavesHolidays = () => {
+  const confirm = useConfirm();
   const { user, isSuperAdmin, isHrAdmin } = useAuth();
   const { showToast } = useToast();
   const canManage = isSuperAdmin || isHrAdmin;
@@ -336,7 +338,14 @@ export const LeavesHolidays = () => {
 
   // Cancel Leave (PUT /leave/requests/:id/cancel)
   const handleCancelLeave = async (id) => {
-    if (!window.confirm('Are you sure you want to cancel this leave application?')) return;
+    const isConfirmed = await confirm({
+      title: 'Cancel Leave Application',
+      message: 'Are you sure you want to cancel this leave application? This action cannot be undone.',
+      confirmText: 'Cancel Leave',
+      cancelText: 'Keep',
+      variant: 'warning',
+    });
+    if (!isConfirmed) return;
     try {
       await leaveHolidayApi.cancelLeave(id);
       showToast('Leave application withdrawn', 'info');
@@ -401,7 +410,14 @@ export const LeavesHolidays = () => {
 
   // Delete Holiday (DELETE /holidays/:id)
   const handleDeleteHoliday = async (id) => {
-    if (!window.confirm('Delete this holiday entry?')) return;
+    const isConfirmed = await confirm({
+      title: 'Delete Holiday',
+      message: 'Are you sure you want to delete this holiday entry from the organization calendar?',
+      confirmText: 'Delete Holiday',
+      cancelText: 'Cancel',
+      variant: 'danger',
+    });
+    if (!isConfirmed) return;
     try {
       await leaveHolidayApi.deleteHoliday(id);
       showToast('Holiday deleted', 'info');

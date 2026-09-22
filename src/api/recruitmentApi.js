@@ -41,7 +41,8 @@ export const recruitmentApi = {
       return res.data;
     } catch (err) {
       const status = err?.response?.status;
-      if (status === 400 || status === 403) return { data: [], jobs: [] };
+      // 400/403 = permission/bad-request; 409 = server-side conflict (e.g. duplicate index), handle gracefully
+      if (status === 400 || status === 403 || status === 409) return { data: [], jobs: [] };
       throw err;
     }
   },

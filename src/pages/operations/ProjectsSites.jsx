@@ -3,6 +3,7 @@ import projectTaskApi from '../../api/projectTaskApi';
 import masterApi from '../../api/masterApi';
 import employeeApi from '../../api/employeeApi';
 import { useToast } from '../../context/ToastContext';
+import { useConfirm } from '../../context/ConfirmContext';
 import {
   getEmployeeName,
   getEmployeeCode,
@@ -103,6 +104,7 @@ export const ProjectsSites = () => {
   });
 
   const { showToast } = useToast();
+  const confirm = useConfirm();
 
   // Load Projects Master & Supporting Data
   const loadData = async () => {
@@ -316,7 +318,14 @@ export const ProjectsSites = () => {
 
   // Deactivate Project Site (PUT /projects/sites/:id/deactivate)
   const handleDeactivateSite = async (siteId) => {
-    if (!window.confirm('Are you sure you want to deactivate this project site?')) return;
+    const isConfirmed = await confirm({
+      title: 'Deactivate Project Site',
+      message: 'Are you sure you want to deactivate this project site? Active geo-fencing and check-ins for this site will be paused.',
+      confirmText: 'Deactivate Site',
+      cancelText: 'Cancel',
+      variant: 'warning',
+    });
+    if (!isConfirmed) return;
     try {
       await projectTaskApi.deactivateProjectSite(siteId);
       showToast('Project site deactivated', 'success');

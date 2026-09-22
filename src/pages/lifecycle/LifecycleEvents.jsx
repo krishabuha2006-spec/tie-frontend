@@ -3,6 +3,7 @@ import lifecycleApi from '../../api/lifecycleApi';
 import employeeApi from '../../api/employeeApi';
 import masterApi from '../../api/masterApi';
 import { useToast } from '../../context/ToastContext';
+import { useConfirm } from '../../context/ConfirmContext';
 import { useAuth } from '../../context/AuthContext';
 import {
   getEmployeeName,
@@ -39,6 +40,7 @@ import Select from '../../components/common/Select';
 import Badge from '../../components/common/Badge';
 
 export const LifecycleEvents = () => {
+  const confirm = useConfirm();
   const { user, isSuperAdmin, isHrAdmin } = useAuth();
   const canManage = isSuperAdmin || isHrAdmin;
   const { showToast } = useToast();
@@ -59,7 +61,7 @@ export const LifecycleEvents = () => {
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [eventTypeFilter, setEventTypeFilter] = useState('ALL');
 
-  // Modals for Transitions
+
   const [confirmationModalOpen, setConfirmationModalOpen] = useState(false);
   const [confirmationForm, setConfirmationForm] = useState({
     employeeId: '',
@@ -329,7 +331,14 @@ export const LifecycleEvents = () => {
   };
 
   const handleFinalizeExit = async () => {
-    if (!window.confirm('Finalize employee exit? This will write employeeStatus=EXITED, revoke portal login, and calculate full-and-final settlement.')) return;
+    const isConfirmed = await confirm({
+      title: 'Finalize Employee Exit',
+      message: 'Are you sure you want to finalize this employee exit? This will mark employeeStatus as EXITED, revoke portal logins, and initiate full-and-final settlement.',
+      confirmText: 'Finalize Exit',
+      cancelText: 'Cancel',
+      variant: 'danger',
+    });
+    if (!isConfirmed) return;
     setSubmittingFinalize(true);
     try {
       await lifecycleApi.finalizeExit(activeExitEvent._id);

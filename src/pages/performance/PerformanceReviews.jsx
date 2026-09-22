@@ -3,6 +3,7 @@ import performanceApi from '../../api/performanceApi';
 import masterApi from '../../api/masterApi';
 import employeeApi from '../../api/employeeApi';
 import { useToast } from '../../context/ToastContext';
+import { useConfirm } from '../../context/ConfirmContext';
 import { useAuth } from '../../context/AuthContext';
 import {
   Plus,
@@ -28,6 +29,7 @@ import Select from '../../components/common/Select';
 import Badge from '../../components/common/Badge';
 
 export const PerformanceReviews = () => {
+  const confirm = useConfirm();
   const { user, isSuperAdmin, isHrAdmin } = useAuth();
   const canManage = isSuperAdmin || isHrAdmin;
   const { showToast } = useToast();
@@ -369,7 +371,14 @@ export const PerformanceReviews = () => {
   };
 
   const handleDeactivateTemplate = async (id) => {
-    if (!window.confirm('Deactivate this KRA template?')) return;
+    const isConfirmed = await confirm({
+      title: 'Deactivate KRA Template',
+      message: 'Are you sure you want to deactivate this KRA template? It will no longer be available for assignment.',
+      confirmText: 'Deactivate',
+      cancelText: 'Cancel',
+      variant: 'warning',
+    });
+    if (!isConfirmed) return;
     try {
       await performanceApi.deactivateKraTemplate(id);
       showToast('KRA template deactivated', 'info');

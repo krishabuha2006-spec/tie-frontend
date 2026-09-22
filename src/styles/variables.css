@@ -1,5 +1,5 @@
 :root {
-  /* Brand Color Palette - Derived from Official TIE Corporation Logo */
+
   --primary: #2e7b85;
   --primary-hover: #256770;
   --primary-active: #1c525a;
@@ -8,12 +8,10 @@
   --primary-border: #bce1e6;
   --primary-ring: rgba(46, 123, 133, 0.2);
 
-  /* Logo Brand Accents */
   --logo-teal: #3f929a;
   --logo-orange: #f5a532;
   --logo-green: #8bc54a;
 
-  /* Status Colors */
   --success: #16a34a;
   --success-light: #f0fdf4;
   --success-border: #bbf7d0;
@@ -27,7 +25,7 @@
   --info-light: #eff6ff;
   --info-border: #bfdbfe;
 
-  /* Neutrals & Surfaces */
+
   --bg-app: #f8fafc;
   --bg-surface: #ffffff;
   --bg-subtle: #f1f5f9;
@@ -36,14 +34,14 @@
   --border-light: #edf2f7;
   --border-dark: #cbd5e1;
 
-  /* Typography */
+
   --text-main: #1e293b;
   --text-muted: #64748b;
   --text-light: #94a3b8;
   --text-white: #ffffff;
   --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 
-  /* Sizing & Spacing */
+
   --sidebar-width: 260px;
   --sidebar-collapsed-width: 72px;
   --header-height: 64px;
@@ -52,14 +50,14 @@
   --radius-lg: 12px;
   --radius-xl: 16px;
 
-  /* Elevation / Shadows */
+
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
   --shadow-modal: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
 
-  /* Transitions */
+
   --transition-fast: 0.15s ease;
   --transition-normal: 0.25s ease;
 }

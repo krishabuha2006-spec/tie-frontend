@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import recruitmentApi from '../../api/recruitmentApi';
 import masterApi from '../../api/masterApi';
 import { useToast } from '../../context/ToastContext';
+import { useConfirm } from '../../context/ConfirmContext';
 import { Plus, Briefcase, RefreshCw, XCircle, Search } from 'lucide-react';
 import Table from '../../components/common/Table';
 import Modal from '../../components/common/Modal';
@@ -13,6 +14,8 @@ import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { recruitmentNav } from '../../routes/moduleNavConfig';
 
 export const JobOpenings = () => {
+  const confirm = useConfirm();
+  const { showToast } = useToast();
   const [jobs, setJobs] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -33,8 +36,6 @@ export const JobOpenings = () => {
     description: '',
     requirements: '',
   });
-
-  const { showToast } = useToast();
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -100,7 +101,12 @@ export const JobOpenings = () => {
       setModalOpen(false);
       await loadData();
     } catch (err) {
-      showToast(err.response?.data?.message || 'Failed to create job opening', 'error');
+      const status = err?.response?.status;
+      if (status === 409) {
+        showToast(err.response?.data?.message || 'A job opening with the same title already exists in this department. Please use a different title or update the existing one.', 'error');
+      } else {
+        showToast(err.response?.data?.message || 'Failed to create job opening', 'error');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -117,7 +123,14 @@ export const JobOpenings = () => {
   };
 
   const handleDeleteJob = async (job) => {
-    if (!window.confirm(`Are you sure you want to delete job opening "${job.title}"?`)) return;
+    const isConfirmed = await confirm({
+      title: 'Delete Job Opening',
+      message: `Are you sure you want to delete job opening "${job.title}"? This cannot be undone.`,
+      confirmText: 'Delete Opening',
+      cancelText: 'Cancel',
+      variant: 'danger',
+    });
+    if (!isConfirmed) return;
     try {
       await recruitmentApi.deleteJobOpening(job._id);
       showToast('Job opening deleted successfully', 'success');

@@ -11,7 +11,6 @@ export default defineConfig({
         target: 'https://tie-backend-ruddy.vercel.app',
         changeOrigin: true,
         secure: false,
-
         timeout: 60000,
         proxyTimeout: 60000,
       },
