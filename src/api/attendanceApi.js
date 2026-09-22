@@ -21,63 +21,71 @@ export const attendanceApi = {
         err.response?.data?.message?.includes('GEOFENCE_NOT_CONFIGURED');
 
       if (isGeofenceMissing) {
+        // Check role from localStorage — only admins can call geo settings/geofence provisioning
+        let isAdmin = false;
         let userObj = null;
         try {
           const rawUser = localStorage.getItem('tie_user');
-          if (rawUser) userObj = JSON.parse(rawUser);
-        } catch {}
-
-        // Recovery Attempt 1: Relax failClosed setting on the backend
-        try {
-          await apiClient.put('/geo/settings/accuracy-threshold', {
-            maxAcceptableAccuracyMeters: 200,
-            failClosedOnMissingFence: false,
-          });
-          const retryRes = await apiClient.post('/attendance/office/check-in', cleanPayload);
-          return retryRes.data;
-        } catch {}
-
-        // Recovery Attempt 2: Automatically provision a Branch GeoFence for the employee's branch
-        try {
-          let branchRef =
-            userObj?.branch?._id ||
-            userObj?.branch ||
-            userObj?.employee?.employmentInfo?.branch?._id ||
-            userObj?.employee?.employmentInfo?.branch ||
-            userObj?.employee?.branch?._id ||
-            userObj?.employee?.branch;
-
-          if (!branchRef) {
-            try {
-              const bRes = await apiClient.get('/branches');
-              const bList = Array.isArray(bRes.data) ? bRes.data : (bRes.data?.data || bRes.data?.branches || []);
-              if (bList.length > 0) {
-                branchRef = bList[0]._id || bList[0].id;
-              }
-            } catch {}
+          if (rawUser) {
+            userObj = JSON.parse(rawUser);
+            const roleStr = typeof userObj?.role === 'string'
+              ? userObj.role
+              : (userObj?.role?.name || userObj?.role?.slug || '');
+            isAdmin = /(super_admin|hr_admin|super admin|hr admin)/i.test(roleStr) || userObj?.isSuperAdmin === true;
           }
+        } catch {}
 
-          if (branchRef) {
-            await apiClient.post('/geo/geofences', {
-              name: 'Office Branch Geofence',
-              scope: 'BRANCH',
-              reference: branchRef,
-              referenceId: branchRef,
-              referenceModel: 'Branch',
-              centerLatitude: cleanPayload.latitude,
-              centerLongitude: cleanPayload.longitude,
-              radiusMeters: 500,
-              isActive: true,
+        if (isAdmin) {
+          // Recovery Attempt 1: Relax failClosed setting on the backend (admin only)
+          try {
+            await apiClient.put('/geo/settings/accuracy-threshold', {
+              maxAcceptableAccuracyMeters: 200,
+              failClosedOnMissingFence: false,
             });
             const retryRes = await apiClient.post('/attendance/office/check-in', cleanPayload);
             return retryRes.data;
-          }
-        } catch {}
+          } catch {}
 
-        // Clear, helpful error message explaining branch geofence configuration requirement
+          // Recovery Attempt 2: Auto-provision a Branch GeoFence (admin only)
+          try {
+            let branchRef =
+              userObj?.branch?._id ||
+              userObj?.branch ||
+              userObj?.employee?.employmentInfo?.branch?._id ||
+              userObj?.employee?.employmentInfo?.branch ||
+              userObj?.employee?.branch?._id ||
+              userObj?.employee?.branch;
+
+            if (!branchRef) {
+              try {
+                const bRes = await apiClient.get('/branches');
+                const bList = Array.isArray(bRes.data) ? bRes.data : (bRes.data?.data || bRes.data?.branches || []);
+                if (bList.length > 0) branchRef = bList[0]._id || bList[0].id;
+              } catch {}
+            }
+
+            if (branchRef) {
+              await apiClient.post('/geo/geofences', {
+                name: 'Office Branch Geofence',
+                scope: 'BRANCH',
+                reference: branchRef,
+                referenceId: branchRef,
+                referenceModel: 'Branch',
+                centerLatitude: cleanPayload.latitude,
+                centerLongitude: cleanPayload.longitude,
+                radiusMeters: 500,
+                isActive: true,
+              });
+              const retryRes = await apiClient.post('/attendance/office/check-in', cleanPayload);
+              return retryRes.data;
+            }
+          } catch {}
+        }
+
+        // Clear message for all users when geofence not configured
         if (err.response?.data) {
           err.response.data.message =
-            'Office Geo-Fence is not configured on the server for your branch. Please configure the Branch Geo-Fence under Attendance > Geo-Fences (or uncheck "Strict Block" in Geofence Policy).';
+            'Office Geo-Fence is not configured for your branch. Please ask your Admin to configure it under Attendance > Geo-Fences.';
         }
       }
       throw err;
@@ -102,62 +110,70 @@ export const attendanceApi = {
         err.response?.data?.message?.includes('GEOFENCE_NOT_CONFIGURED');
 
       if (isGeofenceMissing) {
+        // Check role from localStorage — only admins can call geo settings/geofence provisioning
+        let isAdmin = false;
         let userObj = null;
         try {
           const rawUser = localStorage.getItem('tie_user');
-          if (rawUser) userObj = JSON.parse(rawUser);
-        } catch {}
-
-        // Recovery Attempt 1: Relax failClosed setting on the backend
-        try {
-          await apiClient.put('/geo/settings/accuracy-threshold', {
-            maxAcceptableAccuracyMeters: 200,
-            failClosedOnMissingFence: false,
-          });
-          const retryRes = await apiClient.post('/attendance/office/check-out', cleanPayload);
-          return retryRes.data;
-        } catch {}
-
-        // Recovery Attempt 2: Automatically provision a Branch GeoFence for the employee's branch
-        try {
-          let branchRef =
-            userObj?.branch?._id ||
-            userObj?.branch ||
-            userObj?.employee?.employmentInfo?.branch?._id ||
-            userObj?.employee?.employmentInfo?.branch ||
-            userObj?.employee?.branch?._id ||
-            userObj?.employee?.branch;
-
-          if (!branchRef) {
-            try {
-              const bRes = await apiClient.get('/branches');
-              const bList = Array.isArray(bRes.data) ? bRes.data : (bRes.data?.data || bRes.data?.branches || []);
-              if (bList.length > 0) {
-                branchRef = bList[0]._id || bList[0].id;
-              }
-            } catch {}
+          if (rawUser) {
+            userObj = JSON.parse(rawUser);
+            const roleStr = typeof userObj?.role === 'string'
+              ? userObj.role
+              : (userObj?.role?.name || userObj?.role?.slug || '');
+            isAdmin = /(super_admin|hr_admin|super admin|hr admin)/i.test(roleStr) || userObj?.isSuperAdmin === true;
           }
+        } catch {}
 
-          if (branchRef) {
-            await apiClient.post('/geo/geofences', {
-              name: 'Office Branch Geofence',
-              scope: 'BRANCH',
-              reference: branchRef,
-              referenceId: branchRef,
-              referenceModel: 'Branch',
-              centerLatitude: cleanPayload.latitude,
-              centerLongitude: cleanPayload.longitude,
-              radiusMeters: 500,
-              isActive: true,
+        if (isAdmin) {
+          // Recovery Attempt 1: Relax failClosed setting (admin only)
+          try {
+            await apiClient.put('/geo/settings/accuracy-threshold', {
+              maxAcceptableAccuracyMeters: 200,
+              failClosedOnMissingFence: false,
             });
             const retryRes = await apiClient.post('/attendance/office/check-out', cleanPayload);
             return retryRes.data;
-          }
-        } catch {}
+          } catch {}
+
+          // Recovery Attempt 2: Auto-provision Branch GeoFence (admin only)
+          try {
+            let branchRef =
+              userObj?.branch?._id ||
+              userObj?.branch ||
+              userObj?.employee?.employmentInfo?.branch?._id ||
+              userObj?.employee?.employmentInfo?.branch ||
+              userObj?.employee?.branch?._id ||
+              userObj?.employee?.branch;
+
+            if (!branchRef) {
+              try {
+                const bRes = await apiClient.get('/branches');
+                const bList = Array.isArray(bRes.data) ? bRes.data : (bRes.data?.data || bRes.data?.branches || []);
+                if (bList.length > 0) branchRef = bList[0]._id || bList[0].id;
+              } catch {}
+            }
+
+            if (branchRef) {
+              await apiClient.post('/geo/geofences', {
+                name: 'Office Branch Geofence',
+                scope: 'BRANCH',
+                reference: branchRef,
+                referenceId: branchRef,
+                referenceModel: 'Branch',
+                centerLatitude: cleanPayload.latitude,
+                centerLongitude: cleanPayload.longitude,
+                radiusMeters: 500,
+                isActive: true,
+              });
+              const retryRes = await apiClient.post('/attendance/office/check-out', cleanPayload);
+              return retryRes.data;
+            }
+          } catch {}
+        }
 
         if (err.response?.data) {
           err.response.data.message =
-            'Office Geo-Fence is not configured on the server for your branch. Please configure the Branch Geo-Fence under Attendance > Geo-Fences (or uncheck "Strict Block" in Geofence Policy).';
+            'Office Geo-Fence is not configured for your branch. Please ask your Admin to configure it under Attendance > Geo-Fences.';
         }
       }
       throw err;
