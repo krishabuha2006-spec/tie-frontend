@@ -12,6 +12,47 @@ export const faceApi = {
     }
   },
 
+  // Bulk face status — tries a single bulk endpoint first, then falls back to batched individual calls
+  getBulkFaceStatus: async (employeeIds) => {
+    if (!employeeIds || employeeIds.length === 0) return {};
+    const validIds = employeeIds.filter((id) => id && id !== 'undefined' && id !== 'null');
+    if (validIds.length === 0) return {};
+
+    // Try bulk endpoint first
+    try {
+      const res = await apiClient.post('/face/employees/bulk-status', { employeeIds: validIds });
+      const data = res.data?.data || res.data || {};
+      // Normalize to { [empId]: { isRegistered, status } }
+      if (typeof data === 'object' && !Array.isArray(data)) return data;
+      if (Array.isArray(data)) {
+        const map = {};
+        data.forEach((item) => { if (item.employeeId || item._id) map[item.employeeId || item._id] = item; });
+        return map;
+      }
+    } catch {
+      // Bulk endpoint not available — fall through to batched individual calls
+    }
+
+    // Batched individual calls (5 at a time) to avoid rate limiting
+    const statusMap = {};
+    const batchSize = 5;
+    for (let i = 0; i < validIds.length; i += batchSize) {
+      const batch = validIds.slice(i, i + batchSize);
+      const results = await Promise.allSettled(
+        batch.map((id) => apiClient.get(`/face/employees/${id}/status`).then((r) => ({ id, data: r.data }))
+          .catch(() => ({ id, data: { status: 'UNREGISTERED', isRegistered: false } }))
+        )
+      );
+      results.forEach((r) => {
+        if (r.status === 'fulfilled') statusMap[r.value.id] = r.value.data;
+        else statusMap[r.reason?.id || ''] = { status: 'UNREGISTERED', isRegistered: false };
+      });
+      // Small delay between batches to avoid overwhelming backend
+      if (i + batchSize < validIds.length) await new Promise((res) => setTimeout(res, 100));
+    }
+    return statusMap;
+  },
+
   enrollFace: async (employeeId, faceImages) => {
     if (!employeeId || employeeId === 'undefined') throw new Error('Employee ID required for face enrollment');
     const imagesArray = Array.isArray(faceImages) ? faceImages : [faceImages];

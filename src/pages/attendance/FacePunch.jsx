@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import faceApi from '../../api/faceApi';
 import geoApi from '../../api/geoApi';
@@ -30,6 +30,111 @@ const LiveClock = () => {
     <span style={{ fontVariantNumeric: 'tabular-nums', letterSpacing: '0.04em' }}>
       {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
     </span>
+  );
+};
+
+/* ─── Employee Picker ──────────────────────────────────────────────── */
+const EmpPicker = ({ employees, value, onChange, label, getEmpName, getEmpCode, getEmpDept }) => {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const ref = React.useRef(null);
+  const selected = employees.find((e) => e._id === value);
+
+  useEffect(() => {
+    const handler = (ev) => { if (ref.current && !ref.current.contains(ev.target)) setOpen(false); };
+    if (open) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const filtered = search
+    ? employees.filter((e) =>
+        getEmpName(e).toLowerCase().includes(search.toLowerCase()) ||
+        String(getEmpCode(e)).toLowerCase().includes(search.toLowerCase())
+      )
+    : employees;
+
+  const initials = (emp) => {
+    const n = getEmpName(emp);
+    const parts = n.split(' ');
+    return parts.length >= 2 ? `${parts[0][0]}${parts[1][0]}`.toUpperCase() : n.slice(0, 2).toUpperCase();
+  };
+
+  const avatarBg = (emp) =>
+    emp.isFaceEnrolled ? 'linear-gradient(135deg,#2e7b85,#3d9ba6)' : 'linear-gradient(135deg,#d97706,#f59e0b)';
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      {label && <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 8 }}>{label} <span style={{ color: '#ef4444' }}>*</span></div>}
+
+      {/* Trigger */}
+      <div
+        onClick={() => setOpen((p) => !p)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '8px 12px', borderRadius: 10, cursor: 'pointer',
+          border: open ? '1.5px solid var(--primary)' : '1.5px solid var(--border-dark)',
+          background: '#fff',
+          boxShadow: open ? '0 0 0 3px var(--primary-ring)' : 'none',
+          transition: 'all 0.15s',
+        }}
+      >
+        {selected ? (
+          <>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: avatarBg(selected), display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: '0.75rem', flexShrink: 0 }}>
+              {initials(selected)}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{getEmpName(selected)}</div>
+              <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>{getEmpCode(selected)} · {getEmpDept(selected)}</div>
+            </div>
+            <div style={{ padding: '2px 8px', borderRadius: 12, fontSize: '0.7rem', fontWeight: 700, background: selected.isFaceEnrolled ? '#dcfce7' : '#fef3c7', color: selected.isFaceEnrolled ? '#166534' : '#92400e', flexShrink: 0 }}>
+              {selected.isFaceEnrolled ? '✓ Enrolled' : 'Pending'}
+            </div>
+          </>
+        ) : (
+          <span style={{ fontSize: '0.85rem', color: 'var(--text-light)' }}>Select employee...</span>
+        )}
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginLeft: 'auto', color: 'var(--text-muted)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0 }}><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+
+      {/* Dropdown */}
+      {open && (
+        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, background: '#fff', border: '1.5px solid var(--primary-border)', borderRadius: 12, boxShadow: '0 10px 25px -5px rgba(46,123,133,0.2)', zIndex: 1100, overflow: 'hidden' }}>
+          {employees.length > 5 && (
+            <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Search size={13} color="var(--text-muted)" />
+              <input autoFocus type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name or code..." style={{ border: 'none', outline: 'none', fontSize: '0.82rem', width: '100%', background: 'transparent', color: 'var(--text-main)' }} />
+            </div>
+          )}
+          <div style={{ maxHeight: 240, overflowY: 'auto' }}>
+            {filtered.length === 0 && <div style={{ padding: '12px 14px', fontSize: '0.82rem', color: 'var(--text-muted)', textAlign: 'center' }}>No employees found</div>}
+            {filtered.map((emp) => {
+              const isSelected = emp._id === value;
+              return (
+                <div key={emp._id}
+                  onClick={() => { onChange(emp._id); setOpen(false); setSearch(''); }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', cursor: 'pointer', background: isSelected ? 'var(--primary-subtle)' : 'transparent', transition: 'background 0.12s' }}
+                  onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'var(--primary-light)'; }}
+                  onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <div style={{ width: 34, height: 34, borderRadius: 8, background: avatarBg(emp), display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: '0.75rem', flexShrink: 0 }}>
+                    {initials(emp)}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: isSelected ? 700 : 500, fontSize: '0.87rem', color: isSelected ? 'var(--primary-active)' : 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{getEmpName(emp)}</div>
+                    <div style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>{getEmpCode(emp)} · {getEmpDept(emp)}</div>
+                  </div>
+                  <div style={{ padding: '2px 8px', borderRadius: 12, fontSize: '0.68rem', fontWeight: 700, background: emp.isFaceEnrolled ? '#dcfce7' : '#fef3c7', color: emp.isFaceEnrolled ? '#166534' : '#92400e', flexShrink: 0 }}>
+                    {emp.isFaceEnrolled ? '✓ Enrolled' : 'Pending'}
+                  </div>
+                  {isSelected && <CheckCircle2 size={15} color="var(--primary)" style={{ flexShrink: 0 }} />}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -86,9 +191,12 @@ export const FacePunch = () => {
         let isEnrolled = false;
         if (myId) {
           try {
-            const statusRes = await faceApi.getFaceStatus(myId);
-            const sData = statusRes?.data || statusRes;
-            isEnrolled = sData?.isRegistered === true || sData?.status === 'REGISTERED' || sData?.status === 'ENROLLED' || sData?.isEnrolled === true;
+            const sData = await faceApi.getFaceStatus(myId);
+            isEnrolled =
+              sData?.isRegistered === true ||
+              sData?.status === 'REGISTERED' ||
+              sData?.status === 'ENROLLED' ||
+              sData?.isEnrolled === true;
             selfEmp = { ...selfEmp, isFaceEnrolled: isEnrolled, faceRegistrationPending: !isEnrolled };
           } catch {}
         }
@@ -100,16 +208,19 @@ export const FacePunch = () => {
       }
       const res = await employeeApi.getEmployees({ limit: 200 });
       const list = res?.data || [];
-      const enriched = await Promise.all(list.map(async (emp) => {
-        try {
-          const statusRes = await faceApi.getFaceStatus(emp._id || emp.id);
-          const sData = statusRes?.data || statusRes;
-          const isEnrolled = sData?.isRegistered === true || sData?.status === 'REGISTERED' || sData?.status === 'ENROLLED' || sData?.isEnrolled === true;
-          return { ...emp, isFaceEnrolled: isEnrolled, faceRegistrationPending: !isEnrolled };
-        } catch {
-          return { ...emp, isFaceEnrolled: false, faceRegistrationPending: true };
-        }
-      }));
+      // Bulk face status check — single API call (or batched 5-at-a-time) instead of N individual calls
+      const empIds = list.map((e) => e._id || e.id).filter(Boolean);
+      const statusMap = await faceApi.getBulkFaceStatus(empIds);
+      const enriched = list.map((emp) => {
+        const empId = emp._id || emp.id;
+        const sData = statusMap[empId] || {};
+        const isEnrolled =
+          sData?.isRegistered === true ||
+          sData?.status === 'REGISTERED' ||
+          sData?.status === 'ENROLLED' ||
+          sData?.isEnrolled === true;
+        return { ...emp, isFaceEnrolled: isEnrolled, faceRegistrationPending: !isEnrolled };
+      });
       setEmployees(enriched);
       const queryEmpId = searchParams.get('empId');
       if (queryEmpId && enriched.some((e) => e._id === queryEmpId)) {
@@ -391,10 +502,16 @@ export const FacePunch = () => {
                 <Search size={13} color="var(--text-muted)" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)' }} />
                 <input type="text" className="form-control" placeholder="Search employee..." value={regSearch} onChange={(e) => setRegSearch(e.target.value)} style={{ paddingLeft: 30, fontSize: '0.83rem', height: 36 }} />
               </div>
-              <Select label="Select Employee" value={regEmpId}
-                onChange={(e) => { setRegEmpId(e.target.value); setRegPhoto(null); setRegSuccess(null); }}
-                options={filteredRegEmps.map((e) => ({ value: e._id, label: `${e.isFaceEnrolled ? '[Enrolled]' : '[Pending]'} ${getEmpCode(e)} — ${getEmpName(e)} (${getEmpDept(e)})` }))}
-                required />
+              <EmpPicker
+                employees={filteredRegEmps}
+                value={regEmpId}
+                onChange={(id) => { setRegEmpId(id); setRegPhoto(null); setRegSuccess(null); }}
+                label="Select Employee"
+                getEmpName={getEmpName}
+                getEmpCode={getEmpCode}
+                getEmpDept={getEmpDept}
+              />
+
             </>)}
             {selectedRegEmployee && (
               <div style={{ ...S.empCard, marginTop: 14 }}>
@@ -441,10 +558,16 @@ export const FacePunch = () => {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {/* Employee */}
               {isOrgAdmin ? (
-                <Select label="Select Employee" value={selectedEmpId}
-                  onChange={(e) => { setSelectedEmpId(e.target.value); setCapturedPhoto(null); setPunchResult(null); }}
-                  options={employees.map((e) => ({ value: e._id, label: `${e.isFaceEnrolled ? '✓' : '⚠'} ${getEmpCode(e)} — ${getEmpName(e)} (${getEmpDept(e)})` }))}
-                  required />
+                <EmpPicker
+                  employees={employees}
+                  value={selectedEmpId}
+                  onChange={(id) => { setSelectedEmpId(id); setCapturedPhoto(null); setPunchResult(null); }}
+                  label="Select Employee"
+                  getEmpName={getEmpName}
+                  getEmpCode={getEmpCode}
+                  getEmpDept={getEmpDept}
+                />
+
               ) : (
                 <div style={S.empCard}>
                   <div>
