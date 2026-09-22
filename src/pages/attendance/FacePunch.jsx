@@ -158,6 +158,9 @@ export const FacePunch = () => {
   const [registering, setRegistering] = useState(false);
   const [regSuccess, setRegSuccess] = useState(null);
   const [selectedEmpId, setSelectedEmpId] = useState('');
+  const [registeredFacePhoto, setRegisteredFacePhoto] = useState(null);
+  const [biometricMatchStatus, setBiometricMatchStatus] = useState(null);
+  const [loadingRegisteredFace, setLoadingRegisteredFace] = useState(false);
   const [attendanceType, setAttendanceType] = useState('OFFICE');
   const [punchMode, setPunchMode] = useState('CHECK_IN');
   const [capturedPhoto, setCapturedPhoto] = useState(null);
@@ -275,6 +278,41 @@ export const FacePunch = () => {
     })();
   }, [selectedEmpId]);
 
+  // Fetch registered face binary data from backend when employee selection changes
+  useEffect(() => {
+    if (!selectedEmpId) {
+      setRegisteredFacePhoto(null);
+      setBiometricMatchStatus(null);
+      return;
+    }
+    let cancelled = false;
+    setLoadingRegisteredFace(true);
+    faceApi.getRegisteredFace(selectedEmpId).then((photo) => {
+      if (!cancelled) {
+        setRegisteredFacePhoto(photo);
+        setLoadingRegisteredFace(false);
+      }
+    }).catch(() => {
+      if (!cancelled) setLoadingRegisteredFace(false);
+    });
+    return () => { cancelled = true; };
+  }, [selectedEmpId]);
+
+  // Automatically compare live captured photo with registered binary face template
+  useEffect(() => {
+    if (!capturedPhoto || !registeredFacePhoto) {
+      setBiometricMatchStatus(null);
+      return;
+    }
+    let cancelled = false;
+    faceApi.compareBiometricImages(registeredFacePhoto, capturedPhoto).then((result) => {
+      if (!cancelled) {
+        setBiometricMatchStatus(result);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [capturedPhoto, registeredFacePhoto]);
+
   const selectedRegEmployee = employees.find((e) => e._id === regEmpId);
   const selectedPunchEmployee = employees.find((e) => e._id === selectedEmpId) || employees[0];
   const pendingCount = employees.filter((e) => !e.isFaceEnrolled).length;
@@ -363,10 +401,11 @@ export const FacePunch = () => {
       const confidence = faceRes?.confidenceScore ?? faceRes?.data?.confidenceScore ?? 0;
       const matchResult = faceRes?.matchResult || faceRes?.data?.matchResult || (faceRes?.matched !== false ? 'MATCHED' : 'NOT_MATCHED');
       const isFaceMatched = faceRes?.matched !== false && faceRes?.data?.matched !== false &&
-        matchResult !== 'NOT_MATCHED' && matchResult !== 'NO_FACE_DETECTED' && matchResult !== 'LOW_CONFIDENCE';
+        matchResult !== 'NOT_MATCHED' && matchResult !== 'NO_FACE_DETECTED' && matchResult !== 'LOW_CONFIDENCE' &&
+        faceRes?.binaryMatch !== false;
       if (!isFaceMatched) {
         setPunchResult({ success: false, reason: faceRes?.reason || faceRes?.data?.reason || `Face biometric mismatch (${Math.round(confidence * 100)}% match below threshold).`, empName, empCode });
-        showToast('Face biometric match failed', 'error');
+        showToast(faceRes?.reason || 'Face biometric match failed', 'error');
         setSubmitting(false); loadLogs(); return;
       }
       let geoRes;
@@ -692,7 +731,26 @@ export const FacePunch = () => {
               onError={(err) => setCameraError(err)}
               label="Capture for Verification"
             />
-            {capturedPhoto && <div style={{ ...S.alertOk, marginTop: 12 }}><CheckCircle2 size={15} /> Photo captured — ready to verify.</div>}
+            {capturedPhoto && !biometricMatchStatus && (
+              <div style={{ ...S.alertOk, marginTop: 12 }}>
+                <CheckCircle2 size={15} /> Photo captured — verifying binary biometrics against registered template...
+              </div>
+            )}
+            {capturedPhoto && biometricMatchStatus && (
+              <div style={{ ...(biometricMatchStatus.match ? S.alertOk : S.alertErr), marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+                {biometricMatchStatus.match ? <CheckCircle2 size={18} color="var(--success)" style={{ flexShrink: 0 }} /> : <XCircle size={18} color="var(--danger)" style={{ flexShrink: 0 }} />}
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '0.86rem' }}>
+                    {biometricMatchStatus.match ? 'Biometric Face Match Verified' : 'Face Biometric Mismatch'}
+                  </div>
+                  <div style={{ fontSize: '0.74rem', marginTop: 1 }}>
+                    {biometricMatchStatus.match
+                      ? `Live capture matches registered template (${biometricMatchStatus.confidencePercentage}% confidence)`
+                      : `Live face does not match registered biometrics (${biometricMatchStatus.confidencePercentage}% match)`}
+                  </div>
+                </div>
+              </div>
+            )}
             {cameraError && <div style={{ ...S.alertErr, marginTop: 12 }}><XCircle size={15} /> {cameraError.error || 'Camera unavailable'}</div>}
           </div>
 
@@ -739,6 +797,32 @@ export const FacePunch = () => {
                   >
                     → Register Face Now
                   </button>
+                </div>
+              )}
+
+              {/* Registered Biometric Profile Preview */}
+              {selectedPunchEmployee?.isFaceEnrolled && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 10, background: '#f8fafc', border: '1px solid var(--border-color)' }}>
+                  {registeredFacePhoto ? (
+                    <img src={registeredFacePhoto} alt="Registered Face Template" style={{ width: 44, height: 44, borderRadius: 8, objectFit: 'cover', border: '2px solid var(--primary)', flexShrink: 0 }} />
+                  ) : (
+                    <div style={{ width: 44, height: 44, borderRadius: 8, background: 'var(--primary-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <ScanFace size={22} color="var(--primary)" />
+                    </div>
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '0.83rem', fontWeight: 600, color: 'var(--text-main)' }}>Enrolled Face Profile</div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      {loadingRegisteredFace
+                        ? 'Fetching binary template from backend...'
+                        : registeredFacePhoto
+                        ? 'Binary template loaded & synced from server'
+                        : 'Face registered in system'}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '3px 8px', borderRadius: 10, background: registeredFacePhoto ? '#dcfce7' : '#f1f5f9', color: registeredFacePhoto ? '#166534' : 'var(--text-muted)' }}>
+                    {registeredFacePhoto ? '✓ Binary Ready' : 'Enrolled'}
+                  </span>
                 </div>
               )}
 

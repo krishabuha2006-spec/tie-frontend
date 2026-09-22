@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import attendanceApi from '../../api/attendanceApi';
 import employeeApi from '../../api/employeeApi';
 import faceApi from '../../api/faceApi';
@@ -20,6 +20,7 @@ import {
   Building2,
   Compass,
   XCircle,
+  ChevronDown,
 } from 'lucide-react';
 import Table from '../../components/common/Table';
 import Modal from '../../components/common/Modal';
@@ -44,6 +45,329 @@ const getEmpCode = (emp) =>
 
 const getEmpDept = (emp) =>
   emp?.employmentInfo?.department?.name || emp?.department?.name || emp?.department || '';
+
+const toLocalInputDateTime = (dateVal, fallback = '') => {
+  if (!dateVal) return fallback;
+  const d = new Date(dateVal);
+  if (isNaN(d.getTime())) return fallback;
+  const pad = (n) => String(n).padStart(2, '0');
+  const year = d.getFullYear();
+  const month = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  const hours = pad(d.getHours());
+  const minutes = pad(d.getMinutes());
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
+const getRecordCheckTimes = (rec) => {
+  const inRaw =
+    rec?.firstCheckInTime ||
+    rec?.checkInTime ||
+    rec?.siteInTime ||
+    rec?.punches?.[0]?.checkInTime ||
+    rec?.sessions?.[0]?.checkInTime ||
+    null;
+
+  const outRaw =
+    rec?.lastCheckOutTime ||
+    rec?.checkOutTime ||
+    rec?.siteOutTime ||
+    rec?.punches?.[rec.punches?.length - 1]?.checkOutTime ||
+    rec?.sessions?.[rec.sessions?.length - 1]?.checkOutTime ||
+    null;
+
+  return { inRaw, outRaw };
+};
+
+const TimeDropdownMenu = ({ isOpen, onClose, items, selectedValue, onSelect, triggerRef }) => {
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClickOutside = (e) => {
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(e.target) &&
+        triggerRef.current &&
+        !triggerRef.current.contains(e.target)
+      ) {
+        onClose();
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen, onClose, triggerRef]);
+
+  useEffect(() => {
+    if (isOpen && menuRef.current) {
+      const selectedEl = menuRef.current.querySelector(`[data-val="${selectedValue}"]`);
+      if (selectedEl) {
+        menuRef.current.scrollTop =
+          selectedEl.offsetTop - menuRef.current.clientHeight / 2 + selectedEl.clientHeight / 2;
+      }
+    }
+  }, [isOpen, selectedValue]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div
+      ref={menuRef}
+      style={{
+        position: 'absolute',
+        top: 'calc(100% + 4px)',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        minWidth: 70,
+        backgroundColor: '#ffffff',
+        border: '1.5px solid var(--border-color, #cbd5e1)',
+        borderRadius: 8,
+        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+        zIndex: 1100,
+        maxHeight: 180,
+        overflowY: 'auto',
+        padding: '4px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 2,
+        scrollbarWidth: 'thin',
+      }}
+    >
+      {items.map((val) => {
+        const isSelected = String(val) === String(selectedValue);
+        return (
+          <div
+            key={val}
+            data-val={val}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect(val);
+              onClose();
+            }}
+            style={{
+              padding: '6px 10px',
+              fontSize: '0.88rem',
+              fontWeight: isSelected ? 700 : 500,
+              textAlign: 'center',
+              cursor: 'pointer',
+              borderRadius: 6,
+              backgroundColor: isSelected ? 'var(--primary, #2e7b85)' : 'transparent',
+              color: isSelected ? '#ffffff' : 'var(--text-main, #1e293b)',
+              transition: 'background-color 0.15s ease',
+              userSelect: 'none',
+            }}
+            onMouseEnter={(e) => {
+              if (!isSelected) {
+                e.currentTarget.style.backgroundColor = 'var(--bg-subtle, #f1f5f9)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isSelected) {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }
+            }}
+          >
+            {val}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+const SimpleTime12HPicker = ({ label, value, onChange, required = false }) => {
+  const [hourOpen, setHourOpen] = useState(false);
+  const [minuteOpen, setMinuteOpen] = useState(false);
+  const hourBtnRef = useRef(null);
+  const minuteBtnRef = useRef(null);
+
+  const parseTime = (val) => {
+    const tPart = (val && val.includes('T')) ? val.split('T')[1] : (val || '09:00');
+    const [h24, m] = tPart.split(':').map(Number);
+    const ampm = (h24 || 0) >= 12 ? 'PM' : 'AM';
+    const h12 = (h24 || 0) % 12 || 12;
+    return {
+      hour: String(h12).padStart(2, '0'),
+      minute: String(m || 0).padStart(2, '0'),
+      ampm,
+    };
+  };
+
+  const parsed = parseTime(value);
+
+  const update = (field, newVal) => {
+    const next = { ...parsed, [field]: newVal };
+    let h = parseInt(next.hour, 10) || 12;
+    if (next.ampm === 'AM' && h === 12) h = 0;
+    else if (next.ampm === 'PM' && h !== 12) h += 12;
+    const hStr = String(h).padStart(2, '0');
+    const mStr = String(parseInt(next.minute, 10) || 0).padStart(2, '0');
+    const dPart = (value && value.includes('T')) ? value.split('T')[0] : new Date().toISOString().split('T')[0];
+    onChange(`${dPart}T${hStr}:${mStr}`);
+  };
+
+  const hours = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'));
+  const minutes = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
+
+  return (
+    <div>
+      <label className="form-label" style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 6, display: 'block' }}>
+        {label} {required && <span style={{ color: '#ef4444' }}>*</span>}
+      </label>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          border: '1.5px solid var(--border-color)',
+          borderRadius: 8,
+          background: '#ffffff',
+          height: 38,
+          boxShadow: 'var(--shadow-xs)',
+          position: 'relative',
+        }}
+      >
+        {/* Hour selector */}
+        <div style={{ position: 'relative', flex: 1, height: '100%' }}>
+          <button
+            type="button"
+            ref={hourBtnRef}
+            onClick={() => {
+              setHourOpen(!hourOpen);
+              setMinuteOpen(false);
+            }}
+            style={{
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 4,
+              border: 'none',
+              background: hourOpen ? 'var(--bg-subtle, #f8fafc)' : 'transparent',
+              cursor: 'pointer',
+              fontSize: '0.92rem',
+              fontWeight: 700,
+              color: 'var(--text-main)',
+              padding: '0 4px',
+              borderTopLeftRadius: 7,
+              borderBottomLeftRadius: 7,
+            }}
+          >
+            <span>{parsed.hour}</span>
+            <ChevronDown
+              size={14}
+              style={{
+                color: 'var(--text-muted)',
+                transform: hourOpen ? 'rotate(180deg)' : 'none',
+                transition: 'transform 0.15s ease',
+              }}
+            />
+          </button>
+          <TimeDropdownMenu
+            isOpen={hourOpen}
+            onClose={() => setHourOpen(false)}
+            items={hours}
+            selectedValue={parsed.hour}
+            onSelect={(val) => update('hour', val)}
+            triggerRef={hourBtnRef}
+          />
+        </div>
+
+        <span style={{ fontWeight: 800, color: 'var(--text-muted)', userSelect: 'none' }}>:</span>
+
+        {/* Minute selector */}
+        <div style={{ position: 'relative', flex: 1, height: '100%' }}>
+          <button
+            type="button"
+            ref={minuteBtnRef}
+            onClick={() => {
+              setMinuteOpen(!minuteOpen);
+              setHourOpen(false);
+            }}
+            style={{
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 4,
+              border: 'none',
+              background: minuteOpen ? 'var(--bg-subtle, #f8fafc)' : 'transparent',
+              cursor: 'pointer',
+              fontSize: '0.92rem',
+              fontWeight: 700,
+              color: 'var(--text-main)',
+              padding: '0 4px',
+            }}
+          >
+            <span>{parsed.minute}</span>
+            <ChevronDown
+              size={14}
+              style={{
+                color: 'var(--text-muted)',
+                transform: minuteOpen ? 'rotate(180deg)' : 'none',
+                transition: 'transform 0.15s ease',
+              }}
+            />
+          </button>
+          <TimeDropdownMenu
+            isOpen={minuteOpen}
+            onClose={() => setMinuteOpen(false)}
+            items={minutes}
+            selectedValue={parsed.minute}
+            onSelect={(val) => update('minute', val)}
+            triggerRef={minuteBtnRef}
+          />
+        </div>
+
+        {/* AM / PM Toggle */}
+        <div
+          style={{
+            display: 'flex',
+            height: '100%',
+            borderLeft: '1px solid var(--border-color)',
+            borderTopRightRadius: 7,
+            borderBottomRightRadius: 7,
+            overflow: 'hidden',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => update('ampm', 'AM')}
+            style={{
+              padding: '0 12px',
+              border: 'none',
+              cursor: 'pointer',
+              fontWeight: 700,
+              fontSize: '0.78rem',
+              background: parsed.ampm === 'AM' ? 'var(--primary, #2e7b85)' : '#f8fafc',
+              color: parsed.ampm === 'AM' ? '#ffffff' : 'var(--text-muted, #64748b)',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            AM
+          </button>
+          <button
+            type="button"
+            onClick={() => update('ampm', 'PM')}
+            style={{
+              padding: '0 12px',
+              border: 'none',
+              cursor: 'pointer',
+              fontWeight: 700,
+              fontSize: '0.78rem',
+              background: parsed.ampm === 'PM' ? 'var(--primary, #2e7b85)' : '#f8fafc',
+              color: parsed.ampm === 'PM' ? '#ffffff' : 'var(--text-muted, #64748b)',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            PM
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export const DailyAttendance = () => {
   const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager } = useAuth();
@@ -317,12 +641,11 @@ export const DailyAttendance = () => {
 
   const openCorrectModal = (rec) => {
     setSelectedRecord(rec);
-    const inRaw = rec.firstCheckInTime || rec.siteInTime || rec.sessions?.[0]?.checkInTime;
-    const outRaw = rec.lastCheckOutTime || rec.siteOutTime || rec.sessions?.[rec.sessions?.length - 1]?.checkOutTime;
+    const { inRaw, outRaw } = getRecordCheckTimes(rec);
     setCorrectForm({
-      checkInTime: inRaw ? new Date(inRaw).toISOString().slice(0, 16) : `${selectedDate}T09:00`,
-      checkOutTime: outRaw ? new Date(outRaw).toISOString().slice(0, 16) : `${selectedDate}T18:00`,
-      attendanceStatus: rec.attendanceStatus || 'PRESENT',
+      checkInTime: toLocalInputDateTime(inRaw, `${selectedDate}T09:00`),
+      checkOutTime: toLocalInputDateTime(outRaw, `${selectedDate}T18:00`),
+      attendanceStatus: rec.attendanceStatus || rec.status || 'PRESENT',
       correctionRemark: '',
     });
     setCorrectModalOpen(true);
@@ -334,12 +657,27 @@ export const DailyAttendance = () => {
     setSubmittingCorrection(true);
     try {
       const tab = selectedRecord?._subType || activeTab;
+      const inIso = correctForm.checkInTime ? new Date(correctForm.checkInTime).toISOString() : undefined;
+      const outIso = correctForm.checkOutTime ? new Date(correctForm.checkOutTime).toISOString() : undefined;
+
       if (tab === 'FIELD') {
-        await attendanceApi.correctFieldAttendance(selectedRecord._id, { attendanceStatus: correctForm.attendanceStatus, correctionRemark: correctForm.correctionRemark.trim() });
+        await attendanceApi.correctFieldAttendance(selectedRecord._id, {
+          attendanceStatus: correctForm.attendanceStatus,
+          correctionRemark: correctForm.correctionRemark.trim(),
+        });
       } else if (tab === 'SITE') {
-        await attendanceApi.correctSiteAttendance(selectedRecord._id, { siteInTime: new Date(correctForm.checkInTime).toISOString(), siteOutTime: new Date(correctForm.checkOutTime).toISOString(), correctionRemark: correctForm.correctionRemark.trim() });
+        await attendanceApi.correctSiteAttendance(selectedRecord._id, {
+          siteInTime: inIso,
+          siteOutTime: outIso,
+          correctionRemark: correctForm.correctionRemark.trim(),
+        });
       } else {
-        await attendanceApi.correctOfficeAttendance(selectedRecord._id, { checkInTime: new Date(correctForm.checkInTime).toISOString(), checkOutTime: new Date(correctForm.checkOutTime).toISOString(), attendanceStatus: correctForm.attendanceStatus, correctionRemark: correctForm.correctionRemark.trim() });
+        await attendanceApi.correctOfficeAttendance(selectedRecord._id, {
+          checkInTime: inIso,
+          checkOutTime: outIso,
+          attendanceStatus: correctForm.attendanceStatus,
+          correctionRemark: correctForm.correctionRemark.trim(),
+        });
       }
       showToast('Record corrected!', 'success');
       setCorrectModalOpen(false);
@@ -379,8 +717,7 @@ export const DailyAttendance = () => {
       header: 'Date & Time',
       key: 'firstCheckInTime',
       render: (r) => {
-        const inRaw = r.firstCheckInTime || r.siteInTime || r.sessions?.[0]?.checkInTime;
-        const outRaw = r.lastCheckOutTime || r.siteOutTime || r.sessions?.[r.sessions?.length - 1]?.checkOutTime;
+        const { inRaw, outRaw } = getRecordCheckTimes(r);
         const inTime = inRaw ? new Date(inRaw).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-';
         const outTime = outRaw
           ? new Date(outRaw).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -453,18 +790,15 @@ export const DailyAttendance = () => {
         );
       },
     },
-    {
+    ...((isSuperAdmin || isHrAdmin) ? [{
       header: 'Actions',
       key: 'actions',
       render: (r) => (
         <div style={{ display: 'flex', gap: 6 }}>
-          <Button size="xs" variant="light" icon={Layers} onClick={() => { setSelectedRecord(r); setSessionModalOpen(true); }}>Sessions</Button>
-          {(isSuperAdmin || isHrAdmin) && (
-            <Button size="xs" variant="secondary" icon={Edit2} onClick={() => openCorrectModal(r)}>Correct</Button>
-          )}
+          <Button size="xs" variant="secondary" icon={Edit2} onClick={() => openCorrectModal(r)}>Correct</Button>
         </div>
       ),
-    },
+    }] : []),
   ];
 
   const totalPresent = records.filter((r) => (r.attendanceStatus || r.status || 'PRESENT') === 'PRESENT').length;
@@ -766,8 +1100,43 @@ export const DailyAttendance = () => {
           <div style={{ marginBottom: 12, fontSize: '0.84rem' }}>
             <strong>Employee:</strong> {getEmpName(selectedRecord?.employee)}
           </div>
-          <Input label="Check-In Time" type="datetime-local" value={correctForm.checkInTime} onChange={(e) => setCorrectForm({ ...correctForm, checkInTime: e.target.value })} required />
-          <Input label="Check-Out Time" type="datetime-local" value={correctForm.checkOutTime} onChange={(e) => setCorrectForm({ ...correctForm, checkOutTime: e.target.value })} required />
+          <div className="form-group" style={{ marginBottom: 12 }}>
+            <label className="form-label" style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 6 }}>
+              Attendance Date *
+            </label>
+            <input
+              type="date"
+              className="form-control"
+              value={(correctForm.checkInTime || '').split('T')[0] || selectedDate}
+              onChange={(e) => {
+                const newD = e.target.value;
+                const inTime = (correctForm.checkInTime || 'T09:00').split('T')[1] || '09:00';
+                const outTime = (correctForm.checkOutTime || 'T18:00').split('T')[1] || '18:00';
+                setCorrectForm({
+                  ...correctForm,
+                  checkInTime: `${newD}T${inTime}`,
+                  checkOutTime: `${newD}T${outTime}`,
+                });
+              }}
+              style={{ height: 38 }}
+              required
+            />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+            <SimpleTime12HPicker
+              label="Check-In Time"
+              value={correctForm.checkInTime}
+              onChange={(val) => setCorrectForm({ ...correctForm, checkInTime: val })}
+              required
+            />
+            <SimpleTime12HPicker
+              label="Check-Out Time"
+              value={correctForm.checkOutTime}
+              onChange={(val) => setCorrectForm({ ...correctForm, checkOutTime: val })}
+              required
+            />
+          </div>
           <Select
             label="Attendance Status"
             value={correctForm.attendanceStatus}
