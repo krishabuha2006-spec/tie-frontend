@@ -14,6 +14,8 @@ import {
   AlertTriangle,
   RefreshCw,
   Navigation,
+  Loader2,
+  LocateFixed,
 } from 'lucide-react';
 import Table from '../../components/common/Table';
 import Modal from '../../components/common/Modal';
@@ -42,24 +44,93 @@ export const GeoFences = () => {
   });
   const [savingSettings, setSavingSettings] = useState(false);
 
+  // Actual Device GPS State
+  const [deviceLocation, setDeviceLocation] = useState(null);
+  const [fetchingGps, setFetchingGps] = useState(false);
+  const [gpsError, setGpsError] = useState(null);
+
   const [formData, setFormData] = useState({
     name: '',
     scope: 'BRANCH',
     referenceId: '',
-    centerLatitude: 23.0225,
-    centerLongitude: 72.5714,
+    centerLatitude: '',
+    centerLongitude: '',
     radiusMeters: 100,
     isActive: true,
   });
 
   const { showToast } = useToast();
 
+  // Core function: Fetch real-time hardware / network device GPS location
+  const fetchActualLocation = (updateForm = false, showNotification = true) => {
+    if (!('geolocation' in navigator)) {
+      const errText = 'GPS Geolocation is not supported by your browser.';
+      setGpsError(errText);
+      if (showNotification) showToast(errText, 'warning');
+      return;
+    }
+
+    setFetchingGps(true);
+    setGpsError(null);
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = parseFloat(pos.coords.latitude.toFixed(6));
+        const lng = parseFloat(pos.coords.longitude.toFixed(6));
+        const acc = Math.round(pos.coords.accuracy);
+
+        const loc = { latitude: lat, longitude: lng, accuracy: acc, timestamp: new Date() };
+        setDeviceLocation(loc);
+        setFetchingGps(false);
+        setGpsError(null);
+
+        if (updateForm) {
+          setFormData((prev) => ({
+            ...prev,
+            centerLatitude: lat,
+            centerLongitude: lng,
+          }));
+        }
+
+        if (showNotification) {
+          showToast(`Live GPS detected: Lat ${lat}, Lng ${lng} (±${acc}m accuracy)`, 'success');
+        }
+      },
+      (err) => {
+        setFetchingGps(false);
+        let msg = 'Could not fetch device GPS location.';
+        if (err.code === 1) {
+          msg = 'GPS Permission Denied. Please enable location permissions in your browser.';
+        } else if (err.code === 2) {
+          msg = 'GPS Position Unavailable. Please ensure device Location/GPS is turned ON.';
+        } else if (err.code === 3) {
+          msg = 'GPS request timed out. Please click "Retry Live GPS".';
+        }
+        setGpsError(msg);
+        if (showNotification) {
+          showToast(msg, 'warning');
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0,
+      }
+    );
+  };
+
   const loadData = async () => {
     setLoading(true);
     try {
       const [fRes, bRes, pRes, sRes] = await Promise.all([
-        geoApi.getGeoFences(),
-        masterApi.getBranches(),
+        geoApi.getGeoFences().catch((err) => {
+          if (err.response?.status === 403) console.warn('Geofences: 403 Forbidden - insufficient permissions');
+          return { data: [] };
+        }),
+        masterApi.getBranches().catch((err) => {
+          if (err.response?.status === 403) console.warn('Branches: 403 Forbidden - insufficient permissions');
+          return { data: [] };
+        }),
         projectTaskApi.getProjects().catch(() => ({ data: [] })),
         geoApi.getAccuracySettings().catch(() => null),
       ]);
@@ -112,26 +183,42 @@ export const GeoFences = () => {
   useEffect(() => {
     loadData();
     loadLocationLogs();
+    // Auto-detect device GPS location on page load
+    fetchActualLocation(false, false);
   }, []);
 
   const openAddModal = () => {
+    const defaultBranch = branches[0];
+    const initialLat = deviceLocation?.latitude ?? defaultBranch?.geoFence?.latitude ?? '';
+    const initialLng = deviceLocation?.longitude ?? defaultBranch?.geoFence?.longitude ?? '';
+
     setFormData({
-      name: '',
+      name: defaultBranch ? `${defaultBranch.name} Fence` : '',
       scope: 'BRANCH',
-      referenceId: branches[0]?._id || '',
-      centerLatitude: 23.0225,
-      centerLongitude: 72.5714,
-      radiusMeters: 100,
+      referenceId: defaultBranch?._id || '',
+      centerLatitude: initialLat,
+      centerLongitude: initialLng,
+      radiusMeters: defaultBranch?.geoFence?.radiusInMeters || 100,
       isActive: true,
     });
     setModalOpen(true);
+
+    // Fetch fresh live GPS coordinates immediately to update form
+    fetchActualLocation(true, false);
   };
 
-  // Step 1: Create GeoFence (POST /api/geo/fences)
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name || !formData.referenceId) {
       showToast('Please specify a name and reference entity', 'warning');
+      return;
+    }
+
+    const lat = parseFloat(formData.centerLatitude);
+    const lng = parseFloat(formData.centerLongitude);
+    if (isNaN(lat) || isNaN(lng)) {
+      showToast('Please provide valid Latitude and Longitude GPS coordinates', 'warning');
       return;
     }
 
@@ -142,9 +229,9 @@ export const GeoFences = () => {
       reference: formData.referenceId,
       referenceId: formData.referenceId,
       referenceModel: formData.scope === 'BRANCH' ? 'Branch' : 'ProjectSite',
-      centerLatitude: parseFloat(formData.centerLatitude),
-      centerLongitude: parseFloat(formData.centerLongitude),
-      radiusMeters: parseInt(formData.radiusMeters, 10),
+      centerLatitude: lat,
+      centerLongitude: lng,
+      radiusMeters: parseInt(formData.radiusMeters, 10) || 100,
       isActive: true,
     };
 
@@ -171,21 +258,21 @@ export const GeoFences = () => {
   };
 
   const useCurrentDeviceLocation = () => {
-    if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setFormData((prev) => ({
-            ...prev,
-            centerLatitude: parseFloat(pos.coords.latitude.toFixed(6)),
-            centerLongitude: parseFloat(pos.coords.longitude.toFixed(6)),
-          }));
-          showToast('Updated coordinates from current device GPS!', 'success');
-        },
-        (err) => {
-          showToast('Could not fetch GPS: ' + err.message, 'warning');
-        },
-        { enableHighAccuracy: true }
-      );
+    fetchActualLocation(true, true);
+  };
+
+  const useBranchCoordinates = () => {
+    const selectedBranch = branches.find((b) => b._id === formData.referenceId);
+    if (selectedBranch?.geoFence?.latitude && selectedBranch?.geoFence?.longitude) {
+      setFormData((prev) => ({
+        ...prev,
+        centerLatitude: selectedBranch.geoFence.latitude,
+        centerLongitude: selectedBranch.geoFence.longitude,
+        radiusMeters: selectedBranch.geoFence.radiusInMeters || prev.radiusMeters,
+      }));
+      showToast(`Applied coordinates from ${selectedBranch.name}`, 'info');
+    } else {
+      showToast('Selected branch does not have pre-configured coordinates.', 'warning');
     }
   };
 
@@ -403,43 +490,129 @@ export const GeoFences = () => {
             )}
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-            <button
-              type="button"
-              onClick={useCurrentDeviceLocation}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: 'var(--primary)',
-                fontSize: '0.82rem',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                fontWeight: 500,
-              }}
-            >
-              <Navigation size={14} /> Detect Current Coordinates via GPS
-            </button>
+          {/* Live Device GPS Bar */}
+          <div
+            style={{
+              padding: '10px 14px',
+              borderRadius: 8,
+              backgroundColor: fetchingGps
+                ? 'rgba(42, 171, 160, 0.08)'
+                : deviceLocation
+                  ? 'rgba(16, 185, 129, 0.08)'
+                  : gpsError
+                    ? 'rgba(239, 68, 68, 0.08)'
+                    : 'var(--bg-subtle)',
+              border: `1px solid ${fetchingGps
+                  ? 'var(--primary)'
+                  : deviceLocation
+                    ? '#10b981'
+                    : gpsError
+                      ? '#ef4444'
+                      : 'var(--border-color)'
+                }`,
+              marginBottom: 16,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 10,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {fetchingGps ? (
+                <Loader2 size={16} color="var(--primary)" style={{ animation: 'spin 1s linear infinite' }} />
+              ) : deviceLocation ? (
+                <CheckCircle2 size={16} color="#10b981" />
+              ) : gpsError ? (
+                <AlertTriangle size={16} color="#ef4444" />
+              ) : (
+                <Navigation size={16} color="var(--text-muted)" />
+              )}
+              <div style={{ fontSize: '0.84rem' }}>
+                {fetchingGps ? (
+                  <span style={{ fontWeight: 600, color: 'var(--primary)' }}>
+                    Detecting real-time device GPS location...
+                  </span>
+                ) : deviceLocation ? (
+                  <div>
+                    <span style={{ fontWeight: 600, color: '#065f46' }}>Live GPS Active: </span>
+                    <span style={{ color: 'var(--text-main)', fontFamily: 'monospace' }}>
+                      {deviceLocation.latitude}, {deviceLocation.longitude}
+                    </span>{' '}
+                    <span style={{ fontSize: '0.76rem', color: '#047857' }}>
+                      (Accuracy: ±{deviceLocation.accuracy}m)
+                    </span>
+                  </div>
+                ) : gpsError ? (
+                  <span style={{ color: '#b91c1c', fontSize: '0.82rem' }}>{gpsError}</span>
+                ) : (
+                  <span style={{ color: 'var(--text-muted)' }}>Device GPS ready to detect coordinates</span>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                type="button"
+                onClick={useCurrentDeviceLocation}
+                disabled={fetchingGps}
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: 'var(--primary)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: 6,
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: fetchingGps ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  opacity: fetchingGps ? 0.7 : 1,
+                }}
+              >
+                {fetchingGps ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <LocateFixed size={13} />}
+                {deviceLocation ? 'Refresh Live GPS' : 'Fetch Actual GPS'}
+              </button>
+
+              {formData.scope === 'BRANCH' && (
+                <button
+                  type="button"
+                  onClick={useBranchCoordinates}
+                  style={{
+                    padding: '6px 10px',
+                    backgroundColor: 'transparent',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 6,
+                    fontSize: '0.78rem',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                  }}
+                  title="Use branch registered coordinates from master"
+                >
+                  Branch Master Coords
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="grid-3">
             <Input
-              label="Center Latitude"
+              label="Center Latitude (GPS)"
               type="number"
               step="any"
               value={formData.centerLatitude}
               onChange={(e) => setFormData({ ...formData, centerLatitude: e.target.value })}
-              placeholder="23.0225"
+              placeholder="e.g. 21.242073"
               required
             />
             <Input
-              label="Center Longitude"
+              label="Center Longitude (GPS)"
               type="number"
               step="any"
               value={formData.centerLongitude}
               onChange={(e) => setFormData({ ...formData, centerLongitude: e.target.value })}
-              placeholder="72.5714"
+              placeholder="e.g. 72.884184"
               required
             />
             <Input

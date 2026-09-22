@@ -3,23 +3,13 @@ import apiClient from './client';
 export const geoApi = {
   // Module 5: GeoFence Management
   getGeoFences: async (params) => {
-    try {
-      const res = await apiClient.get('/geo/geofences', { params });
-      return res.data;
-    } catch {
-      const fallback = await apiClient.get('/geo/fences', { params });
-      return fallback.data;
-    }
+    const res = await apiClient.get('/geo/geofences', { params });
+    return res.data;
   },
 
   getGeoFenceById: async (id) => {
-    try {
-      const res = await apiClient.get(`/geo/geofences/${id}`);
-      return res.data;
-    } catch {
-      const fallback = await apiClient.get(`/geo/fences/${id}`);
-      return fallback.data;
-    }
+    const res = await apiClient.get(`/geo/geofences/${id}`);
+    return res.data;
   },
 
   createGeoFence: async (data) => {
@@ -35,33 +25,18 @@ export const geoApi = {
       radiusMeters: Number(data.radiusMeters) || 100,
       isActive: data.isActive !== false,
     };
-    try {
-      const res = await apiClient.post('/geo/geofences', payload);
-      return res.data;
-    } catch {
-      const fallback = await apiClient.post('/geo/fences', payload);
-      return fallback.data;
-    }
+    const res = await apiClient.post('/geo/geofences', payload);
+    return res.data;
   },
 
   updateGeoFence: async (id, data) => {
-    try {
-      const res = await apiClient.put(`/geo/geofences/${id}`, data);
-      return res.data;
-    } catch {
-      const fallback = await apiClient.put(`/geo/fences/${id}`, data);
-      return fallback.data;
-    }
+    const res = await apiClient.put(`/geo/geofences/${id}`, data);
+    return res.data;
   },
 
   deactivateGeoFence: async (id) => {
-    try {
-      const res = await apiClient.put(`/geo/geofences/${id}/deactivate`);
-      return res.data;
-    } catch {
-      const fallback = await apiClient.put(`/geo/fences/${id}/deactivate`);
-      return fallback.data;
-    }
+    const res = await apiClient.put(`/geo/geofences/${id}/deactivate`);
+    return res.data;
   },
 
   // Module 5: Core Gate API - Resolve Employee Geo-Location (POST /geo/employees/:employeeId/resolve)
@@ -85,23 +60,13 @@ export const geoApi = {
 
   // Module 5: Location Audit Logs
   getAllLocationLogs: async (params) => {
-    try {
-      const res = await apiClient.get('/geo/location-logs', { params });
-      return res.data;
-    } catch {
-      const fallback = await apiClient.get('/geo/logs', { params });
-      return fallback.data;
-    }
+    const res = await apiClient.get('/geo/location-logs', { params });
+    return res.data;
   },
 
   getEmployeeLocationLogs: async (employeeId, params) => {
-    try {
-      const res = await apiClient.get(`/geo/employees/${employeeId}/location-logs`, { params });
-      return res.data;
-    } catch {
-      const fallback = await apiClient.get(`/geo/employees/${employeeId}/logs`, { params });
-      return fallback.data;
-    }
+    const res = await apiClient.get(`/geo/employees/${employeeId}/location-logs`, { params });
+    return res.data;
   },
 
   // Module 5: Maximum Acceptable GPS Accuracy Threshold

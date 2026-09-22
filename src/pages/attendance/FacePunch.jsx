@@ -141,6 +141,7 @@ const EmpPicker = ({ employees, value, onChange, label, getEmpName, getEmpCode, 
 export const FacePunch = () => {
   const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager } = useAuth();
   const isOrgAdmin = isSuperAdmin || isHrAdmin || isDirector || isBranchManager;
+  const [justEnrolled, setJustEnrolled] = useState(false);
   const [searchParams] = useSearchParams();
   const initialTab =
     searchParams.get('tab') === 'register' && isOrgAdmin ? 'REGISTER'
@@ -203,7 +204,10 @@ export const FacePunch = () => {
         setEmployees([selfEmp]);
         setRegEmpId(myId);
         setSelectedEmpId(myId);
-        if (!searchParams.get('tab')) setActiveTab('PUNCH');
+        // Non-admin: go to REGISTER if not enrolled, else PUNCH
+        if (!searchParams.get('tab')) {
+          setActiveTab(selfEmp.isFaceEnrolled ? 'PUNCH' : 'REGISTER');
+        }
         return;
       }
       const res = await employeeApi.getEmployees({ limit: 200 });
@@ -275,6 +279,8 @@ export const FacePunch = () => {
   const selectedPunchEmployee = employees.find((e) => e._id === selectedEmpId) || employees[0];
   const pendingCount = employees.filter((e) => !e.isFaceEnrolled).length;
   const storedCount = employees.filter((e) => e.isFaceEnrolled).length;
+  // For non-admin: check if self is enrolled
+  const selfIsEnrolled = isOrgAdmin || (selectedPunchEmployee?.isFaceEnrolled === true);
 
   const filteredRegEmps = employees.filter((emp) => {
     if (regFilter === 'PENDING' && emp.isFaceEnrolled) return false;
@@ -301,6 +307,11 @@ export const FacePunch = () => {
       setEmployees((prev) =>
         prev.map((e) => ((e._id || e.id) === regEmpId ? { ...e, isFaceEnrolled: true, faceRegistrationPending: false } : e))
       );
+      if (!isOrgAdmin) {
+        // Auto-redirect non-admin to Punch tab after successful enrollment
+        setJustEnrolled(true);
+        setTimeout(() => { setActiveTab('PUNCH'); setJustEnrolled(false); }, 1800);
+      }
       await loadEmps();
     } catch (err) { showToast(err.response?.data?.message || 'Face registration failed', 'error'); }
     finally { setRegistering(false); }
@@ -322,6 +333,10 @@ export const FacePunch = () => {
       setEmployees((prev) =>
         prev.map((e) => ((e._id || e.id) === regEmpId ? { ...e, isFaceEnrolled: true, faceRegistrationPending: false } : e))
       );
+      if (!isOrgAdmin) {
+        setJustEnrolled(true);
+        setTimeout(() => { setActiveTab('PUNCH'); setJustEnrolled(false); }, 1800);
+      }
       await loadEmps();
     } catch (err) { showToast(err.response?.data?.message || 'Face registration failed', 'error'); }
     finally { setRegistering(false); }
@@ -427,7 +442,11 @@ export const FacePunch = () => {
   ];
 
   const TABS = !isOrgAdmin
-    ? [{ key: 'PUNCH', label: 'Daily Punch', icon: UserCheck }, { key: 'LOGS', label: 'My Face Logs', icon: History }]
+    ? [
+        ...(!selfIsEnrolled ? [{ key: 'REGISTER', label: 'Register Face', icon: UserPlus }] : []),
+        ...(selfIsEnrolled ? [{ key: 'PUNCH', label: 'Daily Punch', icon: UserCheck }] : []),
+        { key: 'LOGS', label: 'My Face Logs', icon: History },
+      ]
     : [
         { key: 'REGISTER', label: 'Face Registration', icon: UserPlus, badge: pendingCount > 0 ? pendingCount : null },
         { key: 'PUNCH', label: 'Daily Punch', icon: UserCheck },
@@ -502,36 +521,36 @@ export const FacePunch = () => {
 
       {/* TAB: REGISTER */}
       {activeTab === 'REGISTER' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <div style={S.card}>
-            <div style={S.cardHeader}>
-              <div style={S.cardIconWrap('var(--primary-light)')}><Camera size={16} color="var(--primary)" /></div>
-              <div><div style={S.sectionTitle}>Live Registration Camera</div><div style={S.sectionSub}>Position employee face in frame</div></div>
-            </div>
-            {loadingEmps ? (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 220, gap: 10, color: 'var(--text-muted)' }}>
-                <Loader2 size={22} style={{ animation: 'spin 1s linear infinite' }} />
-                <span style={{ fontSize: '0.88rem' }}>Loading employee list...</span>
+        isOrgAdmin ? (
+          /* ── Admin: pick any employee & register ─────────────────── */
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div style={S.card}>
+              <div style={S.cardHeader}>
+                <div style={S.cardIconWrap('var(--primary-light)')}><Camera size={16} color="var(--primary)" /></div>
+                <div><div style={S.sectionTitle}>Live Registration Camera</div><div style={S.sectionSub}>Position employee face in frame</div></div>
               </div>
-            ) : (
-              <CameraCapture onCapture={handleAutoRegister} label="Look into camera to register" />
-            )}
-            {registering && <div style={{ ...S.alertOk, marginTop: 12 }}><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Storing face biometrics...</div>}
-            {regPhoto && !registering && !regSuccess && <div style={{ ...S.alertOk, marginTop: 12 }}><CheckCircle2 size={15} /> Photo captured successfully.</div>}
-            {regSuccess && (
-              <div style={{ ...S.resultOk, marginTop: 12 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--success)', fontWeight: 700, fontSize: '0.9rem' }}><CheckCircle2 size={17} /> Face Registered Successfully</div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>{regSuccess.empName} — {regSuccess.timestamp}</div>
-              </div>
-            )}
-          </div>
-
-          <div style={S.card}>
-            <div style={S.cardHeader}>
-              <div style={S.cardIconWrap('#f0fdf4')}><Database size={16} color="var(--success)" /></div>
-              <div><div style={S.sectionTitle}>Employee Biometric Enrollment</div><div style={S.sectionSub}>Select employee to register or re-enroll</div></div>
+              {loadingEmps ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 220, gap: 10, color: 'var(--text-muted)' }}>
+                  <Loader2 size={22} style={{ animation: 'spin 1s linear infinite' }} />
+                  <span style={{ fontSize: '0.88rem' }}>Loading employee list...</span>
+                </div>
+              ) : (
+                <CameraCapture onCapture={handleAutoRegister} label="Look into camera to register" />
+              )}
+              {registering && <div style={{ ...S.alertOk, marginTop: 12 }}><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Storing face biometrics...</div>}
+              {regPhoto && !registering && !regSuccess && <div style={{ ...S.alertOk, marginTop: 12 }}><CheckCircle2 size={15} /> Photo captured successfully.</div>}
+              {regSuccess && (
+                <div style={{ ...S.resultOk, marginTop: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--success)', fontWeight: 700, fontSize: '0.9rem' }}><CheckCircle2 size={17} /> Face Registered Successfully</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>{regSuccess.empName} — {regSuccess.timestamp}</div>
+                </div>
+              )}
             </div>
-            {isOrgAdmin && (<>
+            <div style={S.card}>
+              <div style={S.cardHeader}>
+                <div style={S.cardIconWrap('#f0fdf4')}><Database size={16} color="var(--success)" /></div>
+                <div><div style={S.sectionTitle}>Employee Biometric Enrollment</div><div style={S.sectionSub}>Select employee to register or re-enroll</div></div>
+              </div>
               <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
                 {[{ key: 'ALL', label: 'All' }, { key: 'PENDING', label: `Pending (${pendingCount})` }, { key: 'STORED', label: `Enrolled (${storedCount})` }].map((f) => (
                   <button key={f.key} type="button" onClick={() => setRegFilter(f.key)} style={S.filterBtn(regFilter === f.key)}>{f.label}</button>
@@ -550,23 +569,113 @@ export const FacePunch = () => {
                 getEmpCode={getEmpCode}
                 getEmpDept={getEmpDept}
               />
-
-            </>)}
-            {selectedRegEmployee && (
-              <div style={{ ...S.empCard, marginTop: 14 }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-main)' }}>{getEmpName(selectedRegEmployee)}</div>
-                  <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: 2 }}>{getEmpCode(selectedRegEmployee)} · {getEmpDept(selectedRegEmployee)}</div>
+              {selectedRegEmployee && (
+                <div style={{ ...S.empCard, marginTop: 14 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-main)' }}>{getEmpName(selectedRegEmployee)}</div>
+                    <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: 2 }}>{getEmpCode(selectedRegEmployee)} · {getEmpDept(selectedRegEmployee)}</div>
+                  </div>
+                  <Badge variant={selectedRegEmployee.isFaceEnrolled ? 'success' : 'warning'}>{selectedRegEmployee.isFaceEnrolled ? '✓ Enrolled' : 'Pending'}</Badge>
                 </div>
-                <Badge variant={selectedRegEmployee.isFaceEnrolled ? 'success' : 'warning'}>{selectedRegEmployee.isFaceEnrolled ? '✓ Enrolled' : 'Pending'}</Badge>
-              </div>
-            )}
-            <Button variant="primary" icon={ScanFace} loading={registering} onClick={handleRegisterFace} disabled={!regPhoto || !regEmpId}
-              style={{ width: '100%', marginTop: 18, padding: '12px', fontWeight: 600, borderRadius: 10 }}>
-              {selectedRegEmployee?.isFaceEnrolled ? 'Update / Re-Enroll Biometrics' : 'Register & Store Face'}
-            </Button>
+              )}
+              <Button variant="primary" icon={ScanFace} loading={registering} onClick={handleRegisterFace} disabled={!regPhoto || !regEmpId}
+                style={{ width: '100%', marginTop: 18, padding: '12px', fontWeight: 600, borderRadius: 10 }}>
+                {selectedRegEmployee?.isFaceEnrolled ? 'Update / Re-Enroll Biometrics' : 'Register & Store Face'}
+              </Button>
+            </div>
           </div>
-        </div>
+        ) : (
+          /* ── Non-Admin: self face registration gate ───────────────── */
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            {/* Step indicator */}
+            <div style={S.card}>
+              <div style={S.cardHeader}>
+                <div style={S.cardIconWrap('var(--primary-light)')}><Camera size={16} color="var(--primary)" /></div>
+                <div>
+                  <div style={S.sectionTitle}>Step 1 — Capture Your Face</div>
+                  <div style={S.sectionSub}>Look straight into the camera, then click capture</div>
+                </div>
+              </div>
+
+              {/* Onboarding banner */}
+              <div style={{ padding: '12px 14px', borderRadius: 10, background: 'linear-gradient(135deg,#eff6ff,#dbeafe)', border: '1px solid #bfdbfe', display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 14 }}>
+                <ScanFace size={20} color="#2563eb" style={{ flexShrink: 0, marginTop: 2 }} />
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#1e3a8a' }}>One-time Face Registration Required</div>
+                  <div style={{ fontSize: '0.78rem', color: '#3b82f6', marginTop: 3 }}>Register your face once to unlock daily attendance check-in & check-out.</div>
+                </div>
+              </div>
+
+              {loadingEmps ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 220, gap: 10, color: 'var(--text-muted)' }}>
+                  <Loader2 size={22} style={{ animation: 'spin 1s linear infinite' }} />
+                  <span style={{ fontSize: '0.88rem' }}>Loading your profile...</span>
+                </div>
+              ) : (
+                <CameraCapture onCapture={(img) => { setRegPhoto(img); setRegSuccess(null); }} label="Capture My Face" />
+              )}
+              {registering && <div style={{ ...S.alertOk, marginTop: 12 }}><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Enrolling your biometrics...</div>}
+              {regPhoto && !registering && !regSuccess && <div style={{ ...S.alertOk, marginTop: 12 }}><CheckCircle2 size={15} /> Great! Photo captured. Click "Register My Face" to save.</div>}
+              {justEnrolled && regSuccess && (
+                <div style={{ ...S.resultOk, marginTop: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--success)', fontWeight: 700, fontSize: '0.9rem' }}><CheckCircle2 size={17} /> Face Enrolled! Redirecting to Check-In...</div>
+                </div>
+              )}
+            </div>
+
+            {/* Step 2 panel */}
+            <div style={S.card}>
+              <div style={S.cardHeader}>
+                <div style={S.cardIconWrap('#f0fdf4')}><UserCheck size={16} color="var(--success)" /></div>
+                <div>
+                  <div style={S.sectionTitle}>Step 2 — Complete Enrollment</div>
+                  <div style={S.sectionSub}>Confirm & save your biometric profile</div>
+                </div>
+              </div>
+
+              {/* Self employee card */}
+              {selectedRegEmployee && (
+                <div style={{ ...S.empCard, marginBottom: 18 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-main)' }}>{getEmpName(selectedRegEmployee)}</div>
+                    <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: 2 }}>{getEmpCode(selectedRegEmployee)} · {getEmpDept(selectedRegEmployee)}</div>
+                  </div>
+                  <Badge variant={selectedRegEmployee.isFaceEnrolled ? 'success' : 'warning'}>
+                    {selectedRegEmployee.isFaceEnrolled ? '✓ Enrolled' : 'Not Enrolled'}
+                  </Badge>
+                </div>
+              )}
+
+              {/* Steps guide */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+                {[
+                  { n: '1', text: 'Face the camera directly in good lighting', done: !!regPhoto },
+                  { n: '2', text: 'Click "Capture My Face" on the left', done: !!regPhoto },
+                  { n: '3', text: 'Click "Register My Face" below to save', done: !!regSuccess },
+                  { n: '4', text: 'You will be taken to Check-In automatically', done: justEnrolled },
+                ].map((s) => (
+                  <div key={s.n} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ width: 26, height: 26, borderRadius: '50%', background: s.done ? 'var(--success)' : 'var(--primary)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.72rem', fontWeight: 700, flexShrink: 0 }}>
+                      {s.done ? '✓' : s.n}
+                    </div>
+                    <div style={{ fontSize: '0.83rem', color: s.done ? 'var(--success)' : 'var(--text-main)', fontWeight: s.done ? 600 : 400 }}>{s.text}</div>
+                  </div>
+                ))}
+              </div>
+
+              <Button
+                variant="primary"
+                icon={ScanFace}
+                loading={registering}
+                onClick={handleRegisterFace}
+                disabled={!regPhoto || !regEmpId || registering}
+                style={{ width: '100%', padding: '13px', fontWeight: 700, borderRadius: 10, fontSize: '0.95rem' }}
+              >
+                {selectedRegEmployee?.isFaceEnrolled ? 'Update / Re-Enroll Biometrics' : '🔒 Register My Face & Unlock Check-In'}
+              </Button>
+            </div>
+          </div>
+        )
       )}
 
       {/* TAB: PUNCH */}
@@ -618,7 +727,19 @@ export const FacePunch = () => {
               )}
 
               {selectedPunchEmployee && !selectedPunchEmployee.isFaceEnrolled && (
-                <div style={S.alertWarn}><AlertCircle size={15} color="#d97706" /> Biometrics not enrolled. Register face before punching.</div>
+                <div style={{ padding: '14px 16px', borderRadius: 10, background: 'linear-gradient(135deg,#fffbeb,#fef3c7)', border: '1px solid #fcd34d', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: '0.88rem', color: '#92400e' }}>
+                    <AlertCircle size={15} color="#d97706" /> Face biometrics not enrolled
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#78350f' }}>You must register your face before you can mark attendance.</div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('REGISTER')}
+                    style={{ alignSelf: 'flex-start', padding: '7px 16px', fontSize: '0.8rem', fontWeight: 700, borderRadius: 8, border: 'none', background: '#d97706', color: '#fff', cursor: 'pointer' }}
+                  >
+                    → Register Face Now
+                  </button>
+                </div>
               )}
 
               {/* Attendance Type */}
