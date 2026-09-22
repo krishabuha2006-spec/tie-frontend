@@ -1,5 +1,11 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import reportsApi from '../../api/reportsApi';
+import attendanceApi from '../../api/attendanceApi';
+import leaveHolidayApi from '../../api/leaveHolidayApi';
+import payrollApi from '../../api/payrollApi';
+import assetsLoansApi from '../../api/assetsLoansApi';
+import employeeApi from '../../api/employeeApi';
+import taskApi from '../../api/taskApi';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -128,6 +134,194 @@ export const ReportsAnalytics = () => {
   const [definitionForm, setDefinitionForm] = useState({ key: '', title: '', category: 'ATTENDANCE', description: '' });
   const [submittingDef, setSubmittingDef] = useState(false);
 
+  const fetchReportFromBackendApi = async (rKey, category, f) => {
+    // 1. Try dedicated report API endpoint first
+    try {
+      const query = {
+        from: f.startDate,
+        to: f.endDate,
+        year: Number(f.startDate?.split('-')[0]) || new Date().getFullYear(),
+      };
+      if (rKey.includes('leave-balance') || rKey.includes('balance')) {
+        delete query.from;
+        delete query.to;
+      }
+      const res = await reportsApi.getReportData(rKey, query);
+      const data = res?.data || res;
+      if (data && ((Array.isArray(data.rows) && data.rows.length > 0) || (Array.isArray(data) && data.length > 0))) {
+        return data;
+      }
+    } catch {
+      // Backend custom report key not implemented, query live module API
+    }
+
+    const cat = category?.toUpperCase() || '';
+
+    // 2. Real Backend ATTENDANCE Data
+    if (cat === 'ATTENDANCE' || rKey.includes('attendance')) {
+      try {
+        const attRes = await attendanceApi.getAllOfficeAttendance({ from: f.startDate, to: f.endDate }).catch(() =>
+          attendanceApi.getMyOfficeAttendance({ from: f.startDate, to: f.endDate })
+        );
+        const list = Array.isArray(attRes) ? attRes : attRes?.data || attRes?.attendance || [];
+        if (list.length > 0) {
+          const isLateReport = rKey.includes('late');
+          const rows = list
+            .filter((item) => !isLateReport || item.isLate || item.status === 'LATE' || item.lateMinutes > 0)
+            .map((item) => {
+              const emp = item.employee || {};
+              const empName = emp.basicInfo?.fullName || emp.name || item.employeeName || 'Employee';
+              const empCode = emp.employeeCode || emp.code || '—';
+              const dept = emp.employmentInfo?.department?.name || emp.department?.name || emp.department || '—';
+              const date = item.date ? String(item.date).substring(0, 10) : '—';
+              const punchIn = item.checkIn?.time || item.punchIn || item.firstPunch || '—';
+              const punchOut = item.checkOut?.time || item.punchOut || item.lastPunch || '—';
+              const workHrs = item.workHours != null ? `${item.workHours} hrs` : (item.effectiveHours ? `${item.effectiveHours} hrs` : '—');
+              const status = item.status || (item.isLate ? 'LATE' : 'PRESENT');
+              return [empCode, empName, dept, date, punchIn, punchOut, workHrs, status];
+            });
+          return {
+            columns: ['Employee Code', 'Employee Name', 'Department', 'Date', 'Punch In', 'Punch Out', 'Work Hours', 'Status'],
+            rows,
+            summary: { total: rows.length, period: `${f.startDate} to ${f.endDate}` },
+          };
+        }
+      } catch {}
+    }
+
+    // 3. Real Backend LEAVE Data
+    if (cat === 'LEAVE' || rKey.includes('leave')) {
+      try {
+        const leaveRes = await leaveHolidayApi.getLeaveRequests({ from: f.startDate, to: f.endDate }).catch(() =>
+          leaveHolidayApi.getMyLeaves()
+        );
+        const list = Array.isArray(leaveRes) ? leaveRes : leaveRes?.data || leaveRes?.requests || leaveRes?.leaves || [];
+        if (list.length > 0) {
+          const rows = list.map((item) => {
+            const emp = item.employee || {};
+            const empName = emp.basicInfo?.fullName || emp.name || item.employeeName || 'Employee';
+            const empCode = emp.employeeCode || emp.code || '—';
+            const leaveType = item.leaveType?.name || item.leaveType?.code || item.leaveType || 'General Leave';
+            const fromDate = item.startDate ? String(item.startDate).substring(0, 10) : (item.fromDate ? String(item.fromDate).substring(0, 10) : '—');
+            const toDate = item.endDate ? String(item.endDate).substring(0, 10) : (item.toDate ? String(item.toDate).substring(0, 10) : '—');
+            const days = item.daysCount || item.days || item.numberOfDays || 1;
+            const reason = item.reason || '—';
+            const status = item.status || 'PENDING';
+            return [empCode, empName, leaveType, fromDate, toDate, `${days} day(s)`, reason, status];
+          });
+          return {
+            columns: ['Employee Code', 'Employee Name', 'Leave Type', 'Start Date', 'End Date', 'Duration', 'Reason', 'Approval Status'],
+            rows,
+            summary: { total: rows.length, period: `${f.startDate} to ${f.endDate}` },
+          };
+        }
+      } catch {}
+    }
+
+    // 4. Real Backend PAYROLL Data
+    if (cat === 'PAYROLL' || rKey.includes('payroll')) {
+      try {
+        const payRes = await payrollApi.getPayrollRuns();
+        const list = Array.isArray(payRes) ? payRes : payRes?.data || payRes?.runs || payRes?.payrollRuns || [];
+        if (list.length > 0) {
+          const rows = list.map((item) => {
+            const month = item.month || '—';
+            const year = item.year || '—';
+            const empCount = item.totalEmployees || item.employeeCount || 0;
+            const gross = item.totalGross || item.grossPay || item.totalGrossSalary ? `₹${Number(item.totalGross || item.grossPay || item.totalGrossSalary).toLocaleString('en-IN')}` : '₹0';
+            const deductions = item.totalDeductions ? `₹${Number(item.totalDeductions).toLocaleString('en-IN')}` : '₹0';
+            const net = item.totalNet || item.netPay ? `₹${Number(item.totalNet || item.netPay).toLocaleString('en-IN')}` : '₹0';
+            const status = item.status || 'DRAFT';
+            return [`${month}/${year}`, `${item.payPeriodFrom || '—'} to ${item.payPeriodTo || '—'}`, empCount, gross, deductions, net, status];
+          });
+          return {
+            columns: ['Pay Period (M/Y)', 'Date Range', 'Employees Count', 'Total Gross Outlay', 'Statutory Deductions', 'Net Disbursed', 'Run Status'],
+            rows,
+            summary: { total: rows.length, period: `${f.startDate} to ${f.endDate}` },
+          };
+        }
+      } catch {}
+    }
+
+    // 5. Real Backend ASSETS Data
+    if (cat === 'ASSETS' || rKey.includes('asset')) {
+      try {
+        const assetRes = await assetsLoansApi.getAssets();
+        const list = Array.isArray(assetRes) ? assetRes : assetRes?.data || assetRes?.assets || [];
+        if (list.length > 0) {
+          const rows = list.map((item) => {
+            const tag = item.assetTag || item.tag || '—';
+            const name = item.name || item.title || '—';
+            const catItem = item.category || 'IT';
+            const serial = item.serialNumber || '—';
+            const condition = item.condition || 'Good';
+            const assigned = item.currentAssignment?.employee?.name || item.assignedTo?.name || item.assignedEmployee?.name || (item.status === 'AVAILABLE' ? 'Unassigned / In Stock' : 'Assigned');
+            const status = item.status || 'AVAILABLE';
+            const cost = item.purchaseCost ? `₹${Number(item.purchaseCost).toLocaleString('en-IN')}` : '—';
+            return [tag, name, catItem, serial, condition, assigned, cost, status];
+          });
+          return {
+            columns: ['Asset Tag', 'Asset Name', 'Category', 'Serial Number', 'Condition', 'Custody / Assigned', 'Purchase Cost', 'Current Status'],
+            rows,
+            summary: { total: rows.length, period: 'Current Physical Register' },
+          };
+        }
+      } catch {}
+    }
+
+    // 6. Real Backend TASKS Data
+    if (rKey.includes('task') || rKey.includes('site') || cat === 'OPERATIONS') {
+      try {
+        const taskRes = await taskApi.getTasks();
+        const list = Array.isArray(taskRes) ? taskRes : taskRes?.data || taskRes?.tasks || [];
+        if (list.length > 0) {
+          const rows = list.map((item) => {
+            const title = item.title || item.taskName || '—';
+            const assigned = item.assignedTo?.name || item.assignedTo?.basicInfo?.fullName || '—';
+            const priority = item.priority || 'MEDIUM';
+            const due = item.dueDate ? String(item.dueDate).substring(0, 10) : '—';
+            const status = item.status || 'PENDING';
+            return [title, assigned, priority, due, status];
+          });
+          return {
+            columns: ['Task Title', 'Assigned To', 'Priority', 'Due Date', 'Status'],
+            rows,
+            summary: { total: rows.length, period: `${f.startDate} to ${f.endDate}` },
+          };
+        }
+      } catch {}
+    }
+
+    // 7. Real Backend EMPLOYEES Data
+    try {
+      const empRes = await employeeApi.getEmployees({ limit: 100 });
+      const list = Array.isArray(empRes) ? empRes : empRes?.data?.employees || empRes?.data || empRes?.employees || [];
+      if (list.length > 0) {
+        const rows = list.map((item) => {
+          const code = item.employeeCode || item.code || '—';
+          const name = item.basicInfo?.fullName || item.name || `${item.firstName || ''} ${item.lastName || ''}`.trim() || 'Employee';
+          const dept = item.employmentInfo?.department?.name || item.department?.name || item.department || '—';
+          const desig = item.employmentInfo?.designation || item.designation || '—';
+          const email = item.basicInfo?.email || item.email || '—';
+          const status = item.status || 'ACTIVE';
+          return [code, name, dept, desig, email, status];
+        });
+        return {
+          columns: ['Employee Code', 'Full Name', 'Department', 'Designation', 'Official Email', 'Status'],
+          rows,
+          summary: { total: rows.length, period: 'Live Backend Employee Directory' },
+        };
+      }
+    } catch {}
+
+    // Clean Empty State - NO FAKE SEED DATA
+    return {
+      columns: ['Record Code', 'Name / Entity', 'Category', 'Period', 'Status'],
+      rows: [],
+      summary: { total: 0, period: `${f.startDate} to ${f.endDate}` },
+    };
+  };
+
   const handleSelectReport = useCallback(async (report, overrideFilters) => {
     const rKey = report?.reportKey || report?.key;
     if (!rKey) return;
@@ -136,19 +330,13 @@ export const ReportsAnalytics = () => {
     setLoadingData(true);
     const f = overrideFilters || filters;
     try {
-      const res = await reportsApi.getReportData(rKey, { from: f.startDate, to: f.endDate });
-      setReportData(res?.data || res);
+      const data = await fetchReportFromBackendApi(rKey, report?.category, f);
+      setReportData(data);
     } catch {
       setReportData({
-        columns: ['Employee', 'Department', 'Period', 'Metric', 'Status'],
-        rows: [
-          ['Krisha Patel', 'Engineering', 'Sep 2026', '98.5%', 'EXCELLENT'],
-          ['Rahul Sharma', 'Operations', 'Sep 2026', '94.2%', 'GOOD'],
-          ['Sneha Desai', 'HR', 'Sep 2026', '100%', 'OPTIMAL'],
-          ['Amit Kumar', 'Finance', 'Sep 2026', '89.3%', 'AVERAGE'],
-          ['Priya Singh', 'Design', 'Sep 2026', '96.7%', 'EXCELLENT'],
-        ],
-        summary: { total: 5, period: f.startDate + ' to ' + f.endDate },
+        columns: ['Record Code', 'Name / Entity', 'Category', 'Period', 'Status'],
+        rows: [],
+        summary: { total: 0, period: `${f.startDate} to ${f.endDate}` },
       });
     } finally {
       setLoadingData(false);

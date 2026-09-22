@@ -303,6 +303,7 @@ export const AssetsClaimsLoans = () => {
     setTargetAsset(asset);
     setAssignForm({
       employeeId: assignForm.employeeId || employees[0]?._id || employees[0]?.id || '',
+      conditionAtIssue: 'Brand new, good working condition',
       notes: 'Issued for official project duties',
     });
     setAssignModalOpen(true);
@@ -310,9 +311,18 @@ export const AssetsClaimsLoans = () => {
 
   const handleAssignAsset = async (e) => {
     e.preventDefault();
+    if (!assignForm.employeeId) {
+      showToast('Please select an employee', 'warning');
+      return;
+    }
     setSubmittingAssign(true);
     try {
-      await assetsLoansApi.assignAsset(targetAsset._id, assignForm);
+      const payload = {
+        employeeId: assignForm.employeeId,
+        conditionAtIssue: assignForm.conditionAtIssue || 'Brand new, good working condition',
+        notes: assignForm.notes || 'Issued for official project duties',
+      };
+      await assetsLoansApi.assignAsset(targetAsset._id, payload);
       showToast('Asset assigned to employee custody!', 'success');
       setAssignModalOpen(false);
       loadAssets();
@@ -1344,6 +1354,17 @@ export const AssetsClaimsLoans = () => {
               value: emp._id || emp.id,
               label: formatEmployeeOption(emp, true),
             }))}
+            required
+          />
+          <Select
+            label="Condition at Issue"
+            value={assignForm.conditionAtIssue || 'Brand new, good working condition'}
+            onChange={(e) => setAssignForm({ ...assignForm, conditionAtIssue: e.target.value })}
+            options={[
+              { value: 'Brand new, good working condition', label: 'Brand New / Pristine' },
+              { value: 'Good working condition', label: 'Good Working Condition' },
+              { value: 'Fair / Normal wear', label: 'Fair / Normal Wear & Tear' },
+            ]}
             required
           />
           <Input

@@ -37,7 +37,13 @@ export const assetsLoansApi = {
 
   // POST /assets/:assetId/assign
   assignAsset: async (assetId, data) => {
-    const res = await apiClient.post(`/assets/${assetId}/assign`, data);
+    const payload = {
+      employeeId: data.employeeId,
+      conditionAtIssue: data.conditionAtIssue || data.condition || data.notes || 'Good working condition',
+      ...(data.expectedReturnDate ? { expectedReturnDate: data.expectedReturnDate } : {}),
+      ...(data.notes ? { notes: data.notes } : {}),
+    };
+    const res = await apiClient.post(`/assets/${assetId}/assign`, payload);
     return res.data;
   },
 
