@@ -1,6 +1,5 @@
 import {
   CalendarCheck,
-  ScanFace,
   MapPin,
   FileSpreadsheet,
   FolderKanban,
@@ -9,17 +8,12 @@ import {
   Building2,
   Award,
   ShieldCheck,
-  UserCheck,
   Clock,
   Compass,
-  HardHat,
 } from 'lucide-react';
 
 export const attendanceNav = [
   { label: 'Daily Register', path: '/attendance', icon: CalendarCheck, exact: true },
-  { label: 'Office Check-In', path: '/attendance/office-checkin', icon: Building2 },
-  { label: 'Office Check-Out', path: '/attendance/office-checkout', icon: UserCheck },
-  { label: 'Face Registration & Punch', path: '/attendance/face-punch', icon: ScanFace },
   { label: 'Field Staff', path: '/attendance/field', icon: Compass },
   { label: 'Geo-Fences', path: '/attendance/geofences', icon: MapPin },
   { label: 'Timing & Grace Rules', path: '/attendance/timing-rules', icon: Clock },
