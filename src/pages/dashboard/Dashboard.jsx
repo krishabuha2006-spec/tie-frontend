@@ -56,6 +56,10 @@ export const Dashboard = () => {
     canAccessModule,
   } = useAuth();
 
+  const isOrgAdmin = isSuperAdmin || isHrAdmin || isDirector || isBranchManager;
+  const isRecruiter = isSuperAdmin || isHrAdmin || isDirector;
+  const isMasterAdmin = isSuperAdmin || isDirector;
+
   const { showToast } = useToast();
 
   const [stats, setStats] = useState({
@@ -130,9 +134,6 @@ export const Dashboard = () => {
 
       try {
         const todayStr = new Date().toISOString().split('T')[0];
-        const isOrgAdmin = isSuperAdmin || isHrAdmin || isDirector || isBranchManager;
-        const isRecruiter = isSuperAdmin || isHrAdmin || isDirector;
-        const isMasterAdmin = isSuperAdmin || isDirector;
 
         // STAGE 1: Core Daily Metrics (Employees, Attendance, Leaves)
         // Dispatched first so core numbers show up immediately

@@ -1,8 +1,11 @@
 import axios from 'axios';
 
+// Live Backend URL configured from .env
+export const LIVE_BACKEND_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'https://tie-backend-ruddy.vercel.app/api';
+
 // Relative '/api' ensures same-origin requests on both Localhost (via Vite proxy)
 // and Vercel production (via vercel.json rewrite proxy), avoiding browser CORS restrictions.
-const BASE_URL = '/api';
+const BASE_URL = typeof window !== 'undefined' ? '/api' : LIVE_BACKEND_URL;
 
 const apiClient = axios.create({
   baseURL: BASE_URL,
