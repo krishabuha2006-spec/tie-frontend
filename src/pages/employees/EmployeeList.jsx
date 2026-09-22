@@ -144,8 +144,19 @@ const DetailCard = ({ title, subtitle, icon: Icon, action, children }) => (
   </div>
 );
 
-const DetailField = ({ label, value, isMono, isBadge, badgeVariant, emptyText = 'Not Provided', icon: Icon }) => {
+const DetailField = ({ label, value, isMono, isBadge, badgeVariant, emptyText = 'Not Provided', icon: Icon, copyable }) => {
+  const [copied, setCopied] = useState(false);
   const isEmpty = value === undefined || value === null || value === '' || value === '-';
+
+  const handleCopy = (e) => {
+    e.stopPropagation();
+    if (value) {
+      navigator.clipboard.writeText(String(value));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
   return (
     <div
       style={{
@@ -190,6 +201,41 @@ const DetailField = ({ label, value, isMono, isBadge, badgeVariant, emptyText = 
           <Badge variant={badgeVariant || 'primary'} style={{ fontSize: '0.72rem', padding: '2px 7px' }}>
             {value}
           </Badge>
+        </div>
+      ) : copyable ? (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginTop: 1 }}>
+          <span
+            style={{
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              color: 'var(--text-main)',
+              fontFamily: 'monospace',
+              letterSpacing: '0.3px',
+              wordBreak: 'break-all',
+              lineHeight: 1.25,
+            }}
+            title={String(value)}
+          >
+            {value}
+          </span>
+          <button
+            type="button"
+            onClick={handleCopy}
+            title={copied ? 'Copied!' : 'Copy to clipboard'}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '2px 4px',
+              borderRadius: 4,
+              color: copied ? 'var(--success)' : 'var(--text-muted)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              flexShrink: 0,
+            }}
+          >
+            {copied ? <Check size={13} color="var(--success)" /> : <Copy size={13} />}
+          </button>
         </div>
       ) : (
         <span
@@ -2554,14 +2600,11 @@ export const EmployeeList = () => {
                     >
                       <div className="grid-3">
                         <DetailField
-                          label="Employee ID"
-                          value={currentEmployeeDetail._id}
-                          isMono
-                        />
-                        <DetailField
-                          label="Employee Code"
-                          value={currentEmployeeDetail.basicInfo?.employeeCode || currentEmployeeDetail.employeeCode}
-                          isMono
+                          label="Employee ID / Code"
+                          value={currentEmployeeDetail.basicInfo?.employeeCode || currentEmployeeDetail.employeeCode || 'N/A'}
+                          isBadge
+                          badgeVariant="primary"
+                          icon={User}
                         />
                         <DetailField
                           label="Full Name"
@@ -2569,6 +2612,12 @@ export const EmployeeList = () => {
                             currentEmployeeDetail.basicInfo?.fullName ||
                             `${currentEmployeeDetail.firstName || ''} ${currentEmployeeDetail.lastName || ''}`.trim()
                           }
+                        />
+                        <DetailField
+                          label="System Record ID"
+                          value={currentEmployeeDetail._id}
+                          isMono
+                          copyable
                         />
                         <DetailField
                           label="Gender"

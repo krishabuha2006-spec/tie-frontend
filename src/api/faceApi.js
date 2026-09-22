@@ -1,3 +1,5 @@
+import apiClient from './client';
+
 const faceStatusCache = new Map();
 
 export const faceApi = {
@@ -69,6 +71,7 @@ export const faceApi = {
 
   enrollFace: async (employeeId, faceImages) => {
     if (!employeeId || employeeId === 'undefined') throw new Error('Employee ID required for face enrollment');
+    faceStatusCache.delete(employeeId);
     const imagesArray = Array.isArray(faceImages) ? faceImages : [faceImages];
     const res = await apiClient.post(`/face/employees/${employeeId}/enroll`, {
       sampleImages: imagesArray,
@@ -80,6 +83,7 @@ export const faceApi = {
 
   reEnrollFace: async (employeeId, faceImages, notes = 'Web Biometric Re-enrollment') => {
     if (!employeeId || employeeId === 'undefined') throw new Error('Employee ID required for face re-enrollment');
+    faceStatusCache.delete(employeeId);
     const imagesArray = Array.isArray(faceImages) ? faceImages : [faceImages];
     const res = await apiClient.put(`/face/employees/${employeeId}/re-enroll`, {
       images: imagesArray,
