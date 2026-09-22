@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Background rounded square with official logo teal -->
+  <rect width="64" height="64" rx="14" fill="#2e7b85"/>
+  <!-- TIE text logo -->
+  <text x="50%" y="53%" dominant-baseline="middle" text-anchor="middle"
+        font-family="Arial, sans-serif" font-weight="900" font-size="22"
+        letter-spacing="1.5" fill="white">TIE</text>
+  <!-- Decorative top orange accent bar from logo -->
+  <rect x="42" y="14" width="12" height="4" rx="2" fill="#f5a532"/>
+  <!-- Decorative bottom green accent bar from logo -->
+  <rect x="42" y="46" width="12" height="4" rx="2" fill="#8bc54a"/>
+  <!-- Decorative underline bar -->
+  <rect x="14" y="48" width="22" height="2.5" rx="1.25" fill="rgba(255,255,255,0.7)"/>
+</svg>
