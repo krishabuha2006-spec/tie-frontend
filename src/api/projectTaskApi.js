@@ -32,31 +32,15 @@ export const projectTaskApi = {
     return res.data;
   },
 
-  // Site Tasks (Module 9 - GET & POST /projects/tasks)
+  // Site Tasks (Module 9 & 11 - GET & POST /tasks)
   getSiteTasks: async (params) => {
-    try {
-      const res = await apiClient.get('/projects/tasks', { params });
-      return res.data;
-    } catch (err) {
-      if (err.response?.status === 404) {
-        const fallback = await apiClient.get('/tasks', { params });
-        return fallback.data;
-      }
-      throw err;
-    }
+    const res = await apiClient.get('/tasks', { params });
+    return res.data;
   },
 
   createSiteTask: async (data) => {
-    try {
-      const res = await apiClient.post('/projects/tasks', data);
-      return res.data;
-    } catch (err) {
-      if (err.response?.status === 404) {
-        const fallback = await apiClient.post('/tasks', data);
-        return fallback.data;
-      }
-      throw err;
-    }
+    const res = await apiClient.post('/tasks', data);
+    return res.data;
   },
 
   // Site Activity Logs (Module 10)
@@ -109,13 +93,8 @@ export const projectTaskApi = {
 
   // Tasks (Module 9 & Module 11)
   getTasks: async (params) => {
-    try {
-      const res = await apiClient.get('/projects/tasks', { params });
-      return res.data;
-    } catch {
-      const fallback = await apiClient.get('/tasks', { params });
-      return fallback.data;
-    }
+    const res = await apiClient.get('/tasks', { params });
+    return res.data;
   },
 
   getMyTasks: async (params) => {
@@ -124,13 +103,8 @@ export const projectTaskApi = {
   },
 
   createTask: async (data) => {
-    try {
-      const res = await apiClient.post('/projects/tasks', data);
-      return res.data;
-    } catch {
-      const fallback = await apiClient.post('/tasks', data);
-      return fallback.data;
-    }
+    const res = await apiClient.post('/tasks', data);
+    return res.data;
   },
 
   updateTaskStatus: async (id, status) => {
