@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import authApi from '../api/authApi';
 import userApi from '../api/userApi';
 import masterApi from '../api/masterApi';
@@ -65,6 +65,8 @@ export const AuthProvider = ({ children }) => {
     return '';
   };
 
+  const rolesLoadedRef = useRef(false);
+
   // Fetch all system roles from backend masterApi (Super Admin only)
   const refreshRoles = useCallback(async () => {
     const savedUser = localStorage.getItem('tie_user');
@@ -77,12 +79,13 @@ export const AuthProvider = ({ children }) => {
       } catch {}
     }
     if (!userIsSA) {
-      return allRoles;
+      return [];
     }
     try {
       const res = await masterApi.getRoles();
       const list = res?.data || res?.roles || (Array.isArray(res) ? res : []);
       if (Array.isArray(list) && list.length > 0) {
+        rolesLoadedRef.current = true;
         setAllRoles(list);
         localStorage.setItem('tie_roles', JSON.stringify(list));
         return list;
@@ -90,8 +93,8 @@ export const AuthProvider = ({ children }) => {
     } catch (err) {
       console.warn('Roles fetch error (using cache if available):', err?.message || err);
     }
-    return allRoles;
-  }, [allRoles]);
+    return [];
+  }, []);
 
   // Step 2: Fetch and verify current logged-in user profile with complete roles & permissions
   const fetchUserProfile = useCallback(async () => {
@@ -111,14 +114,20 @@ export const AuthProvider = ({ children }) => {
           userData?.role?.isSuperAdmin === true ||
           userData?.isSuperAdmin === true;
 
-        // 2. Collect latest system roles ONLY for Super Admin
-        let rolesToUse = allRoles;
-        if (userIsSA) {
+        // 2. Collect latest system roles ONLY for Super Admin (once per session)
+        let rolesToUse = [];
+        try {
+          const cached = localStorage.getItem('tie_roles');
+          if (cached) rolesToUse = JSON.parse(cached);
+        } catch {}
+
+        if (userIsSA && !rolesLoadedRef.current) {
           try {
             const rolesRes = await masterApi.getRoles();
             const fetchedRoles = rolesRes?.data || rolesRes?.roles || (Array.isArray(rolesRes) ? rolesRes : null);
             if (Array.isArray(fetchedRoles) && fetchedRoles.length > 0) {
               rolesToUse = fetchedRoles;
+              rolesLoadedRef.current = true;
               setAllRoles(fetchedRoles);
               localStorage.setItem('tie_roles', JSON.stringify(fetchedRoles));
             }
@@ -182,15 +191,15 @@ export const AuthProvider = ({ children }) => {
           }
 
           if (matchedRole) {
-            const existingPerms = typeof userData.role === 'object' ? userData.role?.permissions : null;
-            userData.role = {
-              ...matchedRole,
-              ...(typeof userData.role === 'object' ? userData.role : {}),
-              permissions: matchedRole.permissions || existingPerms || {},
-            };
+            // Merge configured role permissions into user object
+            userData.role = matchedRole;
+            if (matchedRole.permissions && (!userData.permissions || Object.keys(userData.permissions).length === 0)) {
+              userData.permissions = matchedRole.permissions;
+            }
           }
         }
 
+        // 5. Cache user in state and localStorage
         setUser(userData);
         localStorage.setItem('tie_user', JSON.stringify(userData));
         return userData;
@@ -218,9 +227,9 @@ export const AuthProvider = ({ children }) => {
       }
     }
     return null;
-  }, [allRoles]);
+  }, []);
 
-  // Initialize from localStorage and verify with /users/profile (or /auth/me)
+  // Initialize from localStorage and verify with /users/profile (or /auth/me) ONCE on mount
   useEffect(() => {
     const initializeAuth = async () => {
       const token = localStorage.getItem('tie_access_token');
@@ -240,7 +249,7 @@ export const AuthProvider = ({ children }) => {
     };
 
     initializeAuth();
-  }, [fetchUserProfile]);
+  }, []);
 
   // Step 1: User Login
   const login = async (email, password) => {
@@ -680,33 +689,59 @@ export const AuthProvider = ({ children }) => {
     return user?.role?.displayName || user?.role?.name || (isAccountant ? 'Accountant' : 'Employee');
   }, [isSuperAdmin, user, isAccountant]);
 
-  const value = {
-    user,
-    loading,
-    isAuthenticated: !!user,
-    roleId,
-    userRole,
-    company: user?.company,
-    branch: user?.branch || user?.branchId,
-    isSuperAdmin,
-    isDirector,
-    isHrAdmin,
-    isBranchManager,
-    isProjectExecutive,
-    isAccountant,
-    isEmployee,
-    allRoles,
-    hasRole,
-    hasPermission,
-    canAccessModule,
-    login,
-    logout,
-    refreshSession,
-    fetchUserProfile,
-    refreshRoles,
-    updateProfile,
-    changePassword,
-  };
+  const value = useMemo(
+    () => ({
+      user,
+      loading,
+      isAuthenticated: !!user,
+      roleId,
+      userRole,
+      company: user?.company,
+      branch: user?.branch || user?.branchId,
+      isSuperAdmin,
+      isDirector,
+      isHrAdmin,
+      isBranchManager,
+      isProjectExecutive,
+      isAccountant,
+      isEmployee,
+      allRoles,
+      hasRole,
+      hasPermission,
+      canAccessModule,
+      login,
+      logout,
+      refreshSession,
+      fetchUserProfile,
+      refreshRoles,
+      updateProfile,
+      changePassword,
+    }),
+    [
+      user,
+      loading,
+      roleId,
+      userRole,
+      isSuperAdmin,
+      isDirector,
+      isHrAdmin,
+      isBranchManager,
+      isProjectExecutive,
+      isAccountant,
+      isEmployee,
+      allRoles,
+      hasRole,
+      hasPermission,
+      canAccessModule,
+      login,
+      logout,
+      refreshSession,
+      fetchUserProfile,
+      refreshRoles,
+      updateProfile,
+      changePassword,
+    ]
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

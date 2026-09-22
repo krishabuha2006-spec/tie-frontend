@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Users,
@@ -60,6 +60,11 @@ export const Dashboard = () => {
   });
   const [recentEmployees, setRecentEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const isFetchingRef = useRef(false);
+  const initialLoadedRef = useRef(false);
+  const lastFetchTimeRef = useRef(0);
 
   // Extract department and branch cleanly from user / employee object
   const userDept =
@@ -78,154 +83,168 @@ export const Dashboard = () => {
     user?.employmentInfo?.branch?.name ||
     'Head Office';
 
-  const fetchDashboardData = useCallback(async () => {
-    try {
-      setLoading(true);
-      const todayStr = new Date().toISOString().split('T')[0];
-      const isOrgAdmin = isSuperAdmin || isHrAdmin || isDirector || isBranchManager;
-      const isRecruiter = isSuperAdmin || isHrAdmin || isDirector;
-      const isMasterAdmin = isSuperAdmin || isDirector;
-
-      const calls = [
-        // 0. Employees (only if org admin and module accessible)
-        (isOrgAdmin && canAccessModule('employees'))
-          ? employeeApi.getEmployees({ limit: 5 }).catch(() => ({ data: [] }))
-          : Promise.resolve({ data: [] }),
-        // 1. Departments (only if master admin)
-        (isMasterAdmin && canAccessModule('masters'))
-          ? masterApi.getDepartments().catch(() => [])
-          : Promise.resolve([]),
-        // 2. Branches (only if org admin)
-        (isOrgAdmin && canAccessModule('masters'))
-          ? masterApi.getBranches().catch(() => [])
-          : Promise.resolve([]),
-        // 3. Companies (only if master admin)
-        (isMasterAdmin && canAccessModule('masters'))
-          ? masterApi.getCompanies().catch(() => [])
-          : Promise.resolve([]),
-        // 4. Job Openings (only if recruiter)
-        (isRecruiter && canAccessModule('recruitment'))
-          ? recruitmentApi.getJobOpenings().catch(() => [])
-          : Promise.resolve([]),
-        // 5. Candidates (only if recruiter)
-        (isRecruiter && canAccessModule('recruitment'))
-          ? recruitmentApi.getCandidates().catch(() => [])
-          : Promise.resolve([]),
-        // 6. Attendance (org admin gets org-wide, staff/accountant gets my attendance)
-        canAccessModule('attendance')
-          ? (isOrgAdmin
-              ? attendanceApi.getAllOfficeAttendance({ date: todayStr }).catch(() => attendanceApi.getMyOfficeAttendance({ date: todayStr }).catch(() => []))
-              : attendanceApi.getMyOfficeAttendance({ date: todayStr }).catch(() => []))
-          : Promise.resolve([]),
-        // 7. Leaves (org admin gets pending approvals, staff gets my leaves)
-        canAccessModule('leaves')
-          ? (isOrgAdmin
-              ? leaveHolidayApi.getPendingLeaveApprovals().catch(() => leaveHolidayApi.getMyLeaves().catch(() => []))
-              : leaveHolidayApi.getMyLeaves().catch(() => []))
-          : Promise.resolve([]),
-        // 8. Payroll
-        canAccessModule('payroll') ? payrollApi.getPayrollRuns().catch(() => []) : Promise.resolve([]),
-        // 9. Assets
-        (canAccessModule('assets-claims') || canAccessModule('assets')) ? assetsLoansApi.getAssets().catch(() => []) : Promise.resolve([]),
-        // 10. Projects
-        canAccessModule('projects') ? projectTaskApi.getProjects().catch(() => []) : Promise.resolve([]),
-        // 11. Tasks
-        canAccessModule('tasks') ? projectTaskApi.getSiteTasks().catch(() => []) : Promise.resolve([]),
-      ];
-
-      const [
-        empRes,
-        deptRes,
-        branchRes,
-        compRes,
-        jobRes,
-        candRes,
-        attRes,
-        leaveRes,
-        payrollRes,
-        assetsRes,
-        projRes,
-        taskRes,
-      ] = await Promise.allSettled(calls);
-
-      // 1. Employees data & total count
-      const empDataVal = empRes.status === 'fulfilled' ? empRes.value : {};
-      const employeesList = empDataVal?.data || empDataVal?.employees || (Array.isArray(empDataVal) ? empDataVal : []);
-      const totalEmps = empDataVal?.count ?? (empDataVal?.total || employeesList.length);
-
-      // 2. Departments
-      const deptDataVal = deptRes.status === 'fulfilled' ? deptRes.value : {};
-      const deptsList = deptDataVal?.data || deptDataVal?.departments || (Array.isArray(deptDataVal) ? deptDataVal : []);
-
-      // 3. Branches
-      const branchDataVal = branchRes.status === 'fulfilled' ? branchRes.value : {};
-      const branchesList = branchDataVal?.data || branchDataVal?.branches || (Array.isArray(branchDataVal) ? branchDataVal : []);
-
-      // 4. Companies
-      const compDataVal = compRes.status === 'fulfilled' ? compRes.value : {};
-      const compsList = compDataVal?.data || compDataVal?.companies || (Array.isArray(compDataVal) ? compDataVal : []);
-
-      // 5. Job Openings
-      const jobDataVal = jobRes.status === 'fulfilled' ? jobRes.value : {};
-      const jobsList = jobDataVal?.data || jobDataVal?.jobs || jobDataVal?.jobOpenings || (Array.isArray(jobDataVal) ? jobDataVal : []);
-      const openJobsCount = jobsList.filter((j) => !j.status || j.status === 'OPEN' || j.status === 'ACTIVE').length;
-
-      // 6. Candidates
-      const candDataVal = candRes.status === 'fulfilled' ? candRes.value : {};
-      const candsList = candDataVal?.data || candDataVal?.candidates || (Array.isArray(candDataVal) ? candDataVal : []);
-
-      // 7. Today's Attendance
-      const attDataVal = attRes.status === 'fulfilled' ? attRes.value : {};
-      const todayAttList = attDataVal?.data || (Array.isArray(attDataVal) ? attDataVal : []);
-
-      // 8. Pending Leaves
-      const leaveDataVal = leaveRes.status === 'fulfilled' ? leaveRes.value : {};
-      const leavesList = leaveDataVal?.data || leaveDataVal?.leaves || (Array.isArray(leaveDataVal) ? leaveDataVal : []);
-
-      // 9. Payroll Runs
-      const payrollDataVal = payrollRes.status === 'fulfilled' ? payrollRes.value : {};
-      const payrollList = payrollDataVal?.data || payrollDataVal?.runs || (Array.isArray(payrollDataVal) ? payrollDataVal : []);
-
-      // 10. Assets
-      const assetsDataVal = assetsRes.status === 'fulfilled' ? assetsRes.value : {};
-      const assetsList = assetsDataVal?.data || assetsDataVal?.assets || (Array.isArray(assetsDataVal) ? assetsDataVal : []);
-
-      // 11. Projects
-      const projDataVal = projRes.status === 'fulfilled' ? projRes.value : {};
-      const projList = projDataVal?.data || projDataVal?.projects || (Array.isArray(projDataVal) ? projDataVal : []);
-
-      // 12. Tasks
-      const taskDataVal = taskRes.status === 'fulfilled' ? taskRes.value : {};
-      const tasksList = taskDataVal?.data || taskDataVal?.tasks || (Array.isArray(taskDataVal) ? taskDataVal : []);
-
-      setStats({
-        employees: totalEmps,
-        departments: deptsList.length,
-        branches: branchesList.length,
-        companies: compsList.length,
-        openJobs: openJobsCount,
-        candidates: candsList.length,
-        todayAttendance: todayAttList.length,
-        pendingLeaves: leavesList.length,
-        payrollRuns: payrollList.length,
-        assets: assetsList.length,
-        projects: projList.length,
-        tasks: tasksList.length,
-      });
-
-      if (canAccessModule('employees')) {
-        setRecentEmployees(employeesList.slice(0, 5));
+  const fetchDashboardData = useCallback(
+    async (isManual = false) => {
+      const now = Date.now();
+      // Throttle automatic refreshes to at least 10 seconds
+      if (!isManual && now - lastFetchTimeRef.current < 10000) {
+        return;
       }
-    } catch (err) {
-      console.error('Error loading dashboard stats:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [canAccessModule]);
+      if (isFetchingRef.current) return;
 
+      isFetchingRef.current = true;
+      lastFetchTimeRef.current = now;
+
+      if (isManual) {
+        setIsRefreshing(true);
+      } else if (!initialLoadedRef.current) {
+        setLoading(true);
+      }
+
+      try {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const isOrgAdmin = isSuperAdmin || isHrAdmin || isDirector || isBranchManager;
+        const isRecruiter = isSuperAdmin || isHrAdmin || isDirector;
+        const isMasterAdmin = isSuperAdmin || isDirector;
+
+        // STAGE 1: Core Daily Metrics (Employees, Attendance, Leaves)
+        // Dispatched first so core numbers show up immediately
+        const stage1Calls = [
+          isOrgAdmin && canAccessModule('employees')
+            ? employeeApi.getEmployees({ limit: 5 }).catch(() => ({ data: [] }))
+            : Promise.resolve({ data: [] }),
+          canAccessModule('attendance')
+            ? isOrgAdmin
+              ? attendanceApi.getAllOfficeAttendance({ date: todayStr }).catch(() => attendanceApi.getMyOfficeAttendance({ date: todayStr }).catch(() => []))
+              : attendanceApi.getMyOfficeAttendance({ date: todayStr }).catch(() => [])
+            : Promise.resolve([]),
+          canAccessModule('leaves')
+            ? isOrgAdmin
+              ? leaveHolidayApi.getPendingLeaveApprovals().catch(() => leaveHolidayApi.getMyLeaves().catch(() => []))
+              : leaveHolidayApi.getMyLeaves().catch(() => [])
+            : Promise.resolve([]),
+        ];
+
+        const [empRes, attRes, leaveRes] = await Promise.allSettled(stage1Calls);
+
+        const empDataVal = empRes.status === 'fulfilled' ? empRes.value : {};
+        const employeesList = empDataVal?.data || empDataVal?.employees || (Array.isArray(empDataVal) ? empDataVal : []);
+        const totalEmps = empDataVal?.count ?? (empDataVal?.total || employeesList.length);
+
+        const attDataVal = attRes.status === 'fulfilled' ? attRes.value : {};
+        const todayAttList = attDataVal?.data || (Array.isArray(attDataVal) ? attDataVal : []);
+
+        const leaveDataVal = leaveRes.status === 'fulfilled' ? leaveRes.value : {};
+        const leavesList = leaveDataVal?.data || leaveDataVal?.leaves || (Array.isArray(leaveDataVal) ? leaveDataVal : []);
+
+        setStats((prev) => ({
+          ...prev,
+          employees: totalEmps,
+          todayAttendance: todayAttList.length,
+          pendingLeaves: leavesList.length,
+        }));
+
+        if (canAccessModule('employees')) {
+          setRecentEmployees(employeesList.slice(0, 5));
+        }
+
+        // Show UI immediately once core stats are loaded
+        if (!initialLoadedRef.current) {
+          initialLoadedRef.current = true;
+          setLoading(false);
+        }
+
+        // STAGE 2: Operations & Assets (Tasks, Projects, Assets)
+        // Dispatched next in small batch to avoid flooding server
+        const stage2Calls = [
+          canAccessModule('tasks') ? projectTaskApi.getSiteTasks().catch(() => []) : Promise.resolve([]),
+          canAccessModule('projects') ? projectTaskApi.getProjects().catch(() => []) : Promise.resolve([]),
+          canAccessModule('assets-claims') || canAccessModule('assets')
+            ? assetsLoansApi.getAssets().catch(() => [])
+            : Promise.resolve([]),
+        ];
+
+        const [taskRes, projRes, assetsRes] = await Promise.allSettled(stage2Calls);
+
+        const taskDataVal = taskRes.status === 'fulfilled' ? taskRes.value : {};
+        const tasksList = taskDataVal?.data || taskDataVal?.tasks || (Array.isArray(taskDataVal) ? taskDataVal : []);
+
+        const projDataVal = projRes.status === 'fulfilled' ? projRes.value : {};
+        const projList = projDataVal?.data || projDataVal?.projects || (Array.isArray(projDataVal) ? projDataVal : []);
+
+        const assetsDataVal = assetsRes.status === 'fulfilled' ? assetsRes.value : {};
+        const assetsList = assetsDataVal?.data || assetsDataVal?.assets || (Array.isArray(assetsDataVal) ? assetsDataVal : []);
+
+        setStats((prev) => ({
+          ...prev,
+          tasks: tasksList.length,
+          projects: projList.length,
+          assets: assetsList.length,
+        }));
+
+        // STAGE 3: Administration & Recruitment (Only if authorized)
+        const stage3Calls = [
+          isRecruiter && canAccessModule('recruitment')
+            ? recruitmentApi.getJobOpenings().catch(() => [])
+            : Promise.resolve([]),
+          isRecruiter && canAccessModule('recruitment')
+            ? recruitmentApi.getCandidates().catch(() => [])
+            : Promise.resolve([]),
+          canAccessModule('payroll') ? payrollApi.getPayrollRuns().catch(() => []) : Promise.resolve([]),
+          isMasterAdmin && canAccessModule('masters') ? masterApi.getDepartments().catch(() => []) : Promise.resolve([]),
+          isOrgAdmin && canAccessModule('masters') ? masterApi.getBranches().catch(() => []) : Promise.resolve([]),
+          isMasterAdmin && canAccessModule('masters') ? masterApi.getCompanies().catch(() => []) : Promise.resolve([]),
+        ];
+
+        const [jobRes, candRes, payrollRes, deptRes, branchRes, compRes] = await Promise.allSettled(stage3Calls);
+
+        const jobDataVal = jobRes.status === 'fulfilled' ? jobRes.value : {};
+        const jobsList =
+          jobDataVal?.data || jobDataVal?.jobs || jobDataVal?.jobOpenings || (Array.isArray(jobDataVal) ? jobDataVal : []);
+        const openJobsCount = jobsList.filter((j) => !j.status || j.status === 'OPEN' || j.status === 'ACTIVE').length;
+
+        const candDataVal = candRes.status === 'fulfilled' ? candRes.value : {};
+        const candsList = candDataVal?.data || candDataVal?.candidates || (Array.isArray(candDataVal) ? candDataVal : []);
+
+        const payrollDataVal = payrollRes.status === 'fulfilled' ? payrollRes.value : {};
+        const payrollList = payrollDataVal?.data || payrollDataVal?.runs || (Array.isArray(payrollDataVal) ? payrollDataVal : []);
+
+        const deptDataVal = deptRes.status === 'fulfilled' ? deptRes.value : {};
+        const deptsList = deptDataVal?.data || deptDataVal?.departments || (Array.isArray(deptDataVal) ? deptDataVal : []);
+
+        const branchDataVal = branchRes.status === 'fulfilled' ? branchRes.value : {};
+        const branchesList = branchDataVal?.data || branchDataVal?.branches || (Array.isArray(branchDataVal) ? branchDataVal : []);
+
+        const compDataVal = compRes.status === 'fulfilled' ? compRes.value : {};
+        const compsList = compDataVal?.data || compDataVal?.companies || (Array.isArray(compDataVal) ? compDataVal : []);
+
+        setStats((prev) => ({
+          ...prev,
+          openJobs: openJobsCount,
+          candidates: candsList.length,
+          payrollRuns: payrollList.length,
+          departments: deptsList.length,
+          branches: branchesList.length,
+          companies: compsList.length,
+        }));
+      } catch (err) {
+        console.error('Error loading dashboard stats:', err);
+      } finally {
+        isFetchingRef.current = false;
+        initialLoadedRef.current = true;
+        setLoading(false);
+        setIsRefreshing(false);
+      }
+    },
+    [isSuperAdmin, isHrAdmin, isDirector, isBranchManager, canAccessModule]
+  );
+
+  // Trigger fetch once when user profile is loaded
   useEffect(() => {
-    fetchDashboardData();
-  }, [fetchDashboardData]);
+    if (user?._id && !initialLoadedRef.current) {
+      fetchDashboardData();
+    }
+  }, [user?._id, fetchDashboardData]);
 
   // Dynamically assemble authorized modules list for RBAC summary
   const accessibleModulesList = [];
@@ -483,10 +502,32 @@ export const Dashboard = () => {
           </h1>
           <Badge variant="primary">{userRole || 'Employee'}</Badge>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-          <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{userDept}</span>
-          <span>•</span>
-          <span>{userBranch}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+            <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{userDept}</span>
+            <span>•</span>
+            <span>{userBranch}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => fetchDashboardData(true)}
+            disabled={isRefreshing}
+            className="btn btn-light btn-sm"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '4px 10px',
+              fontSize: '0.78rem',
+              fontWeight: 500,
+              cursor: isRefreshing ? 'not-allowed' : 'pointer',
+              opacity: isRefreshing ? 0.7 : 1,
+            }}
+            title="Refresh dashboard stats"
+          >
+            <RefreshCw size={13} style={{ animation: isRefreshing ? 'spin 1s linear infinite' : 'none' }} />
+            <span>{isRefreshing ? 'Refreshing...' : 'Refresh'}</span>
+          </button>
         </div>
       </div>
 
