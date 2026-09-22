@@ -1249,7 +1249,14 @@ export const EmployeeList = () => {
 
       setEnrollModalOpen(false);
     } catch (err) {
-      showToast(err.response?.data?.message || 'Face enrollment failed. Ensure face is clearly centered.', 'error');
+      if (err.response?.status === 403) {
+        showToast(
+          err.response?.data?.message || 'Access Denied: Only Super Admin / HR Admin can enroll employee faces. Please log in with an admin account.',
+          'error'
+        );
+      } else {
+        showToast(err.response?.data?.message || 'Face enrollment failed. Ensure face is clearly centered.', 'error');
+      }
     } finally {
       setEnrolling(false);
     }
