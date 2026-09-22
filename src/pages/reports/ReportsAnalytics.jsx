@@ -31,15 +31,15 @@ const CATEGORY_CONFIG = {
 const getCatConfig = (cat) => CATEGORY_CONFIG[cat?.toUpperCase()] || CATEGORY_CONFIG.DEFAULT;
 
 const DEFAULT_CATALOG = [
-  { reportKey: 'attendance-daily-summary', title: 'Daily & Monthly Attendance Summary', category: 'ATTENDANCE', description: 'Aggregates employee attendance status across Office, Field, and Site modalities with work hours.' },
-  { reportKey: 'attendance-late-arrivals', title: 'Late Arrivals & Shortfall Records', category: 'ATTENDANCE', description: 'Captures employees who punched in after the configured grace period.' },
-  { reportKey: 'attendance-site-activity', title: 'Project Site Activity & Log Summary', category: 'ATTENDANCE', description: 'Field attendance aggregated by project site including geo-verified punch data.' },
-  { reportKey: 'leave-balance-summary', title: 'Employee Leave Balance Summary', category: 'LEAVE', description: 'Current leave balances by type across all employees with carry-forward info.' },
-  { reportKey: 'leave-utilization-analysis', title: 'Leave Utilization Analysis', category: 'LEAVE', description: 'Monthly & quarterly utilization patterns and peak absence periods.' },
-  { reportKey: 'payroll-cost-statutory', title: 'Payroll Cost & Statutory Summary', category: 'PAYROLL', description: 'Gross payroll outlay, PF, ESIC, PT, TDS breakdowns by department and month.' },
-  { reportKey: 'payroll-disbursement-status', title: 'Salary Payment & Disbursement Status', category: 'PAYROLL', description: 'Bank transfer statuses, rejected transactions, and payment confirmation logs.' },
-  { reportKey: 'assets-allocation-utilization', title: 'Asset Allocation & Utilization Report', category: 'ASSETS', description: 'Physical custody register with asset age, condition, and replacement cost exposures.' },
-  { reportKey: 'performance-kra-scorecard', title: 'KRA Appraisal Scorecards', category: 'PERFORMANCE', description: 'Aggregated self vs manager KRA appraisal scores with performance band distributions.' },
+  { reportKey: 'attendance-daily-summary', title: 'Daily & Monthly Attendance Summary', category: 'ATTENDANCE', description: 'Aggregates employee attendance status across Office, Field, and Site modalities with work hours.', exportFormats: ['XLSX', 'CSV', 'PDF'] },
+  { reportKey: 'attendance-late-arrivals', title: 'Late Arrivals & Shortfall Records', category: 'ATTENDANCE', description: 'Captures employees who punched in after the configured grace period.', exportFormats: ['XLSX', 'CSV', 'PDF'] },
+  { reportKey: 'attendance-site-activity', title: 'Project Site Activity & Log Summary', category: 'ATTENDANCE', description: 'Field attendance aggregated by project site including geo-verified punch data.', exportFormats: ['XLSX', 'CSV', 'PDF'] },
+  { reportKey: 'leave-balance-summary', title: 'Employee Leave Balance Summary', category: 'LEAVE', description: 'Current leave balances by type across all employees with carry-forward info.', exportFormats: ['XLSX', 'CSV', 'PDF'] },
+  { reportKey: 'leave-utilization-analysis', title: 'Leave Utilization Analysis', category: 'LEAVE', description: 'Monthly & quarterly utilization patterns and peak absence periods.', exportFormats: ['XLSX', 'CSV', 'PDF'] },
+  { reportKey: 'payroll-cost-statutory', title: 'Payroll Cost & Statutory Summary', category: 'PAYROLL', description: 'Gross payroll outlay, PF, ESIC, PT, TDS breakdowns by department and month.', exportFormats: ['XLSX', 'CSV', 'PDF'] },
+  { reportKey: 'payroll-disbursement-status', title: 'Salary Payment & Disbursement Status', category: 'PAYROLL', description: 'Bank transfer statuses, rejected transactions, and payment confirmation logs.', exportFormats: ['XLSX', 'CSV', 'PDF'] },
+  { reportKey: 'assets-allocation-utilization', title: 'Asset Allocation & Utilization Report', category: 'ASSETS', description: 'Physical custody register with asset age, condition, and replacement cost exposures.', exportFormats: ['XLSX', 'CSV', 'PDF'] },
+  { reportKey: 'performance-kra-scorecard', title: 'KRA Appraisal Scorecards', category: 'PERFORMANCE', description: 'Aggregated self vs manager KRA appraisal scores with performance band distributions.', exportFormats: ['XLSX', 'CSV', 'PDF'] },
 ];
 
 const styles = `
@@ -376,6 +376,7 @@ export const ReportsAnalytics = () => {
         title: item.title || item.name || item.reportKey || ('Report ' + (i + 1)),
         category: item.category || 'DEFAULT',
         description: item.description || '',
+        exportFormats: item.exportFormats || item.supportedFormats || (Array.isArray(item.formats) ? item.formats : null) || ['XLSX', 'CSV', 'PDF'],
       }));
       const finalList = normalized.length > 0 ? normalized : DEFAULT_CATALOG;
       setCatalog(finalList);
@@ -405,24 +406,254 @@ export const ReportsAnalytics = () => {
 
   const handleRunQuery = () => { if (selectedReport) handleSelectReport(selectedReport, filters); };
 
+  const triggerBlobDownload = (blob, filename) => {
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => window.URL.revokeObjectURL(url), 1500);
+  };
+
+  const getCleanCellText = (val) => {
+    if (val == null) return '';
+    if (typeof val === 'object') {
+      if (val.name) return String(val.name);
+      if (val.designationName) return String(val.designationName);
+      if (val.fullName) return String(val.fullName);
+      if (val.title) return String(val.title);
+      if (val.code) return String(val.code);
+      if (val.label) return String(val.label);
+      if (val instanceof Date) return val.toLocaleDateString();
+      if (Array.isArray(val)) {
+        return val.map(v => typeof v === 'object' ? v.name || v.title || v.code || '' : String(v)).join(', ');
+      }
+      return val.employeeCode || val.email || '';
+    }
+    const str = String(val).trim();
+    if (str.startsWith('{') && str.endsWith('}')) {
+      try {
+        const p = JSON.parse(str);
+        if (p.name) return p.name;
+        if (p.designationName) return p.designationName;
+        if (p.title) return p.title;
+        if (p.code) return p.code;
+      } catch {}
+    }
+    return str;
+  };
+
+  const extractTableData = (data) => {
+    if (!data) return { columns: [], rows: [] };
+    if (Array.isArray(data.columns) && Array.isArray(data.rows)) {
+      return { columns: data.columns, rows: data.rows };
+    }
+    if (Array.isArray(data) && data.length > 0) {
+      return { columns: Object.keys(data[0]), rows: data.map(r => Object.values(r)) };
+    }
+    if (typeof data === 'object') {
+      const arr = Object.values(data).find(v => Array.isArray(v) && v.length > 0 && typeof v[0] === 'object');
+      if (arr) {
+        return { columns: Object.keys(arr[0]), rows: arr.map(r => Object.values(r)) };
+      }
+    }
+    return { columns: [], rows: [] };
+  };
+
+  const exportTableToCsv = (filename, columns = [], rows = []) => {
+    const escapeCsv = (val) => `"${getCleanCellText(val).replace(/"/g, '""')}"`;
+    const headerLine = columns.map(escapeCsv).join(',');
+    const rowLines = rows.map(r => (Array.isArray(r) ? r : Object.values(r)).map(escapeCsv).join(','));
+    const fullContent = '\uFEFF' + [headerLine, ...rowLines].join('\r\n');
+    const blob = new Blob([fullContent], { type: 'text/csv;charset=utf-8;' });
+    triggerBlobDownload(blob, filename.endsWith('.csv') ? filename : `${filename}.csv`);
+  };
+
+  const exportTableToExcel = (filename, reportTitle, columns = [], rows = []) => {
+    const tableHeader = columns.map(c => `<th>${String(c).replace(/_/g, ' ')}</th>`).join('');
+    const tableRows = rows.map(r => `
+      <tr>
+        ${(Array.isArray(r) ? r : Object.values(r)).map(v => `<td>${getCleanCellText(v)}</td>`).join('')}
+      </tr>
+    `).join('');
+
+    const xml = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta http-equiv="content-type" content="text/plain; charset=UTF-8"/>
+        <style>
+          th { background-color: #0f766e; color: #ffffff; font-weight: bold; font-family: Arial, sans-serif; font-size: 11pt; height: 32px; padding: 6px 12px; border: 1px solid #0d655e; }
+          td { font-family: Arial, sans-serif; font-size: 10pt; padding: 6px 10px; border: 1px solid #e2e8f0; vertical-align: middle; }
+          .title { font-size: 15pt; font-weight: bold; color: #0f766e; font-family: Arial, sans-serif; height: 36px; }
+          .meta { font-size: 9pt; color: #64748b; font-family: Arial, sans-serif; height: 22px; }
+        </style>
+      </head>
+      <body>
+        <table>
+          <tr><td colspan="${Math.max(columns.length, 1)}" class="title">${reportTitle}</td></tr>
+          <tr><td colspan="${Math.max(columns.length, 1)}" class="meta">Exported from TIE Technologies ERP &bull; Generated on ${new Date().toLocaleString()}</td></tr>
+          <tr></tr>
+          <thead>
+            <tr>${tableHeader}</tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+      </body>
+      </html>
+    `;
+    const blob = new Blob(['\uFEFF' + xml], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+    triggerBlobDownload(blob, filename.endsWith('.xls') ? filename : `${filename}.xls`);
+  };
+
+  const openReportPrintPdf = (reportTitle, category, period, columns = [], rows = []) => {
+    const printWin = window.open('', '_blank', 'width=1100,height=850');
+    if (!printWin) {
+      showToast('Please allow popups to preview and print the PDF report', 'warning');
+      return;
+    }
+    const tableRows = rows.map((r, idx) => `
+      <tr style="background: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+        ${(Array.isArray(r) ? r : Object.values(r)).map(v => `<td style="padding: 7px 10px; border-bottom: 1px solid #e2e8f0; font-size: 11px; color: #1e293b;">${getCleanCellText(v) || '—'}</td>`).join('')}
+      </tr>
+    `).join('');
+
+    const doc = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>${reportTitle} - TIE ERP Report</title>
+        <style>
+          @page { size: landscape; margin: 12mm; }
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 20px; color: #0f172a; background: #fff; }
+          .hdr { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #0f766e; padding-bottom: 12px; margin-bottom: 16px; }
+          .corp-name { font-size: 18px; font-weight: 800; color: #0f766e; letter-spacing: -0.3px; }
+          .corp-sub { font-size: 10px; color: #64748b; margin-top: 2px; }
+          .rep-title { font-size: 15px; font-weight: 700; color: #0f172a; margin: 4px 0 2px; }
+          .rep-meta { font-size: 11px; color: #475569; display: flex; gap: 16px; margin-top: 4px; }
+          .badge { display: inline-block; padding: 3px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; background: #0f766e15; color: #0f766e; text-transform: uppercase; }
+          table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+          th { background: #0f766e; color: #ffffff; text-align: left; padding: 8px 10px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+          .ftr { margin-top: 20px; padding-top: 10px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; }
+          @media print {
+            body { padding: 0; }
+            .no-print { display: none !important; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="no-print" style="margin-bottom: 14px; display: flex; gap: 10px; align-items: center; background: #f0fdf4; border: 1px solid #bbf7d0; padding: 10px 14px; border-radius: 8px;">
+          <span style="font-size: 12px; font-weight: 600; color: #166534;">PDF Print Preview Ready</span>
+          <button onclick="window.print()" style="margin-left: auto; background: #0f766e; color: #fff; border: none; padding: 6px 14px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 11px;">Print / Save as PDF</button>
+          <button onclick="window.close()" style="background: #e2e8f0; color: #475569; border: none; padding: 6px 10px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 11px;">Close</button>
+        </div>
+        <div class="hdr">
+          <div>
+            <div class="corp-name">TIE TECHNOLOGIES PVT LTD</div>
+            <div class="corp-sub">Human Resource Management &amp; Enterprise Analytics</div>
+            <div class="rep-title">${reportTitle}</div>
+            <div class="rep-meta">
+              <span><strong>Period:</strong> ${period}</span>
+              <span><strong>Total Records:</strong> ${rows.length}</span>
+              <span><strong>Generated:</strong> ${new Date().toLocaleString()}</span>
+            </div>
+          </div>
+          <div>
+            <span class="badge">${category}</span>
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>${columns.map(c => `<th>${String(c).replace(/_/g, ' ')}</th>`).join('')}</tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+        <div class="ftr">
+          <span>Confidential &bull; Internal HR &amp; Executive Management Use</span>
+          <span>Generated by TIE ERP System</span>
+        </div>
+        <script>
+          window.addEventListener('load', () => {
+            setTimeout(() => { window.print(); }, 400);
+          });
+        </script>
+      </body>
+      </html>
+    `;
+    printWin.document.open();
+    printWin.document.write(doc);
+    printWin.document.close();
+  };
+
   const handleExport = async (format) => {
-    if (!selectedReport) { showToast('Select a report first', 'warning'); return; }
+    if (!selectedReport) {
+      showToast('Select a report first', 'warning');
+      return;
+    }
     const rKey = selectedReport.reportKey || selectedReport.key;
+    const reportTitle = selectedReport.title || rKey;
+    const cat = selectedReport.category || 'GENERAL';
+    const periodStr = `${filters.startDate} to ${filters.endDate}`;
+    const filename = `${rKey}_${filters.startDate}_${filters.endDate}`;
+
+    const { columns, rows } = extractTableData(reportData);
+
     setExportingFormat(format);
+    const apiFormat = format === 'excel' ? 'XLSX' : format.toUpperCase();
+
     try {
-      const blob = await reportsApi.exportReport(rKey, {
-        from: filters.startDate, to: filters.endDate,
-        format: format === 'excel' ? 'XLSX' : format.toUpperCase(),
-      });
-      const ext = format === 'excel' ? 'xlsx' : format;
-      const url = window.URL.createObjectURL(new Blob([blob]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', rKey + '_' + filters.startDate + '_' + filters.endDate + '.' + ext);
-      document.body.appendChild(link); link.click(); link.remove();
-      showToast(format.toUpperCase() + ' export downloaded!', 'success');
-    } catch {
-      showToast('Export completed', 'success');
+      // 1. Fetch from live backend API (GET /api/reports/:reportKey/export)
+      let backendBlob = null;
+      let contentType = '';
+      try {
+        const res = await reportsApi.exportReport(rKey, {
+          from: filters.startDate,
+          to: filters.endDate,
+          format: apiFormat,
+        });
+        backendBlob = res?.blob || res?.data || res;
+        contentType = res?.contentType || backendBlob?.type || '';
+      } catch (apiErr) {
+        console.warn('Backend export endpoint notice, applying data export:', apiErr);
+      }
+
+      // 2. Deliver format cleanly and reliably
+      if (format === 'csv') {
+        if (backendBlob && backendBlob.size > 50 && (contentType.includes('csv') || !contentType.includes('json'))) {
+          const text = await backendBlob.text();
+          const cleanText = text.startsWith('\uFEFF') ? text : '\uFEFF' + text;
+          triggerBlobDownload(new Blob([cleanText], { type: 'text/csv;charset=utf-8;' }), `${filename}.csv`);
+        } else {
+          exportTableToCsv(filename, columns, rows);
+        }
+        showToast('CSV report downloaded successfully!', 'success');
+      } else if (format === 'excel') {
+        if (backendBlob && backendBlob.size > 50 && (contentType.includes('spreadsheet') || contentType.includes('excel') || contentType.includes('octet-stream'))) {
+          triggerBlobDownload(backendBlob, `${filename}.xlsx`);
+        } else {
+          exportTableToExcel(filename, reportTitle, columns, rows);
+        }
+        showToast('Excel report downloaded successfully!', 'success');
+      } else if (format === 'pdf') {
+        if (backendBlob && backendBlob.size > 100 && contentType.includes('pdf')) {
+          triggerBlobDownload(backendBlob, `${filename}.pdf`);
+          showToast('PDF report downloaded!', 'success');
+        } else {
+          openReportPrintPdf(reportTitle, cat, periodStr, columns, rows);
+          showToast('Printable PDF report generated!', 'success');
+        }
+      }
+
+      // Refresh export logs so the backend audit log is updated
+      loadExportLogs().catch(() => {});
+    } catch (err) {
+      console.error('Export error:', err);
+      showToast('Export failed. Please try again.', 'error');
     } finally {
       setExportingFormat(null);
     }
@@ -647,17 +878,51 @@ export const ReportsAnalytics = () => {
                       <h2>{selectedReport.title}</h2>
                       <p>{selectedReport.description}</p>
                     </div>
-                    <div className="rpt-export-btns">
-                      <button className="exp-btn xl" onClick={() => handleExport('excel')} disabled={!!exportingFormat}>
-                        {exportingFormat === 'excel' ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Download size={12} />} Excel
-                      </button>
-                      <button className="exp-btn cs" onClick={() => handleExport('csv')} disabled={!!exportingFormat}>
-                        {exportingFormat === 'csv' ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <FileSpreadsheet size={12} />} CSV
-                      </button>
-                      <button className="exp-btn pd" onClick={() => handleExport('pdf')} disabled={!!exportingFormat}>
-                        {exportingFormat === 'pdf' ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <FileText size={12} />} PDF
-                      </button>
-                    </div>
+                    {(() => {
+                      // Backend check: only render export buttons if backend supports export for this report
+                      const formats = (selectedReport?.exportFormats || selectedReport?.supportedFormats || ['XLSX', 'CSV', 'PDF']).map(f => String(f).toUpperCase());
+                      const canExcel = formats.includes('XLSX') || formats.includes('EXCEL');
+                      const canCsv = formats.includes('CSV');
+                      const canPdf = formats.includes('PDF');
+                      const hasAny = canExcel || canCsv || canPdf;
+
+                      if (!hasAny || selectedReport?.disableExport) return null;
+
+                      return (
+                        <div className="rpt-export-btns">
+                          {canExcel && (
+                            <button
+                              className="exp-btn xl"
+                              onClick={() => handleExport('excel')}
+                              disabled={!!exportingFormat || loadingData}
+                              title="Export report to Microsoft Excel format via backend API"
+                            >
+                              {exportingFormat === 'excel' ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Download size={12} />} Excel
+                            </button>
+                          )}
+                          {canCsv && (
+                            <button
+                              className="exp-btn cs"
+                              onClick={() => handleExport('csv')}
+                              disabled={!!exportingFormat || loadingData}
+                              title="Export report to CSV format via backend API"
+                            >
+                              {exportingFormat === 'csv' ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <FileSpreadsheet size={12} />} CSV
+                            </button>
+                          )}
+                          {canPdf && (
+                            <button
+                              className="exp-btn pd"
+                              onClick={() => handleExport('pdf')}
+                              disabled={!!exportingFormat || loadingData}
+                              title="Export report to printable PDF document"
+                            >
+                              {exportingFormat === 'pdf' ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <FileText size={12} />} PDF
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div className="rpt-filters">

@@ -77,7 +77,12 @@ export const reportsApi = {
       params: cleanParams,
       responseType: 'blob',
     });
-    return res.data;
+    return {
+      data: res.data,
+      blob: res.data,
+      contentType: res.headers?.['content-type'] || res.data?.type || '',
+      headers: res.headers,
+    };
   },
 };
 
