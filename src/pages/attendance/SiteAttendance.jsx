@@ -30,7 +30,6 @@ import {
   FileCheck,
   Image as ImageIcon,
   ExternalLink,
-  ChevronDown,
 } from 'lucide-react';
 import Table from '../../components/common/Table';
 import Modal from '../../components/common/Modal';
@@ -40,309 +39,6 @@ import Select from '../../components/common/Select';
 import Badge from '../../components/common/Badge';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { attendanceNav } from '../../routes/moduleNavConfig';
-
-const toLocalInputDateTime = (dateVal, fallback = '') => {
-  if (!dateVal) return fallback;
-  const d = new Date(dateVal);
-  if (isNaN(d.getTime())) return fallback;
-  const pad = (n) => String(n).padStart(2, '0');
-  const year = d.getFullYear();
-  const month = pad(d.getMonth() + 1);
-  const day = pad(d.getDate());
-  const hours = pad(d.getHours());
-  const minutes = pad(d.getMinutes());
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
-};
-
-const TimeDropdownMenu = ({ isOpen, onClose, items, selectedValue, onSelect, triggerRef }) => {
-  const menuRef = useRef(null);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleClickOutside = (e) => {
-      if (
-        menuRef.current &&
-        !menuRef.current.contains(e.target) &&
-        triggerRef.current &&
-        !triggerRef.current.contains(e.target)
-      ) {
-        onClose();
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isOpen, onClose, triggerRef]);
-
-  useEffect(() => {
-    if (isOpen && menuRef.current) {
-      const selectedEl = menuRef.current.querySelector(`[data-val="${selectedValue}"]`);
-      if (selectedEl) {
-        menuRef.current.scrollTop =
-          selectedEl.offsetTop - menuRef.current.clientHeight / 2 + selectedEl.clientHeight / 2;
-      }
-    }
-  }, [isOpen, selectedValue]);
-
-  if (!isOpen) return null;
-
-  return (
-    <div
-      ref={menuRef}
-      style={{
-        position: 'absolute',
-        top: 'calc(100% + 4px)',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        minWidth: 70,
-        backgroundColor: '#ffffff',
-        border: '1.5px solid var(--border-color, #cbd5e1)',
-        borderRadius: 8,
-        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
-        zIndex: 1100,
-        maxHeight: 180,
-        overflowY: 'auto',
-        padding: '4px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 2,
-        scrollbarWidth: 'thin',
-      }}
-    >
-      {items.map((val) => {
-        const isSelected = String(val) === String(selectedValue);
-        return (
-          <div
-            key={val}
-            data-val={val}
-            onClick={(e) => {
-              e.stopPropagation();
-              onSelect(val);
-              onClose();
-            }}
-            style={{
-              padding: '6px 10px',
-              fontSize: '0.88rem',
-              fontWeight: isSelected ? 700 : 500,
-              textAlign: 'center',
-              cursor: 'pointer',
-              borderRadius: 6,
-              backgroundColor: isSelected ? 'var(--primary, #2e7b85)' : 'transparent',
-              color: isSelected ? '#ffffff' : 'var(--text-main, #1e293b)',
-              transition: 'background-color 0.15s ease',
-              userSelect: 'none',
-            }}
-            onMouseEnter={(e) => {
-              if (!isSelected) {
-                e.currentTarget.style.backgroundColor = 'var(--bg-subtle, #f1f5f9)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isSelected) {
-                e.currentTarget.style.backgroundColor = 'transparent';
-              }
-            }}
-          >
-            {val}
-          </div>
-        );
-      })}
-    </div>
-  );
-};
-
-const SimpleTime12HPicker = ({ label, value, onChange, required = false }) => {
-  const [hourOpen, setHourOpen] = useState(false);
-  const [minuteOpen, setMinuteOpen] = useState(false);
-  const hourBtnRef = useRef(null);
-  const minuteBtnRef = useRef(null);
-
-  const parseTime = (val) => {
-    const tPart = (val && val.includes('T')) ? val.split('T')[1] : (val || '09:00');
-    const [h24, m] = tPart.split(':').map(Number);
-    const ampm = (h24 || 0) >= 12 ? 'PM' : 'AM';
-    const h12 = (h24 || 0) % 12 || 12;
-    return {
-      hour: String(h12).padStart(2, '0'),
-      minute: String(m || 0).padStart(2, '0'),
-      ampm,
-    };
-  };
-
-  const parsed = parseTime(value);
-
-  const update = (field, newVal) => {
-    const next = { ...parsed, [field]: newVal };
-    let h = parseInt(next.hour, 10) || 12;
-    if (next.ampm === 'AM' && h === 12) h = 0;
-    else if (next.ampm === 'PM' && h !== 12) h += 12;
-    const hStr = String(h).padStart(2, '0');
-    const mStr = String(parseInt(next.minute, 10) || 0).padStart(2, '0');
-    const dPart = (value && value.includes('T')) ? value.split('T')[0] : new Date().toISOString().split('T')[0];
-    onChange(`${dPart}T${hStr}:${mStr}`);
-  };
-
-  const hours = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'));
-  const minutes = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
-
-  return (
-    <div>
-      <label className="form-label" style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 6, display: 'block' }}>
-        {label} {required && <span style={{ color: '#ef4444' }}>*</span>}
-      </label>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          border: '1.5px solid var(--border-color)',
-          borderRadius: 8,
-          background: '#ffffff',
-          height: 38,
-          boxShadow: 'var(--shadow-xs)',
-          position: 'relative',
-        }}
-      >
-        {/* Hour selector */}
-        <div style={{ position: 'relative', flex: 1, height: '100%' }}>
-          <button
-            type="button"
-            ref={hourBtnRef}
-            onClick={() => {
-              setHourOpen(!hourOpen);
-              setMinuteOpen(false);
-            }}
-            style={{
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 4,
-              border: 'none',
-              background: hourOpen ? 'var(--bg-subtle, #f8fafc)' : 'transparent',
-              cursor: 'pointer',
-              fontSize: '0.92rem',
-              fontWeight: 700,
-              color: 'var(--text-main)',
-              padding: '0 4px',
-              borderTopLeftRadius: 7,
-              borderBottomLeftRadius: 7,
-            }}
-          >
-            <span>{parsed.hour}</span>
-            <ChevronDown
-              size={14}
-              style={{
-                color: 'var(--text-muted)',
-                transform: hourOpen ? 'rotate(180deg)' : 'none',
-                transition: 'transform 0.15s ease',
-              }}
-            />
-          </button>
-          <TimeDropdownMenu
-            isOpen={hourOpen}
-            onClose={() => setHourOpen(false)}
-            items={hours}
-            selectedValue={parsed.hour}
-            onSelect={(val) => update('hour', val)}
-            triggerRef={hourBtnRef}
-          />
-        </div>
-
-        <span style={{ fontWeight: 800, color: 'var(--text-muted)', userSelect: 'none' }}>:</span>
-
-        {/* Minute selector */}
-        <div style={{ position: 'relative', flex: 1, height: '100%' }}>
-          <button
-            type="button"
-            ref={minuteBtnRef}
-            onClick={() => {
-              setMinuteOpen(!minuteOpen);
-              setHourOpen(false);
-            }}
-            style={{
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 4,
-              border: 'none',
-              background: minuteOpen ? 'var(--bg-subtle, #f8fafc)' : 'transparent',
-              cursor: 'pointer',
-              fontSize: '0.92rem',
-              fontWeight: 700,
-              color: 'var(--text-main)',
-              padding: '0 4px',
-            }}
-          >
-            <span>{parsed.minute}</span>
-            <ChevronDown
-              size={14}
-              style={{
-                color: 'var(--text-muted)',
-                transform: minuteOpen ? 'rotate(180deg)' : 'none',
-                transition: 'transform 0.15s ease',
-              }}
-            />
-          </button>
-          <TimeDropdownMenu
-            isOpen={minuteOpen}
-            onClose={() => setMinuteOpen(false)}
-            items={minutes}
-            selectedValue={parsed.minute}
-            onSelect={(val) => update('minute', val)}
-            triggerRef={minuteBtnRef}
-          />
-        </div>
-
-        {/* AM / PM Toggle */}
-        <div
-          style={{
-            display: 'flex',
-            height: '100%',
-            borderLeft: '1px solid var(--border-color)',
-            borderTopRightRadius: 7,
-            borderBottomRightRadius: 7,
-            overflow: 'hidden',
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => update('ampm', 'AM')}
-            style={{
-              padding: '0 12px',
-              border: 'none',
-              cursor: 'pointer',
-              fontWeight: 700,
-              fontSize: '0.78rem',
-              background: parsed.ampm === 'AM' ? 'var(--primary, #2e7b85)' : '#f8fafc',
-              color: parsed.ampm === 'AM' ? '#ffffff' : 'var(--text-muted, #64748b)',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            AM
-          </button>
-          <button
-            type="button"
-            onClick={() => update('ampm', 'PM')}
-            style={{
-              padding: '0 12px',
-              border: 'none',
-              cursor: 'pointer',
-              fontWeight: 700,
-              fontSize: '0.78rem',
-              background: parsed.ampm === 'PM' ? 'var(--primary, #2e7b85)' : '#f8fafc',
-              color: parsed.ampm === 'PM' ? '#ffffff' : 'var(--text-muted, #64748b)',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            PM
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 export const SiteAttendance = () => {
   const { isSuperAdmin, isHrAdmin, user } = useAuth();
@@ -708,11 +404,12 @@ export const SiteAttendance = () => {
     }
   };
 
+  // Step 8: Admin Correction Modal Open
   const openCorrectModal = (rec) => {
     setSelectedRecord(rec);
     setCorrectForm({
-      siteInTime: toLocalInputDateTime(rec.siteInTime),
-      siteOutTime: toLocalInputDateTime(rec.siteOutTime),
+      siteInTime: rec.siteInTime ? new Date(rec.siteInTime).toISOString().slice(0, 16) : '',
+      siteOutTime: rec.siteOutTime ? new Date(rec.siteOutTime).toISOString().slice(0, 16) : '',
       taskStatus: rec.taskStatus || 'COMPLETED',
       correctionRemark: 'Adjusted check-in time per supervisor manual sign-off sheet',
     });
@@ -731,8 +428,8 @@ export const SiteAttendance = () => {
     setSubmittingCorrect(true);
     try {
       await attendanceApi.correctSiteAttendance(selectedRecord._id, {
-        siteInTime: correctForm.siteInTime ? new Date(correctForm.siteInTime).toISOString() : undefined,
-        siteOutTime: correctForm.siteOutTime ? new Date(correctForm.siteOutTime).toISOString() : undefined,
+        siteInTime: new Date(correctForm.siteInTime).toISOString(),
+        siteOutTime: new Date(correctForm.siteOutTime).toISOString(),
         taskStatus: correctForm.taskStatus,
         correctionRemark: correctForm.correctionRemark.trim(),
       });
@@ -1706,40 +1403,19 @@ export const SiteAttendance = () => {
             </div>
           )}
 
-          <div className="form-group" style={{ marginBottom: 12 }}>
-            <label className="form-label" style={{ fontSize: '0.82rem', fontWeight: 600, color: '#475569', marginBottom: 6 }}>
-              Site Date *
-            </label>
-            <input
-              type="date"
-              className="form-control"
-              value={(correctForm.siteInTime || '').split('T')[0] || new Date().toISOString().split('T')[0]}
-              onChange={(e) => {
-                const newD = e.target.value;
-                const inTime = (correctForm.siteInTime || 'T09:00').split('T')[1] || '09:00';
-                const outTime = (correctForm.siteOutTime || 'T18:00').split('T')[1] || '18:00';
-                setCorrectForm({
-                  ...correctForm,
-                  siteInTime: `${newD}T${inTime}`,
-                  siteOutTime: `${newD}T${outTime}`,
-                });
-              }}
-              style={{ height: 38 }}
-              required
-            />
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
-            <SimpleTime12HPicker
+          <div className="grid-2">
+            <Input
               label="Site-In Time"
+              type="datetime-local"
               value={correctForm.siteInTime}
-              onChange={(val) => setCorrectForm({ ...correctForm, siteInTime: val })}
+              onChange={(e) => setCorrectForm({ ...correctForm, siteInTime: e.target.value })}
               required
             />
-            <SimpleTime12HPicker
+            <Input
               label="Site-Out Time"
+              type="datetime-local"
               value={correctForm.siteOutTime}
-              onChange={(val) => setCorrectForm({ ...correctForm, siteOutTime: val })}
+              onChange={(e) => setCorrectForm({ ...correctForm, siteOutTime: e.target.value })}
               required
             />
           </div>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import masterApi from '../../api/masterApi';
+import geoApi from '../../api/geoApi';
 import { useToast } from '../../context/ToastContext';
 import { validateEmail, validatePhone } from '../../utils/validation';
 import { Plus, Edit2, Trash2, MapPin, Compass } from 'lucide-react';
@@ -142,16 +143,23 @@ export const Branches = () => {
       }
     }
     setSubmitting(true);
+    const lat = formData.latitude ? Number(formData.latitude) : undefined;
+    const lon = formData.longitude ? Number(formData.longitude) : undefined;
+    const radius = Number(formData.radiusInMeters) || 500;
+
     const payload = {
       company: formData.company,
       name: formData.name,
       code: formData.code.toUpperCase(),
       email: formData.email,
       phone: formData.phone,
-      geoFence: formData.latitude && formData.longitude ? {
-        latitude: Number(formData.latitude),
-        longitude: Number(formData.longitude),
-        radiusInMeters: Number(formData.radiusInMeters) || 500,
+      latitude: lat,
+      longitude: lon,
+      radiusInMeters: radius,
+      geoFence: lat && lon ? {
+        latitude: lat,
+        longitude: lon,
+        radiusInMeters: radius,
       } : undefined,
       address: {
         street: formData.street,
@@ -163,13 +171,50 @@ export const Branches = () => {
     };
 
     try {
+      let savedBranch = null;
       if (editingBranch) {
-        await masterApi.updateBranch(editingBranch._id, payload);
+        const res = await masterApi.updateBranch(editingBranch._id, payload);
+        savedBranch = res?.data || res;
         showToast('Branch updated successfully!', 'success');
       } else {
-        await masterApi.createBranch(payload);
+        const res = await masterApi.createBranch(payload);
+        savedBranch = res?.data || res;
         showToast('Branch created successfully!', 'success');
       }
+
+      // Automatically sync 500m GeoFence in backend /geo/geofences collection
+      const branchId = savedBranch?._id || savedBranch?.id || editingBranch?._id;
+      if (branchId && lat && lon) {
+        try {
+          let existingFence = null;
+          try {
+            const fencesRes = await geoApi.getGeoFences({ scope: 'BRANCH' });
+            const list = Array.isArray(fencesRes) ? fencesRes : fencesRes?.data || fencesRes?.geofences || [];
+            existingFence = list.find((f) => String(f.reference || f.referenceId) === String(branchId));
+          } catch {}
+
+          const fencePayload = {
+            name: `${formData.name} Branch Geofence`,
+            scope: 'BRANCH',
+            reference: branchId,
+            referenceId: branchId,
+            referenceModel: 'Branch',
+            centerLatitude: lat,
+            centerLongitude: lon,
+            radiusMeters: radius,
+            isActive: true,
+          };
+
+          if (existingFence?._id || existingFence?.id) {
+            await geoApi.updateGeoFence(existingFence._id || existingFence.id, fencePayload);
+          } else {
+            await geoApi.createGeoFence(fencePayload);
+          }
+        } catch (gfErr) {
+          console.warn('Auto-sync of branch GeoFence non-fatal notice:', gfErr);
+        }
+      }
+
       setModalOpen(false);
       loadData();
     } catch (err) {

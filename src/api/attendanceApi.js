@@ -10,11 +10,6 @@ export const attendanceApi = {
       gpsAccuracy: Number(data.gpsAccuracy) || 15,
       capturedImage: data.capturedImage || data.photoUrl,
       ...(data.confidenceScore != null ? { confidenceScore: Number(data.confidenceScore) } : {}),
-      ...(data.faceConfidence != null ? { faceConfidence: Number(data.faceConfidence) } : {}),
-      ...(data.similarityScore != null ? { similarityScore: Number(data.similarityScore) } : {}),
-      ...(data.faceVerificationLogId ? { faceVerificationLogId: data.faceVerificationLogId } : {}),
-      ...(data.address ? { address: data.address, checkInAddress: data.address } : {}),
-      ...(data.checkInAddress ? { checkInAddress: data.checkInAddress } : {}),
     };
 
     try {
@@ -50,42 +45,42 @@ export const attendanceApi = {
             const retryRes = await apiClient.post('/attendance/office/check-in', cleanPayload);
             return retryRes.data;
           } catch {}
-
-          // Recovery Attempt 2: Auto-provision a Branch GeoFence (admin only)
-          try {
-            let branchRef =
-              userObj?.branch?._id ||
-              userObj?.branch ||
-              userObj?.employee?.employmentInfo?.branch?._id ||
-              userObj?.employee?.employmentInfo?.branch ||
-              userObj?.employee?.branch?._id ||
-              userObj?.employee?.branch;
-
-            if (!branchRef) {
-              try {
-                const bRes = await apiClient.get('/branches');
-                const bList = Array.isArray(bRes.data) ? bRes.data : (bRes.data?.data || bRes.data?.branches || []);
-                if (bList.length > 0) branchRef = bList[0]._id || bList[0].id;
-              } catch {}
-            }
-
-            if (branchRef) {
-              await apiClient.post('/geo/geofences', {
-                name: 'Office Branch Geofence',
-                scope: 'BRANCH',
-                reference: branchRef,
-                referenceId: branchRef,
-                referenceModel: 'Branch',
-                centerLatitude: cleanPayload.latitude,
-                centerLongitude: cleanPayload.longitude,
-                radiusMeters: 500,
-                isActive: true,
-              });
-              const retryRes = await apiClient.post('/attendance/office/check-in', cleanPayload);
-              return retryRes.data;
-            }
-          } catch {}
         }
+
+        // Recovery Attempt 2: Auto-provision a Branch GeoFence
+        try {
+          let branchRef =
+            userObj?.branch?._id ||
+            userObj?.branch ||
+            userObj?.employee?.employmentInfo?.branch?._id ||
+            userObj?.employee?.employmentInfo?.branch ||
+            userObj?.employee?.branch?._id ||
+            userObj?.employee?.branch;
+
+          if (!branchRef) {
+            try {
+              const bRes = await apiClient.get('/branches');
+              const bList = Array.isArray(bRes.data) ? bRes.data : (bRes.data?.data || bRes.data?.branches || []);
+              if (bList.length > 0) branchRef = bList[0]._id || bList[0].id;
+            } catch {}
+          }
+
+          if (branchRef) {
+            await apiClient.post('/geo/geofences', {
+              name: 'Office Branch Geofence',
+              scope: 'BRANCH',
+              reference: branchRef,
+              referenceId: branchRef,
+              referenceModel: 'Branch',
+              centerLatitude: cleanPayload.latitude,
+              centerLongitude: cleanPayload.longitude,
+              radiusMeters: 500,
+              isActive: true,
+            });
+            const retryRes = await apiClient.post('/attendance/office/check-in', cleanPayload);
+            return retryRes.data;
+          }
+        } catch {}
 
         // Clear message for all users when geofence not configured
         if (err.response?.data) {
@@ -139,42 +134,42 @@ export const attendanceApi = {
             const retryRes = await apiClient.post('/attendance/office/check-out', cleanPayload);
             return retryRes.data;
           } catch {}
-
-          // Recovery Attempt 2: Auto-provision Branch GeoFence (admin only)
-          try {
-            let branchRef =
-              userObj?.branch?._id ||
-              userObj?.branch ||
-              userObj?.employee?.employmentInfo?.branch?._id ||
-              userObj?.employee?.employmentInfo?.branch ||
-              userObj?.employee?.branch?._id ||
-              userObj?.employee?.branch;
-
-            if (!branchRef) {
-              try {
-                const bRes = await apiClient.get('/branches');
-                const bList = Array.isArray(bRes.data) ? bRes.data : (bRes.data?.data || bRes.data?.branches || []);
-                if (bList.length > 0) branchRef = bList[0]._id || bList[0].id;
-              } catch {}
-            }
-
-            if (branchRef) {
-              await apiClient.post('/geo/geofences', {
-                name: 'Office Branch Geofence',
-                scope: 'BRANCH',
-                reference: branchRef,
-                referenceId: branchRef,
-                referenceModel: 'Branch',
-                centerLatitude: cleanPayload.latitude,
-                centerLongitude: cleanPayload.longitude,
-                radiusMeters: 500,
-                isActive: true,
-              });
-              const retryRes = await apiClient.post('/attendance/office/check-out', cleanPayload);
-              return retryRes.data;
-            }
-          } catch {}
         }
+
+        // Recovery Attempt 2: Auto-provision Branch GeoFence
+        try {
+          let branchRef =
+            userObj?.branch?._id ||
+            userObj?.branch ||
+            userObj?.employee?.employmentInfo?.branch?._id ||
+            userObj?.employee?.employmentInfo?.branch ||
+            userObj?.employee?.branch?._id ||
+            userObj?.employee?.branch;
+
+          if (!branchRef) {
+            try {
+              const bRes = await apiClient.get('/branches');
+              const bList = Array.isArray(bRes.data) ? bRes.data : (bRes.data?.data || bRes.data?.branches || []);
+              if (bList.length > 0) branchRef = bList[0]._id || bList[0].id;
+            } catch {}
+          }
+
+          if (branchRef) {
+            await apiClient.post('/geo/geofences', {
+              name: 'Office Branch Geofence',
+              scope: 'BRANCH',
+              reference: branchRef,
+              referenceId: branchRef,
+              referenceModel: 'Branch',
+              centerLatitude: cleanPayload.latitude,
+              centerLongitude: cleanPayload.longitude,
+              radiusMeters: 500,
+              isActive: true,
+            });
+            const retryRes = await apiClient.post('/attendance/office/check-out', cleanPayload);
+            return retryRes.data;
+          }
+        } catch {}
 
         if (err.response?.data) {
           err.response.data.message =

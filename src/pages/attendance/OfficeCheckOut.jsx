@@ -16,6 +16,8 @@ import CameraCapture from '../../components/common/CameraCapture';
 import GeoLocationPicker from '../../components/common/GeoLocationPicker';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { attendanceNav } from '../../routes/moduleNavConfig';
+import { calculateDistanceMeters, resolveBranchLocation } from '../../utils/geoUtils';
+import { compareFacePhotos, resolveRegisteredSelfie } from '../../utils/faceComparison';
 
 const formatHours = (h) => {
   if (!h || h <= 0) return '0h 0m';
@@ -49,6 +51,7 @@ export const OfficeCheckOut = () => {
   const [coords, setCoords] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [checkoutResult, setCheckoutResult] = useState(null);
+  const [branchLocation, setBranchLocation] = useState(null);
 
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -84,6 +87,17 @@ export const OfficeCheckOut = () => {
             employmentInfo: { designation: user?.designation, department: user?.department },
           };
           if (myId) {
+            try {
+              const empRes = await employeeApi.getEmployeeById(myId);
+              const empData = empRes?.data || empRes?.employee || empRes;
+              if (empData) {
+                selfEmp = {
+                  ...selfEmp,
+                  ...empData,
+                  basicInfo: { ...selfEmp.basicInfo, ...empData.basicInfo },
+                };
+              }
+            } catch {}
             try {
               const statusRes = await faceApi.getFaceStatus(myId);
               const sData = statusRes?.data || statusRes;
@@ -160,21 +174,87 @@ export const OfficeCheckOut = () => {
   const elapsedHours = checkInISO ? calcHours(checkInISO, currentTime.toISOString()) : 0;
   const checkInTimeStr = checkInISO ? new Date(checkInISO).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
 
+  // Resolve branch coordinates & radius for 500m distance checking
+  useEffect(() => {
+    if (!selectedEmp) {
+      setBranchLocation(null);
+      return;
+    }
+    const empBranch =
+      selectedEmp.employmentInfo?.branch ||
+      selectedEmp.branch ||
+      user?.employee?.employmentInfo?.branch ||
+      user?.branch;
+
+    if (empBranch) {
+      resolveBranchLocation(empBranch)
+        .then((loc) => setBranchLocation(loc))
+        .catch(() => setBranchLocation(null));
+    } else {
+      setBranchLocation(null);
+    }
+  }, [selectedEmp, user]);
+
   const handleFaceCapture = async (img) => {
     setCapturedPhoto(img);
     setCameraError(null);
     setFaceResult(null);
     setFaceVerifying(true);
     try {
-      const res = await faceApi.verifyFace(selectedEmpId, img, 'OFFICE');
-      const logId = res?.logId || res?.data?.logId;
-      const confidence = res?.confidenceScore ?? res?.data?.confidenceScore ?? 0;
-      const matchResult = res?.matchResult || res?.data?.matchResult || (res?.matched !== false ? 'MATCHED' : 'NOT_MATCHED');
-      const matched = res?.matched !== false && res?.data?.matched !== false && matchResult !== 'NOT_MATCHED' && matchResult !== 'NO_FACE_DETECTED' && matchResult !== 'LOW_CONFIDENCE';
-      setFaceResult({ matched, confidence: Math.round(confidence * 100), logId, matchResult });
+      // 1. Resolve registered selfie from all storage layers
+      const regPhoto = await resolveRegisteredSelfie(selectedEmpId, empCode, selectedEmp);
+
+      if (!regPhoto) {
+        setFaceResult({
+          matched: false,
+          confidence: 0,
+          logId: null,
+          matchResult: 'NO_REGISTERED_FACE',
+          reason: 'No registered selfie found for this employee. Please register your selfie with Admin first before marking attendance.',
+        });
+        showToast('No registered selfie found! Please contact Admin to register your selfie.', 'error');
+        setFaceVerifying(false);
+        return;
+      }
+
+      // 2. Compare live webcam capture with registered selfie
+      const comp = await compareFacePhotos(regPhoto, img, 0.60);
+
+      // 3. Also log with backend faceApi
+      let logId = null;
+      try {
+        const res = await faceApi.verifyFace(selectedEmpId, img, 'OFFICE');
+        logId = res?.logId || res?.data?.logId;
+      } catch {}
+
+      if (!comp.matched) {
+        setFaceResult({
+          matched: false,
+          confidence: comp.confidencePct,
+          logId,
+          matchResult: 'NOT_MATCHED',
+          reason: comp.reason || `Face biometric mismatch (${comp.confidencePct}% match). Live photo does not match registered employee selfie!`,
+        });
+        showToast(`Face mismatch (${comp.confidencePct}% match)! Does not match registered selfie.`, 'error');
+      } else {
+        setFaceResult({
+          matched: true,
+          confidence: comp.confidencePct,
+          logId,
+          matchResult: 'MATCHED',
+          reason: `Face verified successfully (${comp.confidencePct}% biometric match).`,
+        });
+        showToast(`✓ Face verified (${comp.confidencePct}% match)`, 'success');
+      }
     } catch (err) {
-      const errData = err.response?.data || {};
-      setFaceResult({ matched: false, confidence: 0, logId: null, matchResult: errData.matchResult || 'NOT_MATCHED', error: errData.message || 'Face verification error' });
+      setFaceResult({
+        matched: false,
+        confidence: 0,
+        logId: null,
+        matchResult: 'NOT_MATCHED',
+        error: err.message || 'Face verification error',
+      });
+      showToast(err.message || 'Face verification error', 'error');
     } finally {
       setFaceVerifying(false);
     }
@@ -184,10 +264,41 @@ export const OfficeCheckOut = () => {
     if (!selectedEmpId) { showToast('Select an employee', 'warning'); return; }
     if (cameraError?.isPermissionDenied || (cameraError && !capturedPhoto)) { showToast('Camera permission denied', 'error'); return; }
     if (!capturedPhoto) { showToast('Capture face photo first', 'warning'); return; }
-    if (faceResult && !faceResult.matched) { showToast('Face verification failed — cannot check out', 'error'); return; }
-    const activeCoords = (coords && typeof coords.latitude === 'number' && typeof coords.longitude === 'number' && !coords.gpsUnavailable && !coords.error)
-      ? coords
-      : { latitude: 23.0225, longitude: 72.5714, gpsAccuracy: 15, isSimulated: true };
+
+    // Condition 1: Verify Face against Registered Selfie is strictly required
+    if (!faceResult || !faceResult.matched) {
+      const faceMsg = faceResult?.reason || faceResult?.error || 'Face biometric verification failed — Live photo did not match registered employee selfie!';
+      showToast(faceMsg, 'error');
+      setCheckoutResult({ success: false, reason: faceMsg });
+      return;
+    }
+
+    // Condition 2: GPS Location & 500m Branch Radius verification
+    if (!coords || coords.gpsUnavailable || coords.error || (coords.latitude == null && coords.longitude == null)) {
+      const geoErr = 'GPS Location required: Please grant location permissions to verify you are within 500m of the branch.';
+      showToast(geoErr, 'error');
+      setCheckoutResult({ success: false, reason: geoErr });
+      return;
+    }
+
+    const activeCoords = coords;
+    if (branchLocation && branchLocation.latitude != null && branchLocation.longitude != null) {
+      const distance = calculateDistanceMeters(
+        activeCoords.latitude,
+        activeCoords.longitude,
+        branchLocation.latitude,
+        branchLocation.longitude
+      );
+      const maxRadius = branchLocation.radiusMeters || 500;
+
+      if (distance !== null && distance > maxRadius) {
+        const distErr = `Location check failed: You are ${distance}m away from ${branchLocation.branchName || 'your office branch'}. Check-out is only permitted within ${maxRadius}m radius.`;
+        showToast(distErr, 'error');
+        setCheckoutResult({ success: false, reason: distErr });
+        setSubmitting(false);
+        return;
+      }
+    }
 
     setSubmitting(true);
     setCheckoutResult(null);
@@ -224,6 +335,8 @@ export const OfficeCheckOut = () => {
         latitude: activeCoords.latitude,
         longitude: activeCoords.longitude,
         gpsAccuracy: activeCoords.gpsAccuracy || 15,
+        capturedImage: capturedPhoto,
+        confidenceScore: faceResult?.confidence ? faceResult.confidence / 100 : 0.95,
         remarks: `Office Check-Out: Face ${faceResult?.confidence || 95}% match at ${address}`,
       };
 
@@ -422,7 +535,10 @@ export const OfficeCheckOut = () => {
               <label className="form-label" style={{ fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <MapPin size={14} color="#0284c7" /> GPS Location
               </label>
-              <GeoLocationPicker onLocationChange={(c) => { setCoords(c); if (c && !c.gpsUnavailable) setCheckoutResult(null); }} />
+              <GeoLocationPicker
+                targetLocation={branchLocation}
+                onLocationChange={(c) => { setCoords(c); if (c && !c.gpsUnavailable) setCheckoutResult(null); }}
+              />
             </div>
 
             {/* Failure result */}
@@ -437,7 +553,7 @@ export const OfficeCheckOut = () => {
               icon={LogOut}
               loading={submitting}
               onClick={handleCheckOut}
-              disabled={!capturedPhoto || !selectedEmpId || !coords || (faceResult && !faceResult.matched)}
+              disabled={!capturedPhoto || !selectedEmpId || !coords || !faceResult || !faceResult.matched || submitting}
               style={{ padding: '11px', fontWeight: 600 }}
             >
               {submitting ? 'Processing Check-Out...' : 'Submit Check-Out'}

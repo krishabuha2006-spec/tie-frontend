@@ -6,6 +6,7 @@ import masterApi from '../../api/masterApi';
 import faceApi from '../../api/faceApi';
 import { useToast } from '../../context/ToastContext';
 import { validateEmail, validatePhone } from '../../utils/validation';
+import { saveRegisteredSelfie } from '../../utils/faceComparison';
 import {
   Plus,
   Search,
@@ -356,6 +357,7 @@ export const EmployeeList = () => {
 
   // Profile Photo state for Add Employee Modal (Tab 1)
   const [showPhotoUrlInput, setShowPhotoUrlInput] = useState(false);
+  const [showCameraInAddForm, setShowCameraInAddForm] = useState(false);
 
   const handlePhotoSelect = (file) => {
     if (!file) return;
@@ -830,10 +832,33 @@ export const EmployeeList = () => {
         }
       }
 
-      showToast('Step 1 Complete: Employee created! Proceeding to Step 2: Face Registration.', 'success');
+      // Automatically enroll face biometrics if a selfie/photo was captured or uploaded
+      let faceEnrolled = false;
+      if (empId && newEmp.photo) {
+        saveRegisteredSelfie(empId, createdEmp?.employeeCode || newEmp.employeeCode, newEmp.photo);
+        try {
+          await faceApi.enrollFace(empId, [newEmp.photo]);
+          faceEnrolled = true;
+          showToast('✓ Employee created & Selfie registered for face attendance!', 'success');
+        } catch (fErr) {
+          console.warn('Auto face enrollment warning, opening enrollment modal:', fErr);
+        }
+      }
+
       setAddModalOpen(false);
       loadEmployees();
-      if (createdEmp && (createdEmp._id || createdEmp.id)) {
+
+      if (faceEnrolled) {
+        // Update local employee list immediately with ENROLLED status
+        setEmployees((prev) =>
+          prev.map((e) =>
+            (e._id === empId || e.id === empId)
+              ? { ...e, _faceStatus: 'ENROLLED', isFaceEnrolled: true }
+              : e
+          )
+        );
+      } else if (createdEmp && (createdEmp._id || createdEmp.id)) {
+        showToast('Employee created! Please capture a face photo to complete enrollment.', 'info');
         setEmployeeToEnroll(createdEmp);
         setCapturedFace(null);
         setEnrollModalOpen(true);
@@ -1741,7 +1766,7 @@ export const EmployeeList = () => {
                     </div>
 
                     <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
-                      <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                         <label
                           htmlFor="add-emp-photo-input"
                           style={{
@@ -1771,33 +1796,86 @@ export const EmployeeList = () => {
                             e.target.value = '';
                           }}
                         />
-                        <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)', marginLeft: 8 }}>
-                          JPG, PNG, WebP (Max 5MB)
+
+                        <button
+                          type="button"
+                          onClick={() => setShowCameraInAddForm(!showCameraInAddForm)}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            padding: '5px 12px',
+                            borderRadius: '6px',
+                            backgroundColor: '#0d9488',
+                            color: '#ffffff',
+                            border: 'none',
+                            fontSize: '0.78rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <Camera size={13} />
+                          {showCameraInAddForm ? 'Close Camera' : 'Take Live Selfie'}
+                        </button>
+
+                        <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>
+                          Selfie will auto-register for biometric attendance
                         </span>
                       </div>
 
                       {newEmp.photo && (
-                        <button
-                          type="button"
-                          onClick={handlePhotoRemove}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 4,
-                            padding: '4px 8px',
-                            borderRadius: '4px',
-                            backgroundColor: '#fee2e2',
-                            color: '#ef4444',
-                            border: 'none',
-                            fontSize: '0.75rem',
-                            fontWeight: 500,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <Trash2 size={12} /> Remove
-                        </button>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: '0.72rem', color: '#16a34a', fontWeight: 600, backgroundColor: '#dcfce7', padding: '3px 8px', borderRadius: 4 }}>
+                            ✓ Biometrics Ready
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handlePhotoRemove}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              padding: '4px 8px',
+                              borderRadius: '4px',
+                              backgroundColor: '#fee2e2',
+                              color: '#ef4444',
+                              border: 'none',
+                              fontSize: '0.75rem',
+                              fontWeight: 500,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <Trash2 size={12} /> Remove
+                          </button>
+                        </div>
                       )}
                     </div>
+                  </div>
+                )}
+
+                {showCameraInAddForm && (
+                  <div style={{ marginTop: 12, padding: 12, backgroundColor: '#f8fafc', borderRadius: 8, border: '1px solid var(--border-color)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--primary)' }}>
+                        Capture Employee Selfie (Look directly into the camera)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowCameraInAddForm(false)}
+                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)' }}
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                    <CameraCapture
+                      onCapture={(img) => {
+                        setNewEmp((prev) => ({ ...prev, photo: img }));
+                        setShowCameraInAddForm(false);
+                        showToast('Selfie captured! Will auto-enroll on employee creation.', 'success');
+                      }}
+                      onCancel={() => setShowCameraInAddForm(false)}
+                      label="Employee Face Photo"
+                    />
                   </div>
                 )}
               </div>

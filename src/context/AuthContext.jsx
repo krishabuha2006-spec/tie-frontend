@@ -3,6 +3,7 @@ import authApi from '../api/authApi';
 import userApi from '../api/userApi';
 import masterApi from '../api/masterApi';
 import employeeApi from '../api/employeeApi';
+import { saveRegisteredSelfie } from '../utils/faceComparison';
 
 const defaultAuthValue = {
   user: null,
@@ -199,7 +200,21 @@ export const AuthProvider = ({ children }) => {
           }
         }
 
-        // 5. Cache user in state and localStorage
+        // 5. Cache employee registered selfie if available
+        const empId = typeof userData.employee === 'string' ? userData.employee : userData.employee?._id;
+        const empCode = userData.employee?.basicInfo?.employeeCode || userData.employeeCode;
+        const photo = userData.employee?.basicInfo?.photo || userData.employee?.photo || userData.photo;
+        if (photo) {
+          saveRegisteredSelfie(empId, empCode, photo);
+        } else if (empId) {
+          employeeApi.getEmployeeById(empId).then((eRes) => {
+            const eData = eRes?.data || eRes?.employee || eRes;
+            const p = eData?.basicInfo?.photo || eData?.photo;
+            if (p) saveRegisteredSelfie(empId, empCode || eData?.basicInfo?.employeeCode, p);
+          }).catch(() => {});
+        }
+
+        // 6. Cache user in state and localStorage
         setUser(userData);
         localStorage.setItem('tie_user', JSON.stringify(userData));
         return userData;

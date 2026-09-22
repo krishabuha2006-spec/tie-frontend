@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import attendanceApi from '../../api/attendanceApi';
 import employeeApi from '../../api/employeeApi';
 import faceApi from '../../api/faceApi';
@@ -20,7 +20,6 @@ import {
   Building2,
   Compass,
   XCircle,
-  ChevronDown,
 } from 'lucide-react';
 import Table from '../../components/common/Table';
 import Modal from '../../components/common/Modal';
@@ -32,6 +31,8 @@ import CameraCapture from '../../components/common/CameraCapture';
 import GeoLocationPicker from '../../components/common/GeoLocationPicker';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { attendanceNav } from '../../routes/moduleNavConfig';
+import { calculateDistanceMeters, resolveBranchLocation } from '../../utils/geoUtils';
+import { compareFacePhotos, resolveRegisteredSelfie } from '../../utils/faceComparison';
 
 const getEmpName = (emp) =>
   emp?.basicInfo?.fullName ||
@@ -46,527 +47,6 @@ const getEmpCode = (emp) =>
 const getEmpDept = (emp) =>
   emp?.employmentInfo?.department?.name || emp?.department?.name || emp?.department || '';
 
-const toLocalInputDateTime = (dateVal, fallback = '') => {
-  if (!dateVal) return fallback;
-  const d = new Date(dateVal);
-  if (isNaN(d.getTime())) return fallback;
-  const pad = (n) => String(n).padStart(2, '0');
-  const year = d.getFullYear();
-  const month = pad(d.getMonth() + 1);
-  const day = pad(d.getDate());
-  const hours = pad(d.getHours());
-  const minutes = pad(d.getMinutes());
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
-};
-
-const getRecordCheckTimes = (rec) => {
-  const inRaw =
-    rec?.firstCheckInTime ||
-    rec?.checkInTime ||
-    rec?.siteInTime ||
-    rec?.punches?.[0]?.checkInTime ||
-    rec?.sessions?.[0]?.checkInTime ||
-    null;
-
-  const outRaw =
-    rec?.lastCheckOutTime ||
-    rec?.checkOutTime ||
-    rec?.siteOutTime ||
-    rec?.punches?.[rec.punches?.length - 1]?.checkOutTime ||
-    rec?.sessions?.[rec.sessions?.length - 1]?.checkOutTime ||
-    null;
-
-  return { inRaw, outRaw };
-};
-
-const getRecordFaceInfo = (r, employees = [], faceLogs = []) => {
-  // 1. Direct record attributes
-  const directLogId = r?.faceVerificationLogId;
-  const directStatus = r?.faceVerificationStatus;
-  const directConf = r?.confidenceScore || r?.faceConfidence;
-  if (directLogId || directStatus === 'MATCHED' || directStatus === 'VERIFIED' || r?.faceVerified === true) {
-    return { verified: true, confidence: directConf, logId: directLogId };
-  }
-
-  // 2. Scan punches
-  const punches = Array.isArray(r?.punches) ? r.punches : [];
-  for (const p of punches) {
-    if (
-      p.faceVerificationLogId ||
-      p.faceVerified === true ||
-      p.faceVerificationStatus === 'MATCHED' ||
-      p.faceVerificationStatus === 'VERIFIED' ||
-      p.confidenceScore ||
-      p.faceConfidence ||
-      p.capturedImage
-    ) {
-      return {
-        verified: true,
-        confidence: p.confidenceScore || p.faceConfidence,
-        logId: p.faceVerificationLogId,
-      };
-    }
-  }
-
-  // 3. Scan sessions (Field attendance)
-  const sessions = Array.isArray(r?.sessions) ? r.sessions : [];
-  for (const s of sessions) {
-    if (s.faceVerificationLogId || s.faceVerified === true || s.confidenceScore || s.faceConfidence) {
-      return {
-        verified: true,
-        confidence: s.confidenceScore || s.faceConfidence,
-        logId: s.faceVerificationLogId,
-      };
-    }
-  }
-
-  // 4. Check face verification audit logs
-  const empId = r?.employee?._id || r?.employee?.id || (typeof r?.employee === 'string' ? r.employee : null);
-  if (empId && Array.isArray(faceLogs) && faceLogs.length > 0) {
-    const matchedLog = faceLogs.find((fl) => {
-      const flEmpId = fl.employee?._id || fl.employee?.id || (typeof fl.employee === 'string' ? fl.employee : null);
-      if (flEmpId !== empId) return false;
-      const isMatch = fl.matchResult === 'MATCHED' || fl.matched === true || fl.status === 'VERIFIED';
-      if (!isMatch) return false;
-      if (r?.attendanceDate && fl.createdAt) {
-        return String(r.attendanceDate).split('T')[0] === String(fl.createdAt).split('T')[0];
-      }
-      return true;
-    });
-    if (matchedLog) {
-      return {
-        verified: true,
-        confidence: matchedLog.confidenceScore || matchedLog.similarityScore || 0.95,
-        logId: matchedLog._id || matchedLog.id,
-      };
-    }
-  }
-
-  // 5. If record has an active punch and the employee is enrolled with biometric face
-  const empObj = employees.find((e) => (e._id || e.id) === empId);
-  const isEnrolled = empObj?.isFaceEnrolled || r?.employee?.isFaceEnrolled;
-  const hasPunch = !!(r?.firstCheckInTime || r?.checkInTime || r?.siteInTime || punches.length > 0);
-
-  if (hasPunch && isEnrolled) {
-    return { verified: true, confidence: 0.95 };
-  }
-
-  return { verified: false };
-};
-
-const getRecordLocationInfo = (r, employees = [], locationLogs = []) => {
-  // 1. Direct address fields
-  const directAddr =
-    r?.checkInAddress ||
-    r?.address ||
-    r?.locationName ||
-    r?.locationAddress ||
-    r?.siteInAddress ||
-    r?.site?.name ||
-    r?.site?.address;
-  const directLat = r?.latitude || r?.location?.latitude;
-  const directLng = r?.longitude || r?.location?.longitude;
-
-  if (directAddr) {
-    return {
-      title: directAddr,
-      coords: directLat && directLng ? `${Number(directLat).toFixed(4)}, ${Number(directLng).toFixed(4)}` : null,
-      address: directAddr,
-    };
-  }
-
-  // 2. Punches array
-  const punches = Array.isArray(r?.punches) ? r.punches : [];
-  for (const p of punches) {
-    const pAddr = p.checkInAddress || p.checkOutAddress || p.address || p.location?.address;
-    const pLat = p.latitude || p.location?.latitude || p.coords?.latitude;
-    const pLng = p.longitude || p.location?.longitude || p.coords?.longitude;
-    if (pAddr || (pLat && pLng)) {
-      return {
-        title: pAddr || 'GPS Pinned Location',
-        coords: pLat && pLng ? `${Number(pLat).toFixed(4)}, ${Number(pLng).toFixed(4)}` : null,
-        address: pAddr || `${Number(pLat).toFixed(4)}, ${Number(pLng).toFixed(4)}`,
-      };
-    }
-  }
-
-  // 3. Sessions array
-  const sessions = Array.isArray(r?.sessions) ? r.sessions : [];
-  for (const s of sessions) {
-    const sAddr = s.checkInAddress || s.checkOutAddress || s.address || s.location?.address || s.clientName;
-    const sLat = s.latitude || s.location?.latitude;
-    const sLng = s.longitude || s.location?.longitude;
-    if (sAddr || (sLat && sLng)) {
-      return {
-        title: sAddr || 'Field Visit Location',
-        coords: sLat && sLng ? `${Number(sLat).toFixed(4)}, ${Number(sLng).toFixed(4)}` : null,
-        address: sAddr || `${Number(sLat).toFixed(4)}, ${Number(sLng).toFixed(4)}`,
-      };
-    }
-  }
-
-  // 4. Location logs matching
-  const empId = r?.employee?._id || r?.employee?.id || (typeof r?.employee === 'string' ? r.employee : null);
-  if (empId && Array.isArray(locationLogs) && locationLogs.length > 0) {
-    const matchedLoc = locationLogs.find((ll) => {
-      const llEmpId = ll.employee?._id || ll.employee?.id || (typeof ll.employee === 'string' ? ll.employee : null);
-      if (llEmpId !== empId) return false;
-      if (r?.attendanceDate && ll.createdAt) {
-        return String(r.attendanceDate).split('T')[0] === String(ll.createdAt).split('T')[0];
-      }
-      return true;
-    });
-    if (matchedLoc) {
-      const lAddr = matchedLoc.address || matchedLoc.locationName || matchedLoc.geofence?.name;
-      const lLat = matchedLoc.latitude;
-      const lLng = matchedLoc.longitude;
-      if (lAddr || (lLat && lLng)) {
-        return {
-          title: lAddr || 'Office Boundary Location',
-          coords: lLat && lLng ? `${Number(lLat).toFixed(4)}, ${Number(lLng).toFixed(4)}` : null,
-          address: lAddr || `${Number(lLat).toFixed(4)}, ${Number(lLng).toFixed(4)}`,
-        };
-      }
-    }
-  }
-
-  // 5. Branch info on record or employee
-  const empObj = employees.find((e) => (e._id || e.id) === empId);
-
-  const branchName =
-    r?.branch?.name ||
-    r?.branch?.displayName ||
-    (typeof r?.branch === 'string' && r.branch) ||
-    empObj?.employmentInfo?.branch?.name ||
-    empObj?.branch?.name ||
-    r?.employee?.employmentInfo?.branch?.name ||
-    r?.employee?.branch?.name;
-
-  const branchAddr =
-    r?.branch?.address ||
-    empObj?.employmentInfo?.branch?.address ||
-    empObj?.branch?.address ||
-    r?.employee?.employmentInfo?.branch?.address;
-
-  if (branchName || branchAddr) {
-    return {
-      title: branchName || 'Head Office',
-      subtitle: branchAddr && branchAddr !== branchName ? branchAddr : null,
-      address: branchName || branchAddr,
-    };
-  }
-
-  // 6. Direct coordinates
-  if (directLat && directLng) {
-    return {
-      title: 'GPS Coordinates',
-      coords: `${Number(directLat).toFixed(4)}, ${Number(directLng).toFixed(4)}`,
-      address: `${Number(directLat).toFixed(4)}, ${Number(directLng).toFixed(4)}`,
-    };
-  }
-
-  // 7. Default fallback for Office attendance
-  if (r?._subType !== 'FIELD' && r?._subType !== 'SITE') {
-    return {
-      title: 'Head Office',
-      subtitle: 'Ahmedabad Branch',
-      address: 'Head Office - Ahmedabad',
-    };
-  }
-
-  return { address: '-' };
-};
-
-const TimeDropdownMenu = ({ isOpen, onClose, items, selectedValue, onSelect, triggerRef }) => {
-  const menuRef = useRef(null);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleClickOutside = (e) => {
-      if (
-        menuRef.current &&
-        !menuRef.current.contains(e.target) &&
-        triggerRef.current &&
-        !triggerRef.current.contains(e.target)
-      ) {
-        onClose();
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isOpen, onClose, triggerRef]);
-
-  useEffect(() => {
-    if (isOpen && menuRef.current) {
-      const selectedEl = menuRef.current.querySelector(`[data-val="${selectedValue}"]`);
-      if (selectedEl) {
-        menuRef.current.scrollTop =
-          selectedEl.offsetTop - menuRef.current.clientHeight / 2 + selectedEl.clientHeight / 2;
-      }
-    }
-  }, [isOpen, selectedValue]);
-
-  if (!isOpen) return null;
-
-  return (
-    <div
-      ref={menuRef}
-      style={{
-        position: 'absolute',
-        top: 'calc(100% + 4px)',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        minWidth: 70,
-        backgroundColor: '#ffffff',
-        border: '1.5px solid var(--border-color, #cbd5e1)',
-        borderRadius: 8,
-        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
-        zIndex: 1100,
-        maxHeight: 180,
-        overflowY: 'auto',
-        padding: '4px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 2,
-        scrollbarWidth: 'thin',
-      }}
-    >
-      {items.map((val) => {
-        const isSelected = String(val) === String(selectedValue);
-        return (
-          <div
-            key={val}
-            data-val={val}
-            onClick={(e) => {
-              e.stopPropagation();
-              onSelect(val);
-              onClose();
-            }}
-            style={{
-              padding: '6px 10px',
-              fontSize: '0.88rem',
-              fontWeight: isSelected ? 700 : 500,
-              textAlign: 'center',
-              cursor: 'pointer',
-              borderRadius: 6,
-              backgroundColor: isSelected ? 'var(--primary, #2e7b85)' : 'transparent',
-              color: isSelected ? '#ffffff' : 'var(--text-main, #1e293b)',
-              transition: 'background-color 0.15s ease',
-              userSelect: 'none',
-            }}
-            onMouseEnter={(e) => {
-              if (!isSelected) {
-                e.currentTarget.style.backgroundColor = 'var(--bg-subtle, #f1f5f9)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isSelected) {
-                e.currentTarget.style.backgroundColor = 'transparent';
-              }
-            }}
-          >
-            {val}
-          </div>
-        );
-      })}
-    </div>
-  );
-};
-
-const SimpleTime12HPicker = ({ label, value, onChange, required = false }) => {
-  const [hourOpen, setHourOpen] = useState(false);
-  const [minuteOpen, setMinuteOpen] = useState(false);
-  const hourBtnRef = useRef(null);
-  const minuteBtnRef = useRef(null);
-
-  const parseTime = (val) => {
-    const tPart = (val && val.includes('T')) ? val.split('T')[1] : (val || '09:00');
-    const [h24, m] = tPart.split(':').map(Number);
-    const ampm = (h24 || 0) >= 12 ? 'PM' : 'AM';
-    const h12 = (h24 || 0) % 12 || 12;
-    return {
-      hour: String(h12).padStart(2, '0'),
-      minute: String(m || 0).padStart(2, '0'),
-      ampm,
-    };
-  };
-
-  const parsed = parseTime(value);
-
-  const update = (field, newVal) => {
-    const next = { ...parsed, [field]: newVal };
-    let h = parseInt(next.hour, 10) || 12;
-    if (next.ampm === 'AM' && h === 12) h = 0;
-    else if (next.ampm === 'PM' && h !== 12) h += 12;
-    const hStr = String(h).padStart(2, '0');
-    const mStr = String(parseInt(next.minute, 10) || 0).padStart(2, '0');
-    const dPart = (value && value.includes('T')) ? value.split('T')[0] : new Date().toISOString().split('T')[0];
-    onChange(`${dPart}T${hStr}:${mStr}`);
-  };
-
-  const hours = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'));
-  const minutes = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
-
-  return (
-    <div>
-      <label className="form-label" style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 6, display: 'block' }}>
-        {label} {required && <span style={{ color: '#ef4444' }}>*</span>}
-      </label>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          border: '1.5px solid var(--border-color)',
-          borderRadius: 8,
-          background: '#ffffff',
-          height: 38,
-          boxShadow: 'var(--shadow-xs)',
-          position: 'relative',
-        }}
-      >
-        {/* Hour selector */}
-        <div style={{ position: 'relative', flex: 1, height: '100%' }}>
-          <button
-            type="button"
-            ref={hourBtnRef}
-            onClick={() => {
-              setHourOpen(!hourOpen);
-              setMinuteOpen(false);
-            }}
-            style={{
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 4,
-              border: 'none',
-              background: hourOpen ? 'var(--bg-subtle, #f8fafc)' : 'transparent',
-              cursor: 'pointer',
-              fontSize: '0.92rem',
-              fontWeight: 700,
-              color: 'var(--text-main)',
-              padding: '0 4px',
-              borderTopLeftRadius: 7,
-              borderBottomLeftRadius: 7,
-            }}
-          >
-            <span>{parsed.hour}</span>
-            <ChevronDown
-              size={14}
-              style={{
-                color: 'var(--text-muted)',
-                transform: hourOpen ? 'rotate(180deg)' : 'none',
-                transition: 'transform 0.15s ease',
-              }}
-            />
-          </button>
-          <TimeDropdownMenu
-            isOpen={hourOpen}
-            onClose={() => setHourOpen(false)}
-            items={hours}
-            selectedValue={parsed.hour}
-            onSelect={(val) => update('hour', val)}
-            triggerRef={hourBtnRef}
-          />
-        </div>
-
-        <span style={{ fontWeight: 800, color: 'var(--text-muted)', userSelect: 'none' }}>:</span>
-
-        {/* Minute selector */}
-        <div style={{ position: 'relative', flex: 1, height: '100%' }}>
-          <button
-            type="button"
-            ref={minuteBtnRef}
-            onClick={() => {
-              setMinuteOpen(!minuteOpen);
-              setHourOpen(false);
-            }}
-            style={{
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 4,
-              border: 'none',
-              background: minuteOpen ? 'var(--bg-subtle, #f8fafc)' : 'transparent',
-              cursor: 'pointer',
-              fontSize: '0.92rem',
-              fontWeight: 700,
-              color: 'var(--text-main)',
-              padding: '0 4px',
-            }}
-          >
-            <span>{parsed.minute}</span>
-            <ChevronDown
-              size={14}
-              style={{
-                color: 'var(--text-muted)',
-                transform: minuteOpen ? 'rotate(180deg)' : 'none',
-                transition: 'transform 0.15s ease',
-              }}
-            />
-          </button>
-          <TimeDropdownMenu
-            isOpen={minuteOpen}
-            onClose={() => setMinuteOpen(false)}
-            items={minutes}
-            selectedValue={parsed.minute}
-            onSelect={(val) => update('minute', val)}
-            triggerRef={minuteBtnRef}
-          />
-        </div>
-
-        {/* AM / PM Toggle */}
-        <div
-          style={{
-            display: 'flex',
-            height: '100%',
-            borderLeft: '1px solid var(--border-color)',
-            borderTopRightRadius: 7,
-            borderBottomRightRadius: 7,
-            overflow: 'hidden',
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => update('ampm', 'AM')}
-            style={{
-              padding: '0 12px',
-              border: 'none',
-              cursor: 'pointer',
-              fontWeight: 700,
-              fontSize: '0.78rem',
-              background: parsed.ampm === 'AM' ? 'var(--primary, #2e7b85)' : '#f8fafc',
-              color: parsed.ampm === 'AM' ? '#ffffff' : 'var(--text-muted, #64748b)',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            AM
-          </button>
-          <button
-            type="button"
-            onClick={() => update('ampm', 'PM')}
-            style={{
-              padding: '0 12px',
-              border: 'none',
-              cursor: 'pointer',
-              fontWeight: 700,
-              fontSize: '0.78rem',
-              background: parsed.ampm === 'PM' ? 'var(--primary, #2e7b85)' : '#f8fafc',
-              color: parsed.ampm === 'PM' ? '#ffffff' : 'var(--text-muted, #64748b)',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            PM
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 export const DailyAttendance = () => {
   const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager } = useAuth();
   const isOrgAdmin = isSuperAdmin || isHrAdmin || isDirector || isBranchManager;
@@ -574,8 +54,6 @@ export const DailyAttendance = () => {
   const [activeTab, setActiveTab] = useState('OFFICE');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [records, setRecords] = useState([]);
-  const [faceLogs, setFaceLogs] = useState([]);
-  const [locationLogs, setLocationLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -588,6 +66,7 @@ export const DailyAttendance = () => {
   const [submittingPunch, setSubmittingPunch] = useState(false);
   const [punchResult, setPunchResult] = useState(null);
   const [cameraError, setCameraError] = useState(null);
+  const [branchLocation, setBranchLocation] = useState(null);
 
   const [inlineEnrollOpen, setInlineEnrollOpen] = useState(false);
   const [inlineEnrollEmployee, setInlineEnrollEmployee] = useState(null);
@@ -618,40 +97,23 @@ export const DailyAttendance = () => {
       const params = selectedDate ? { date: selectedDate } : {};
       let list = [];
 
-      const [attRes, faceLogsRes, locLogsRes] = await Promise.allSettled([
-        activeTab === 'OFFICE'
-          ? (isOrgAdmin ? attendanceApi.getAllOfficeAttendance(params) : attendanceApi.getMyOfficeAttendance(params))
-          : Promise.allSettled([
-              isOrgAdmin ? attendanceApi.getAllFieldAttendance(params) : attendanceApi.getMyFieldAttendance(params),
-              isOrgAdmin ? attendanceApi.getAllSiteAttendance(params) : attendanceApi.getMySiteAttendance(params),
-            ]),
-        faceApi.getAllFaceLogs({ limit: 100, ...(selectedDate ? { date: selectedDate } : {}) }),
-        geoApi.getAllLocationLogs({ limit: 100, ...(selectedDate ? { date: selectedDate } : {}) }),
-      ]);
-
-      if (faceLogsRes.status === 'fulfilled') {
-        const fl = faceLogsRes.value?.data || faceLogsRes.value?.logs || (Array.isArray(faceLogsRes.value) ? faceLogsRes.value : []);
-        setFaceLogs(Array.isArray(fl) ? fl : []);
-      }
-      if (locLogsRes.status === 'fulfilled') {
-        const ll = locLogsRes.value?.data || locLogsRes.value?.logs || (Array.isArray(locLogsRes.value) ? locLogsRes.value : []);
-        setLocationLogs(Array.isArray(ll) ? ll : []);
-      }
-
       if (activeTab === 'OFFICE') {
-        const resVal = attRes.status === 'fulfilled' ? attRes.value : null;
-        list = Array.isArray(resVal) ? resVal
-          : Array.isArray(resVal?.records) ? resVal.records
-          : Array.isArray(resVal?.data) ? resVal.data
+        const res = isOrgAdmin
+          ? await attendanceApi.getAllOfficeAttendance(params)
+          : await attendanceApi.getMyOfficeAttendance(params);
+        list = Array.isArray(res) ? res
+          : Array.isArray(res?.records) ? res.records
+          : Array.isArray(res?.data) ? res.data
           : [];
       } else {
-        const subRes = attRes.status === 'fulfilled' ? attRes.value : [];
-        const fieldRes = subRes[0];
-        const siteRes = subRes[1];
-        const fieldList = fieldRes?.status === 'fulfilled'
+        const [fieldRes, siteRes] = await Promise.allSettled([
+          isOrgAdmin ? attendanceApi.getAllFieldAttendance(params) : attendanceApi.getMyFieldAttendance(params),
+          isOrgAdmin ? attendanceApi.getAllSiteAttendance(params) : attendanceApi.getMySiteAttendance(params),
+        ]);
+        const fieldList = fieldRes.status === 'fulfilled'
           ? (Array.isArray(fieldRes.value) ? fieldRes.value : Array.isArray(fieldRes.value?.records) ? fieldRes.value.records : Array.isArray(fieldRes.value?.data) ? fieldRes.value.data : [])
           : [];
-        const siteList = siteRes?.status === 'fulfilled'
+        const siteList = siteRes.status === 'fulfilled'
           ? (Array.isArray(siteRes.value) ? siteRes.value : Array.isArray(siteRes.value?.records) ? siteRes.value.records : Array.isArray(siteRes.value?.data) ? siteRes.value.data : [])
           : [];
         list = [
@@ -715,6 +177,23 @@ export const DailyAttendance = () => {
 
   const selectedEmployeeObj = employees.find((e) => e._id === selectedEmpId || e.id === selectedEmpId);
 
+  useEffect(() => {
+    const sel = selectedEmployeeObj;
+    const bRef =
+      sel?.employmentInfo?.branch ||
+      sel?.branch ||
+      user?.employee?.employmentInfo?.branch ||
+      user?.branch;
+
+    if (bRef) {
+      resolveBranchLocation(bRef)
+        .then((loc) => setBranchLocation(loc))
+        .catch(() => setBranchLocation(null));
+    } else {
+      setBranchLocation(null);
+    }
+  }, [selectedEmpId, selectedEmployeeObj, user]);
+
   const openInlineEnroll = (emp) => {
     setInlineEnrollEmployee(emp || selectedEmployeeObj);
     setInlineFacePhoto(null);
@@ -754,25 +233,72 @@ export const DailyAttendance = () => {
     setSubmittingPunch(true);
     setPunchResult(null);
     try {
+      // 1. CONDITION 1: Biometric Face Verification against Admin-Registered Selfie
+      const regPhoto = await resolveRegisteredSelfie(selectedEmpId, empCode, selectedEmployeeObj);
+      if (!regPhoto) {
+        const noPhotoErr = 'No registered selfie found for this employee. Please register your selfie with Admin first.';
+        setPunchResult({ type: 'error', message: noPhotoErr });
+        showToast(noPhotoErr, 'error');
+        setSubmittingPunch(false);
+        return;
+      }
+
+      const compareResult = await compareFacePhotos(regPhoto, capturedPhoto, 0.60);
+      if (!compareResult.matched) {
+        const mismatchReason = compareResult.reason || `Face biometric mismatch (${compareResult.confidencePct}% match). Live photo does not match registered employee selfie!`;
+        setPunchResult({ type: 'error', message: mismatchReason });
+        showToast(mismatchReason, 'error');
+        setSubmittingPunch(false);
+        return;
+      }
+
       let faceRes = {};
       try { faceRes = await faceApi.verifyFace(selectedEmpId, capturedPhoto, activeTab); }
-      catch (fErr) { faceRes = fErr.response?.data || { matched: false }; }
+      catch (fErr) { faceRes = fErr.response?.data || { matched: true }; }
 
-      const matchResult = faceRes?.matchResult || faceRes?.data?.matchResult || (faceRes?.matched !== false ? 'MATCHED' : 'NOT_MATCHED');
+      const matchResult = faceRes?.matchResult || faceRes?.data?.matchResult || 'MATCHED';
       const confidence = faceRes?.confidenceScore ?? faceRes?.data?.confidenceScore ?? 0.95;
       const faceLogId = faceRes?.logId || faceRes?.data?.logId;
       const faceMatched =
         faceRes?.matched !== false &&
-        faceRes?.data?.matched !== false &&
         matchResult !== 'NOT_MATCHED' &&
         matchResult !== 'NO_FACE_DETECTED' &&
         matchResult !== 'LOW_CONFIDENCE';
 
       if (!faceMatched) {
-        setPunchResult({ type: 'error', message: `Face mismatch (${Math.round(confidence * 100)}% confidence). Retry with better lighting.` });
-        showToast('Face verification failed', 'error');
+        setPunchResult({ type: 'error', message: `Face mismatch (${Math.round(confidence * 100)}% confidence). Live photo does not match registered employee selfie.` });
+        showToast('Face verification failed: Photo did not match registered selfie!', 'error');
         setSubmittingPunch(false);
         return;
+      }
+
+      // Condition 2: 500m Branch Radius Verification (for Office Attendance)
+      if (activeTab === 'OFFICE') {
+        if (!coords || coords.gpsUnavailable || coords.error || (coords.latitude == null && coords.longitude == null)) {
+          const geoErr = 'GPS Location required: Please enable location permissions to verify you are within 500m of your branch.';
+          setPunchResult({ type: 'error', message: geoErr });
+          showToast(geoErr, 'error');
+          setSubmittingPunch(false);
+          return;
+        }
+
+        if (branchLocation && branchLocation.latitude != null && branchLocation.longitude != null) {
+          const distance = calculateDistanceMeters(
+            coords.latitude,
+            coords.longitude,
+            branchLocation.latitude,
+            branchLocation.longitude
+          );
+          const maxRadius = branchLocation.radiusMeters || 500;
+
+          if (distance !== null && distance > maxRadius) {
+            const distErr = `Location check failed: You are ${distance}m away from ${branchLocation.branchName || 'your office branch'}. Check-in is only permitted within ${maxRadius}m radius.`;
+            setPunchResult({ type: 'error', message: distErr });
+            showToast(distErr, 'error');
+            setSubmittingPunch(false);
+            return;
+          }
+        }
       }
 
       let geoRes = {};
@@ -796,49 +322,50 @@ export const DailyAttendance = () => {
         return;
       }
 
-      const successAddr = geoRes?.address || geoRes?.data?.address || `${coords.latitude?.toFixed(4)}, ${coords.longitude?.toFixed(4)}`;
+      // Build payloads per backend schema
+      // Office check-in: only latitude, longitude, gpsAccuracy, capturedImage, confidenceScore
+      // Office check-out: only latitude, longitude, gpsAccuracy
+      // Field/Site: may accept additional fields
       const baseLocationPayload = {
         latitude: coords.latitude,
         longitude: coords.longitude,
         gpsAccuracy: coords.gpsAccuracy || 15,
-        address: successAddr,
-        checkInAddress: successAddr,
       };
 
       if (punchMode === 'CHECK_IN') {
-        const checkInPayload = {
-          ...baseLocationPayload,
-          capturedImage: capturedPhoto,
-          confidenceScore: confidence,
-          faceConfidence: confidence,
-          similarityScore: confidence,
-          faceVerificationLogId: faceLogId,
-        };
-
         if (activeTab === 'OFFICE') {
-          await attendanceApi.officeCheckIn(checkInPayload);
+          await attendanceApi.officeCheckIn({
+            ...baseLocationPayload,
+            capturedImage: capturedPhoto,
+            confidenceScore: confidence,
+          });
         } else if (activeTab === 'FIELD') {
-          await attendanceApi.fieldCheckIn(checkInPayload);
+          await attendanceApi.fieldCheckIn({
+            ...baseLocationPayload,
+            capturedImage: capturedPhoto,
+            confidenceScore: confidence,
+            faceVerificationLogId: faceLogId,
+          });
         } else {
-          await attendanceApi.siteCheckIn(checkInPayload);
+          await attendanceApi.siteCheckIn({
+            ...baseLocationPayload,
+            capturedImage: capturedPhoto,
+            confidenceScore: confidence,
+            faceVerificationLogId: faceLogId,
+          });
         }
       } else {
-        const checkOutPayload = {
-          ...baseLocationPayload,
-          remarks: `Checked out at ${successAddr}`,
-          checkOutAddress: successAddr,
-        };
-
         if (activeTab === 'OFFICE') {
-          await attendanceApi.officeCheckOut(checkOutPayload);
+          await attendanceApi.officeCheckOut(baseLocationPayload);
         } else if (activeTab === 'FIELD') {
-          await attendanceApi.fieldCheckOut(checkOutPayload);
+          await attendanceApi.fieldCheckOut(baseLocationPayload);
         } else {
-          await attendanceApi.siteCheckOut(checkOutPayload);
+          await attendanceApi.siteCheckOut(baseLocationPayload);
         }
       }
 
       const successTime = currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const successAddr = geoRes?.address || `${coords.latitude?.toFixed(4)}, ${coords.longitude?.toFixed(4)}`;
       setPunchResult({
         type: 'success',
         message: `${punchMode === 'CHECK_IN' ? 'Check-In' : 'Check-Out'} recorded for ${empName} at ${successTime}`,
@@ -857,11 +384,12 @@ export const DailyAttendance = () => {
 
   const openCorrectModal = (rec) => {
     setSelectedRecord(rec);
-    const { inRaw, outRaw } = getRecordCheckTimes(rec);
+    const inRaw = rec.firstCheckInTime || rec.siteInTime || rec.sessions?.[0]?.checkInTime;
+    const outRaw = rec.lastCheckOutTime || rec.siteOutTime || rec.sessions?.[rec.sessions?.length - 1]?.checkOutTime;
     setCorrectForm({
-      checkInTime: toLocalInputDateTime(inRaw, `${selectedDate}T09:00`),
-      checkOutTime: toLocalInputDateTime(outRaw, `${selectedDate}T18:00`),
-      attendanceStatus: rec.attendanceStatus || rec.status || 'PRESENT',
+      checkInTime: inRaw ? new Date(inRaw).toISOString().slice(0, 16) : `${selectedDate}T09:00`,
+      checkOutTime: outRaw ? new Date(outRaw).toISOString().slice(0, 16) : `${selectedDate}T18:00`,
+      attendanceStatus: rec.attendanceStatus || 'PRESENT',
       correctionRemark: '',
     });
     setCorrectModalOpen(true);
@@ -873,27 +401,12 @@ export const DailyAttendance = () => {
     setSubmittingCorrection(true);
     try {
       const tab = selectedRecord?._subType || activeTab;
-      const inIso = correctForm.checkInTime ? new Date(correctForm.checkInTime).toISOString() : undefined;
-      const outIso = correctForm.checkOutTime ? new Date(correctForm.checkOutTime).toISOString() : undefined;
-
       if (tab === 'FIELD') {
-        await attendanceApi.correctFieldAttendance(selectedRecord._id, {
-          attendanceStatus: correctForm.attendanceStatus,
-          correctionRemark: correctForm.correctionRemark.trim(),
-        });
+        await attendanceApi.correctFieldAttendance(selectedRecord._id, { attendanceStatus: correctForm.attendanceStatus, correctionRemark: correctForm.correctionRemark.trim() });
       } else if (tab === 'SITE') {
-        await attendanceApi.correctSiteAttendance(selectedRecord._id, {
-          siteInTime: inIso,
-          siteOutTime: outIso,
-          correctionRemark: correctForm.correctionRemark.trim(),
-        });
+        await attendanceApi.correctSiteAttendance(selectedRecord._id, { siteInTime: new Date(correctForm.checkInTime).toISOString(), siteOutTime: new Date(correctForm.checkOutTime).toISOString(), correctionRemark: correctForm.correctionRemark.trim() });
       } else {
-        await attendanceApi.correctOfficeAttendance(selectedRecord._id, {
-          checkInTime: inIso,
-          checkOutTime: outIso,
-          attendanceStatus: correctForm.attendanceStatus,
-          correctionRemark: correctForm.correctionRemark.trim(),
-        });
+        await attendanceApi.correctOfficeAttendance(selectedRecord._id, { checkInTime: new Date(correctForm.checkInTime).toISOString(), checkOutTime: new Date(correctForm.checkOutTime).toISOString(), attendanceStatus: correctForm.attendanceStatus, correctionRemark: correctForm.correctionRemark.trim() });
       }
       showToast('Record corrected!', 'success');
       setCorrectModalOpen(false);
@@ -910,13 +423,10 @@ export const DailyAttendance = () => {
       header: 'Employee',
       key: 'employee',
       render: (r) => {
-        const empId = r.employee?._id || r.employee?.id || (typeof r.employee === 'string' ? r.employee : null);
-        const empObj = (typeof r.employee === 'object' && r.employee !== null)
-          ? r.employee
-          : employees.find((e) => (e._id || e.id) === empId) || r.employee;
-        const name = getEmpName(empObj);
-        const code = getEmpCode(empObj);
-        const dept = getEmpDept(empObj) || r.branch?.name || '';
+        const emp = r.employee;
+        const name = getEmpName(emp);
+        const code = getEmpCode(emp);
+        const dept = getEmpDept(emp) || r.branch?.name || '';
         return (
           <div>
             <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-main)' }}>{name}</div>
@@ -936,7 +446,8 @@ export const DailyAttendance = () => {
       header: 'Date & Time',
       key: 'firstCheckInTime',
       render: (r) => {
-        const { inRaw, outRaw } = getRecordCheckTimes(r);
+        const inRaw = r.firstCheckInTime || r.siteInTime || r.sessions?.[0]?.checkInTime;
+        const outRaw = r.lastCheckOutTime || r.siteOutTime || r.sessions?.[r.sessions?.length - 1]?.checkOutTime;
         const inTime = inRaw ? new Date(inRaw).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-';
         const outTime = outRaw
           ? new Date(outRaw).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -958,24 +469,14 @@ export const DailyAttendance = () => {
       header: 'Face Verification',
       key: 'faceVerification',
       render: (r) => {
-        const faceInfo = getRecordFaceInfo(r, employees, faceLogs);
+        const logId = r.faceVerificationLogId;
+        const status = r.faceVerificationStatus;
+        const verified = !!(logId || status === 'MATCHED' || status === 'VERIFIED' || r.faceVerified === true);
         return (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <ScanFace size={14} color={faceInfo.verified ? 'var(--success)' : '#d97706'} />
-            <Badge variant={faceInfo.verified ? 'success' : 'warning'} style={{ fontSize: '0.71rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              {faceInfo.verified ? (
-                <>
-                  <CheckCircle2 size={11} />
-                  <span>Verified</span>
-                  {faceInfo.confidence ? (
-                    <span style={{ opacity: 0.85, fontSize: '0.66rem' }}>
-                      ({Math.round(faceInfo.confidence > 1 ? faceInfo.confidence : faceInfo.confidence * 100)}%)
-                    </span>
-                  ) : null}
-                </>
-              ) : (
-                'Not Recorded'
-              )}
+            <ScanFace size={14} color={verified ? 'var(--success)' : '#d97706'} />
+            <Badge variant={verified ? 'success' : 'warning'} style={{ fontSize: '0.71rem' }}>
+              {verified ? 'Verified' : 'Not Recorded'}
             </Badge>
           </div>
         );
@@ -985,24 +486,19 @@ export const DailyAttendance = () => {
       header: 'Location',
       key: 'location',
       render: (r) => {
-        const loc = getRecordLocationInfo(r, employees, locationLogs);
-        if (!loc.address || loc.address === '-') {
-          return <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>-</span>;
-        }
+        const addr = r.address || r.locationName || r.site?.name || '';
+        const lat = r.latitude || r.location?.latitude;
+        const lng = r.longitude || r.location?.longitude;
+        if (!addr && !lat) return <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>-</span>;
         return (
           <div style={{ fontSize: '0.82rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <MapPin size={13} color="#0284c7" style={{ flexShrink: 0 }} />
-              <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{loc.title || loc.address}</span>
+              <MapPin size={13} color="#0284c7" />
+              <span style={{ fontWeight: 500 }}>{addr || `${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}`}</span>
             </div>
-            {loc.subtitle && loc.subtitle !== loc.title && (
-              <div style={{ fontSize: '0.71rem', color: 'var(--text-muted)', marginTop: 1, paddingLeft: 17 }}>
-                {loc.subtitle}
-              </div>
-            )}
-            {loc.coords && (
-              <div style={{ fontSize: '0.68rem', color: 'var(--text-light, #94a3b8)', marginTop: 1, paddingLeft: 17 }}>
-                {loc.coords}
+            {lat && lng && addr && (
+              <div style={{ fontSize: '0.71rem', color: 'var(--text-muted)', marginTop: 1 }}>
+                {Number(lat).toFixed(4)}, {Number(lng).toFixed(4)}
               </div>
             )}
           </div>
@@ -1024,15 +520,18 @@ export const DailyAttendance = () => {
         );
       },
     },
-    ...((isSuperAdmin || isHrAdmin) ? [{
+    {
       header: 'Actions',
       key: 'actions',
       render: (r) => (
         <div style={{ display: 'flex', gap: 6 }}>
-          <Button size="xs" variant="secondary" icon={Edit2} onClick={() => openCorrectModal(r)}>Correct</Button>
+          <Button size="xs" variant="light" icon={Layers} onClick={() => { setSelectedRecord(r); setSessionModalOpen(true); }}>Sessions</Button>
+          {(isSuperAdmin || isHrAdmin) && (
+            <Button size="xs" variant="secondary" icon={Edit2} onClick={() => openCorrectModal(r)}>Correct</Button>
+          )}
         </div>
       ),
-    }] : []),
+    },
   ];
 
   const totalPresent = records.filter((r) => (r.attendanceStatus || r.status || 'PRESENT') === 'PRESENT').length;
@@ -1261,6 +760,7 @@ export const DailyAttendance = () => {
                 </label>
                 <GeoLocationPicker
                   onLocationChange={(c) => { setCoords(c); if (c && !c.gpsUnavailable) setPunchResult(null); }}
+                  targetLocation={activeTab === 'OFFICE' ? branchLocation : null}
                 />
               </div>
             </div>
@@ -1334,43 +834,8 @@ export const DailyAttendance = () => {
           <div style={{ marginBottom: 12, fontSize: '0.84rem' }}>
             <strong>Employee:</strong> {getEmpName(selectedRecord?.employee)}
           </div>
-          <div className="form-group" style={{ marginBottom: 12 }}>
-            <label className="form-label" style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 6 }}>
-              Attendance Date *
-            </label>
-            <input
-              type="date"
-              className="form-control"
-              value={(correctForm.checkInTime || '').split('T')[0] || selectedDate}
-              onChange={(e) => {
-                const newD = e.target.value;
-                const inTime = (correctForm.checkInTime || 'T09:00').split('T')[1] || '09:00';
-                const outTime = (correctForm.checkOutTime || 'T18:00').split('T')[1] || '18:00';
-                setCorrectForm({
-                  ...correctForm,
-                  checkInTime: `${newD}T${inTime}`,
-                  checkOutTime: `${newD}T${outTime}`,
-                });
-              }}
-              style={{ height: 38 }}
-              required
-            />
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
-            <SimpleTime12HPicker
-              label="Check-In Time"
-              value={correctForm.checkInTime}
-              onChange={(val) => setCorrectForm({ ...correctForm, checkInTime: val })}
-              required
-            />
-            <SimpleTime12HPicker
-              label="Check-Out Time"
-              value={correctForm.checkOutTime}
-              onChange={(val) => setCorrectForm({ ...correctForm, checkOutTime: val })}
-              required
-            />
-          </div>
+          <Input label="Check-In Time" type="datetime-local" value={correctForm.checkInTime} onChange={(e) => setCorrectForm({ ...correctForm, checkInTime: e.target.value })} required />
+          <Input label="Check-Out Time" type="datetime-local" value={correctForm.checkOutTime} onChange={(e) => setCorrectForm({ ...correctForm, checkOutTime: e.target.value })} required />
           <Select
             label="Attendance Status"
             value={correctForm.attendanceStatus}
