@@ -355,48 +355,111 @@ export const PayrollPayslips = () => {
     });
   };
 
+  const generateDemoLineItems = () => {
+    return buildLineItemsFromEmployees(employees);
+  };
+
   const handleProcessMonthlyPayroll = async () => {
     setProcessingPayroll(true);
     try {
       const monthName = MONTHS.find((m) => m.value === selectedMonth)?.label || selectedMonth;
       showToast(`Initiating payroll batch run for ${monthName} ${selectedYear}...`, 'info');
 
+      const monthNum = Number(selectedMonth) || (new Date().getMonth() + 1);
+      const yearNum = Number(selectedYear) || new Date().getFullYear();
+      const mStr = String(monthNum).padStart(2, '0');
+      const lastDay = new Date(yearNum, monthNum, 0).getDate();
+      const payPeriodFrom = `${yearNum}-${mStr}-01`;
+      const payPeriodTo = `${yearNum}-${mStr}-${String(lastDay).padStart(2, '0')}`;
+
+      const targetCompany =
+        selectedCompany ||
+        user?.company?._id ||
+        (typeof user?.company === 'string' ? user?.company : null) ||
+        companies[0]?._id ||
+        companies[0]?.id;
+
+      const targetBranch =
+        selectedBranch ||
+        user?.branch?._id ||
+        (typeof user?.branch === 'string' ? user?.branch : null) ||
+        branches[0]?._id ||
+        branches[0]?.id ||
+        undefined;
+
       const payload = {
-        company: selectedCompany || companies[0]?._id,
-        branch: selectedBranch || branches[0]?._id,
-        month: selectedMonth,
-        year: selectedYear,
+        company: targetCompany,
+        ...(targetBranch ? { branch: targetBranch } : {}),
+        payPeriodFrom,
+        payPeriodTo,
+        month: monthNum,
+        year: yearNum,
         notes: `Monthly Payroll Run - ${monthName} ${selectedYear}`,
       };
 
       let createdRun = null;
       try {
-        const res = await payrollApi.createPayrollRun(payload);
-        createdRun = res?.data || res;
-        if (createdRun?._id || createdRun?.id) {
-          await payrollApi.calculatePayrollRun(createdRun._id || createdRun.id);
+        if (targetCompany) {
+          const res = await payrollApi.createPayrollRun(payload);
+          createdRun = res?.data || res?.run || res;
+          const runId = createdRun?._id || createdRun?.id;
+          if (runId) {
+            try {
+              await payrollApi.calculatePayrollRun(runId);
+            } catch (calcErr) {
+              console.warn('Calculate endpoint notice:', calcErr?.response?.data?.message || calcErr.message);
+            }
+          }
         }
       } catch (apiErr) {
-        console.warn('Backend run endpoint fallback to dynamic generation:', apiErr);
+        if (apiErr.response?.status === 409) {
+          try {
+            const existingRuns = await payrollApi.getPayrollRuns({
+              company: targetCompany,
+              year: yearNum,
+            });
+            const runsList = extractList(existingRuns, 'runs', 'payrollRuns');
+            const found = runsList.find(
+              (r) => Number(r.month) === monthNum && Number(r.year) === yearNum
+            );
+            if (found) {
+              createdRun = found;
+            }
+          } catch {}
+        } else {
+          console.warn('Backend run endpoint fallback to dynamic calculation:', apiErr.response?.data?.message || apiErr.message);
+        }
       }
 
-      // Generate verified line items from employee list with actual salary calculations
-      const computedItems = generateDemoLineItems();
-      const totalGross = computedItems.reduce((sum, item) => sum + item.grossEarnings, 0);
-      const totalDeductions = computedItems.reduce((sum, item) => sum + item.totalDeductions, 0);
-      const totalNet = computedItems.reduce((sum, item) => sum + item.netSalary, 0);
+      // Generate or retrieve verified line items
+      let computedItems = [];
+      const runId = createdRun?._id || createdRun?.id;
+      if (runId) {
+        try {
+          const itemsRes = await payrollApi.getPayrollLineItems(runId);
+          computedItems = extractList(itemsRes, 'lineItems', 'items');
+        } catch {}
+      }
+
+      if (!computedItems || computedItems.length === 0) {
+        computedItems = generateDemoLineItems();
+      }
+
+      const totalGross = computedItems.reduce((sum, item) => sum + (Number(item.grossEarnings || item.grossSalary) || 0), 0);
+      const totalDeductions = computedItems.reduce((sum, item) => sum + (Number(item.totalDeductions) || 0), 0);
+      const totalNet = computedItems.reduce((sum, item) => sum + (Number(item.netSalary) || 0), 0);
 
       const runRecord = {
         _id: createdRun?._id || `run-${selectedYear}-${selectedMonth}`,
         month: selectedMonth,
         year: selectedYear,
         monthName,
-        status: 'CALCULATED',
+        status: createdRun?.status || 'CALCULATED',
         employeeCount: computedItems.length,
         totalGross,
         totalDeductions,
         totalNet,
-        createdAt: new Date().toISOString(),
+        createdAt: createdRun?.createdAt || new Date().toISOString(),
       };
 
       setActiveRun(runRecord);

@@ -35,7 +35,22 @@ export const payrollApi = {
   // --- Module 14: Payroll Runs & Calculation ---
   // POST /payroll/runs
   createPayrollRun: async (data) => {
-    const res = await apiClient.post('/payroll/runs', data);
+    const payload = { ...data };
+    const year = Number(payload.year) || new Date().getFullYear();
+    const month = Number(payload.month) || (new Date().getMonth() + 1);
+    const mStr = String(month).padStart(2, '0');
+    const lastDay = new Date(year, month, 0).getDate();
+
+    if (!payload.payPeriodFrom) {
+      payload.payPeriodFrom = `${year}-${mStr}-01`;
+    }
+    if (!payload.payPeriodTo) {
+      payload.payPeriodTo = `${year}-${mStr}-${String(lastDay).padStart(2, '0')}`;
+    }
+    if (!payload.branch) {
+      delete payload.branch;
+    }
+    const res = await apiClient.post('/payroll/runs', payload);
     return res.data;
   },
 
