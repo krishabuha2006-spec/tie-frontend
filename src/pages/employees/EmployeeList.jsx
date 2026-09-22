@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import employeeApi from '../../api/employeeApi';
 import masterApi from '../../api/masterApi';
 import faceApi from '../../api/faceApi';
@@ -450,6 +451,8 @@ export const EmployeeList = () => {
 
   const { showToast } = useToast();
   const navigate = useNavigate();
+  const { isSuperAdmin, isHrAdmin } = useAuth();
+  const canEnrollFace = isSuperAdmin || isHrAdmin;
 
   // Robust Designation Fetcher
   const fetchDesignations = async (deptFilter) => {
@@ -3599,55 +3602,99 @@ export const EmployeeList = () => {
         size="md"
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Visual 4-Step Pipeline */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, backgroundColor: '#f8fafc', padding: 8, borderRadius: 8, border: '1px solid var(--border-color)', textAlign: 'center' }}>
-            <div style={{ padding: '4px 6px', borderRadius: 6, backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', fontSize: '0.72rem', fontWeight: 700, color: '#166534' }}>
-              ✓ 1. Employee Created
-            </div>
-            <div style={{ padding: '4px 6px', borderRadius: 6, backgroundColor: enrolling ? '#f0fdfa' : '#eff6ff', border: `1px solid ${enrolling ? '#99f6e4' : '#3b82f6'}`, fontSize: '0.72rem', fontWeight: 700, color: enrolling ? '#0f766e' : '#1d4ed8' }}>
-              {enrolling ? '⏳ Storing...' : '▶ 2. Capture Face'}
-            </div>
-            <div style={{ padding: '4px 6px', borderRadius: 6, backgroundColor: capturedFace && !enrolling ? '#f0fdf4' : '#f8fafc', border: `1px solid ${capturedFace && !enrolling ? '#bbf7d0' : 'var(--border-color)'}`, fontSize: '0.72rem', fontWeight: 600, color: capturedFace && !enrolling ? '#166534' : 'var(--text-muted)' }}>
-              {capturedFace && !enrolling ? '✓ 3. Face Stored' : '3. Face Stored'}
-            </div>
-            <div style={{ padding: '4px 6px', borderRadius: 6, backgroundColor: '#f8fafc', border: '1px solid var(--border-color)', fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-              4. Ready for Attendance
-            </div>
-          </div>
 
-          <div style={{ padding: '10px 12px', backgroundColor: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 8, fontSize: '0.84rem', color: '#0f766e' }}>
-            <strong>📷 Auto-capture:</strong> Look into the camera — face will be captured and stored automatically.
-          </div>
-
-          {enrolling ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '30px 20px', backgroundColor: '#f0fdfa', borderRadius: 10, border: '1px solid #99f6e4' }}>
-              <div style={{ width: 48, height: 48, border: '4px solid #0f766e', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-              <div style={{ fontWeight: 600, color: '#0f766e', fontSize: '0.9rem' }}>Storing face biometrics...</div>
-              <div style={{ fontSize: '0.78rem', color: '#64748b' }}>Please wait while we register the facial template</div>
-            </div>
+          {/* === ACCESS DENIED: not Super Admin or HR Admin === */}
+          {!canEnrollFace ? (
+            <>
+              <div style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16,
+                padding: '36px 24px', backgroundColor: '#fff7ed',
+                border: '1px solid #fed7aa', borderRadius: 12, textAlign: 'center',
+              }}>
+                <div style={{
+                  width: 56, height: 56, borderRadius: '50%',
+                  backgroundColor: '#ffedd5', display: 'flex', alignItems: 'center',
+                  justifyContent: 'center',
+                }}>
+                  <AlertTriangle size={28} color="#ea580c" />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '1rem', color: '#9a3412', marginBottom: 6 }}>
+                    Access Denied — Insufficient Permissions
+                  </div>
+                  <div style={{ fontSize: '0.84rem', color: '#c2410c', lineHeight: 1.6 }}>
+                    Face enrollment requires <strong>Super Admin</strong> or <strong>HR Admin</strong> role.<br />
+                    Please log in with an admin account to register employee faces.
+                  </div>
+                </div>
+                <div style={{
+                  padding: '8px 14px', backgroundColor: '#ffedd5',
+                  borderRadius: 8, border: '1px solid #fdba74',
+                  fontSize: '0.78rem', color: '#9a3412', fontWeight: 600,
+                }}>
+                  🔐 Your current role does not have permission for biometric enrollment
+                </div>
+              </div>
+              <div className="modal-footer" style={{ margin: '14px -20px -20px' }}>
+                <Button variant="secondary" onClick={() => setEnrollModalOpen(false)}>
+                  Close
+                </Button>
+              </div>
+            </>
           ) : (
-            <CameraCapture
-              onCapture={handleAutoEnroll}
-              label="Look into the camera — auto-captures & stores face"
-            />
-          )}
+            /* === AUTHORIZED: Super Admin or HR Admin — show camera === */
+            <>
+              {/* Visual 4-Step Pipeline */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, backgroundColor: '#f8fafc', padding: 8, borderRadius: 8, border: '1px solid var(--border-color)', textAlign: 'center' }}>
+                <div style={{ padding: '4px 6px', borderRadius: 6, backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', fontSize: '0.72rem', fontWeight: 700, color: '#166534' }}>
+                  ✓ 1. Employee Created
+                </div>
+                <div style={{ padding: '4px 6px', borderRadius: 6, backgroundColor: enrolling ? '#f0fdfa' : '#eff6ff', border: `1px solid ${enrolling ? '#99f6e4' : '#3b82f6'}`, fontSize: '0.72rem', fontWeight: 700, color: enrolling ? '#0f766e' : '#1d4ed8' }}>
+                  {enrolling ? '⏳ Storing...' : '▶ 2. Capture Face'}
+                </div>
+                <div style={{ padding: '4px 6px', borderRadius: 6, backgroundColor: capturedFace && !enrolling ? '#f0fdf4' : '#f8fafc', border: `1px solid ${capturedFace && !enrolling ? '#bbf7d0' : 'var(--border-color)'}`, fontSize: '0.72rem', fontWeight: 600, color: capturedFace && !enrolling ? '#166534' : 'var(--text-muted)' }}>
+                  {capturedFace && !enrolling ? '✓ 3. Face Stored' : '3. Face Stored'}
+                </div>
+                <div style={{ padding: '4px 6px', borderRadius: 6, backgroundColor: '#f8fafc', border: '1px solid var(--border-color)', fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                  4. Ready for Attendance
+                </div>
+              </div>
 
-          {capturedFace && !enrolling && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#16a34a', fontSize: '0.85rem', padding: '8px 12px', backgroundColor: '#f0fdf4', borderRadius: 6, border: '1px solid #bbf7d0' }}>
-              <CheckCircle2 size={16} /> Face captured and stored successfully!
-            </div>
-          )}
+              <div style={{ padding: '10px 12px', backgroundColor: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 8, fontSize: '0.84rem', color: '#0f766e' }}>
+                <strong>📷 Auto-capture:</strong> Look into the camera — face will be captured and stored automatically.
+              </div>
 
-          <div className="modal-footer" style={{ margin: '14px -20px -20px' }}>
-            <Button variant="secondary" onClick={() => setEnrollModalOpen(false)} disabled={enrolling}>
-              {capturedFace ? 'Close' : 'Cancel / Complete Later'}
-            </Button>
-            {!capturedFace && !enrolling && (
-              <Button variant="primary" icon={ScanFace} onClick={handleEnrollFace} loading={enrolling} disabled={!capturedFace}>
-                Store Face
-              </Button>
-            )}
-          </div>
+              {enrolling ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '30px 20px', backgroundColor: '#f0fdfa', borderRadius: 10, border: '1px solid #99f6e4' }}>
+                  <div style={{ width: 48, height: 48, border: '4px solid #0f766e', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                  <div style={{ fontWeight: 600, color: '#0f766e', fontSize: '0.9rem' }}>Storing face biometrics...</div>
+                  <div style={{ fontSize: '0.78rem', color: '#64748b' }}>Please wait while we register the facial template</div>
+                </div>
+              ) : (
+                <CameraCapture
+                  onCapture={handleAutoEnroll}
+                  label="Look into the camera — auto-captures & stores face"
+                />
+              )}
+
+              {capturedFace && !enrolling && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#16a34a', fontSize: '0.85rem', padding: '8px 12px', backgroundColor: '#f0fdf4', borderRadius: 6, border: '1px solid #bbf7d0' }}>
+                  <CheckCircle2 size={16} /> Face captured and stored successfully!
+                </div>
+              )}
+
+              <div className="modal-footer" style={{ margin: '14px -20px -20px' }}>
+                <Button variant="secondary" onClick={() => setEnrollModalOpen(false)} disabled={enrolling}>
+                  {capturedFace ? 'Close' : 'Cancel / Complete Later'}
+                </Button>
+                {!capturedFace && !enrolling && (
+                  <Button variant="primary" icon={ScanFace} onClick={handleEnrollFace} loading={enrolling} disabled={!capturedFace}>
+                    Store Face
+                  </Button>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </Modal>
     </div>
