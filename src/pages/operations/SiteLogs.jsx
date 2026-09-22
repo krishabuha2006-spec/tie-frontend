@@ -554,59 +554,61 @@ export const SiteLogs = () => {
       <div
         style={{
           background: '#ffffff',
-          borderRadius: 16,
-          padding: '24px',
+          borderRadius: 14,
+          padding: '16px 20px',
           border: '1px solid #e2e8f0',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.03)',
-          marginBottom: '24px',
+          marginBottom: 16,
           display: 'flex',
           flexWrap: 'wrap',
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: 16,
+          gap: 12,
         }}
       >
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 12,
-                background: 'linear-gradient(135deg, #0f766e 0%, #0d9488 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#ffffff',
-                boxShadow: '0 4px 10px rgba(15, 118, 110, 0.25)',
-              }}
-            >
-              <FileSpreadsheet size={24} />
-            </div>
-            <div>
-              <h1 style={{ fontSize: '1.45rem', fontWeight: 700, margin: 0, color: '#0f172a' }}>
-                Module 10: Site Log & Activity Narrative Reporting
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 10,
+              background: 'linear-gradient(135deg, #0f766e, #0d9488)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#ffffff',
+              boxShadow: '0 2px 8px rgba(15, 118, 110, 0.2)',
+            }}
+          >
+            <FileSpreadsheet size={20} />
+          </div>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <h1 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0, color: '#0f172a' }}>
+                Site Activity Logs
               </h1>
-              <p style={{ margin: '4px 0 0', fontSize: '0.88rem', color: '#64748b' }}>
-                Structured textual work narratives, task progress tracking, supervisor follow-up queue, and executive project/issues reports.
-              </p>
+              <Badge variant="primary">{myLogs.length} Total</Badge>
             </div>
+            <p style={{ margin: '2px 0 0', fontSize: '0.82rem', color: '#64748b' }}>
+              Daily work logs, supervisor review queue, and site observations
+            </p>
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {canSupervise && (
             <Button
               variant="outline"
+              size="sm"
               icon={Plus}
               onClick={() => setStubModalOpen(true)}
               style={{ borderColor: '#0f766e', color: '#0f766e' }}
             >
-              Verify / Create Stub
+              New Log Stub
             </Button>
           )}
           <Button
             variant="light"
+            size="sm"
             icon={RotateCcw}
             onClick={() => {
               if (activeTab === 'my_logs') loadMyLogs();
@@ -621,224 +623,63 @@ export const SiteLogs = () => {
         </div>
       </div>
 
-      {/* KPI Principles Strip */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-          gap: 16,
-          marginBottom: 24,
-        }}
-      >
-        <div
-          style={{
-            background: '#ffffff',
-            borderRadius: 14,
-            padding: '18px 20px',
-            border: '1px solid #e2e8f0',
-            boxShadow: '0 2px 6px rgba(0,0,0,0.02)',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#64748b' }}>ACTIVITY NARRATIVE LAYER</span>
-            <FileCheck size={18} color="#0f766e" />
-          </div>
-          <div style={{ fontSize: '1.35rem', fontWeight: 700, color: '#0f172a' }}>
-            Zero Duplication
-          </div>
-          <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: 4 }}>
-            Thin textual layer dynamically populated over Module 9 Attendance
-          </div>
-        </div>
-
-        <div
-          style={{
-            background: '#ffffff',
-            borderRadius: 14,
-            padding: '18px 20px',
-            border: '1px solid #e2e8f0',
-            boxShadow: '0 2px 6px rgba(0,0,0,0.02)',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#64748b' }}>AUTO-STUB ON SITE-OUT</span>
-            <Clock size={18} color="#d97706" />
-          </div>
-          <div style={{ fontSize: '1.35rem', fontWeight: 700, color: '#d97706' }}>
-            Auto-Generated Stubs
-          </div>
-          <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: 4 }}>
-            Pending stubs (isComplete: false) auto-created upon site departure
-          </div>
-        </div>
-
-        <div
-          style={{
-            background: '#ffffff',
-            borderRadius: 14,
-            padding: '18px 20px',
-            border: '1px solid #e2e8f0',
-            boxShadow: '0 2px 6px rgba(0,0,0,0.02)',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#64748b' }}>IMMUTABILITY ENFORCED</span>
-            <Lock size={18} color="#0284c7" />
-          </div>
-          <div style={{ fontSize: '1.35rem', fontWeight: 700, color: '#0284c7' }}>
-            Locked on Complete
-          </div>
-          <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: 4 }}>
-            Completed narratives cannot be tampered with or resubmitted
-          </div>
-        </div>
-
-        <div
-          style={{
-            background: '#ffffff',
-            borderRadius: 14,
-            padding: '18px 20px',
-            border: '1px solid #e2e8f0',
-            boxShadow: '0 2px 6px rgba(0,0,0,0.02)',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#64748b' }}>SAFETY & ESCALATIONS</span>
-            <ShieldAlert size={18} color="#dc2626" />
-          </div>
-          <div style={{ fontSize: '1.35rem', fontWeight: 700, color: '#dc2626' }}>
-            Issues Stream
-          </div>
-          <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: 4 }}>
-            Instant escalation of flagged site issues directly to management
-          </div>
-        </div>
-      </div>
-
-      {/* Tabs */}
+      {/* Clean Tabs */}
       <div
         style={{
           display: 'flex',
           flexWrap: 'wrap',
-          gap: 10,
-          borderBottom: '2px solid #e2e8f0',
-          marginBottom: 20,
+          gap: 6,
+          background: '#ffffff',
+          padding: '6px 8px',
+          borderRadius: 12,
+          border: '1px solid #e2e8f0',
+          marginBottom: 16,
         }}
       >
-        <button
-          type="button"
-          onClick={() => setActiveTab('my_logs')}
-          style={{
-            padding: '12px 18px',
-            background: 'none',
-            border: 'none',
-            borderBottom: activeTab === 'my_logs' ? '3px solid #0f766e' : '3px solid transparent',
-            color: activeTab === 'my_logs' ? '#0f766e' : '#64748b',
-            fontWeight: activeTab === 'my_logs' ? 700 : 500,
-            cursor: 'pointer',
-            fontSize: '0.94rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          <FileSpreadsheet size={18} />
-          My Site Logs ({myLogs.length})
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('incomplete_queue')}
-          style={{
-            padding: '12px 18px',
-            background: 'none',
-            border: 'none',
-            borderBottom: activeTab === 'incomplete_queue' ? '3px solid #0f766e' : '3px solid transparent',
-            color: activeTab === 'incomplete_queue' ? '#0f766e' : '#64748b',
-            fontWeight: activeTab === 'incomplete_queue' ? 700 : 500,
-            cursor: 'pointer',
-            fontSize: '0.94rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          <Clock size={18} />
-          Incomplete Follow-Up Queue ({incompleteQueue.length})
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('issues_report')}
-          style={{
-            padding: '12px 18px',
-            background: 'none',
-            border: 'none',
-            borderBottom: activeTab === 'issues_report' ? '3px solid #0f766e' : '3px solid transparent',
-            color: activeTab === 'issues_report' ? '#0f766e' : '#64748b',
-            fontWeight: activeTab === 'issues_report' ? 700 : 500,
-            cursor: 'pointer',
-            fontSize: '0.94rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          <ShieldAlert size={18} />
-          Issues & Observations Stream ({issuesReport.length})
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('project_report')}
-          style={{
-            padding: '12px 18px',
-            background: 'none',
-            border: 'none',
-            borderBottom: activeTab === 'project_report' ? '3px solid #0f766e' : '3px solid transparent',
-            color: activeTab === 'project_report' ? '#0f766e' : '#64748b',
-            fontWeight: activeTab === 'project_report' ? 700 : 500,
-            cursor: 'pointer',
-            fontSize: '0.94rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          <Building2 size={18} />
-          Project Executive Report
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('employee_report')}
-          style={{
-            padding: '12px 18px',
-            background: 'none',
-            border: 'none',
-            borderBottom: activeTab === 'employee_report' ? '3px solid #0f766e' : '3px solid transparent',
-            color: activeTab === 'employee_report' ? '#0f766e' : '#64748b',
-            fontWeight: activeTab === 'employee_report' ? 700 : 500,
-            cursor: 'pointer',
-            fontSize: '0.94rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          <User size={18} />
-          Employee Site Report
-        </button>
+        {[
+          { id: 'my_logs', label: `My Logs (${myLogs.length})`, icon: FileSpreadsheet },
+          { id: 'incomplete_queue', label: `Pending Review (${incompleteQueue.length})`, icon: Clock },
+          { id: 'issues_report', label: `Issues Flagged (${issuesReport.length})`, icon: ShieldAlert },
+          { id: 'project_report', label: 'Project Summary', icon: Building2 },
+          { id: 'employee_report', label: 'Employee History', icon: User },
+        ].map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                padding: '8px 14px',
+                borderRadius: 8,
+                border: 'none',
+                background: isActive ? '#0f766e' : 'transparent',
+                color: isActive ? '#ffffff' : '#64748b',
+                fontWeight: isActive ? 600 : 500,
+                cursor: 'pointer',
+                fontSize: '0.84rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 7,
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <Icon size={15} />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* TAB 1: MY SITE LOGS */}
       {activeTab === 'my_logs' && (
         <div style={{ background: '#ffffff', borderRadius: 14, padding: 20, border: '1px solid #e2e8f0' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
             <div>
-              <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#0f172a' }}>My Site Daily Activity Logs</h3>
-              <p style={{ margin: '4px 0 0', fontSize: '0.84rem', color: '#64748b' }}>
-                Complete activity narratives for your site departures with work completed, pending work, and safety observations.
+              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 600, color: '#0f172a' }}>My Daily Activity Logs</h3>
+              <p style={{ margin: '2px 0 0', fontSize: '0.8rem', color: '#64748b' }}>
+                Complete activity narratives for your site departures
               </p>
             </div>
 
@@ -847,10 +688,10 @@ export const SiteLogs = () => {
                 value={myLogsFilter.isComplete}
                 onChange={(e) => setMyLogsFilter({ isComplete: e.target.value })}
                 style={{
-                  padding: '7px 12px',
+                  padding: '6px 12px',
                   borderRadius: 8,
                   border: '1px solid #cbd5e1',
-                  fontSize: '0.86rem',
+                  fontSize: '0.84rem',
                   background: '#ffffff',
                 }}
               >
@@ -865,7 +706,7 @@ export const SiteLogs = () => {
             columns={myLogsColumns}
             data={myLogs}
             loading={loadingMyLogs}
-            emptyMessage="No site activity logs found for your account. Perform Site-Out in Module 9 to generate a log stub."
+            emptyMessage="No site activity logs found for your account. Check out from a site in Site Attendance to automatically generate a log."
           />
         </div>
       )}
@@ -874,11 +715,11 @@ export const SiteLogs = () => {
       {activeTab === 'incomplete_queue' && (
         <div style={{ background: '#ffffff', borderRadius: 14, padding: 20, border: '1px solid #e2e8f0' }}>
           <div style={{ marginBottom: 16 }}>
-            <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#0f172a' }}>
-              Incomplete Site Logs Follow-Up Queue
+            <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 600, color: '#0f172a' }}>
+              Pending Narrative Queue
             </h3>
-            <p style={{ margin: '4px 0 0', fontSize: '0.84rem', color: '#64748b' }}>
-              Site engineers who have checked out from a project site but have not submitted their structured narrative report.
+            <p style={{ margin: '2px 0 0', fontSize: '0.8rem', color: '#64748b' }}>
+              Checked-out site visits waiting for activity narrative submission
             </p>
           </div>
 
@@ -886,7 +727,7 @@ export const SiteLogs = () => {
             columns={incompleteColumns}
             data={incompleteQueue}
             loading={loadingIncomplete}
-            emptyMessage="✓ All checked-out site visits have their narratives completed! Incomplete queue is empty."
+            emptyMessage="✓ All checked-out site visits have their narratives completed! Queue is empty."
           />
         </div>
       )}
@@ -895,11 +736,11 @@ export const SiteLogs = () => {
       {activeTab === 'issues_report' && (
         <div style={{ background: '#ffffff', borderRadius: 14, padding: 20, border: '1px solid #e2e8f0' }}>
           <div style={{ marginBottom: 16 }}>
-            <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#0f172a' }}>
-              Site Safety, Civil & Electrical Issues Escalation
+            <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 600, color: '#0f172a' }}>
+              Flagged Site Issues & Observations
             </h3>
-            <p style={{ margin: '4px 0 0', fontSize: '0.84rem', color: '#64748b' }}>
-              Consolidated stream of all site logs with non-empty observations for executive review and prompt resolution.
+            <p style={{ margin: '2px 0 0', fontSize: '0.8rem', color: '#64748b' }}>
+              Consolidated safety hazards, civil, or electrical issues reported from site visits
             </p>
           </div>
 

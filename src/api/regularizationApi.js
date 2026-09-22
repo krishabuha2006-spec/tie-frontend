@@ -65,13 +65,15 @@ export const regularizationApi = {
   },
 
   // Step 5: Approve Regularization Request (with Write-Through) (PUT /regularization/requests/:id/approve)
-  approveRegularization: async (id, data) => {
+  approveRegularization: async (id, data = {}) => {
+    const text = typeof data === 'string' ? data : (data?.remark || data?.reviewRemarks || 'Approved by manager');
+    const payload = { remark: text, reviewRemarks: text };
     try {
-      const res = await apiClient.put(`/regularization/requests/${id}/approve`, data);
+      const res = await apiClient.put(`/regularization/requests/${id}/approve`, payload);
       return res.data;
     } catch (err) {
       if (err.response?.status === 404) {
-        const fallback = await apiClient.put(`/attendance/office/regularizations/${id}/approve`, data);
+        const fallback = await apiClient.put(`/attendance/office/regularizations/${id}/approve`, payload);
         return fallback.data;
       }
       throw err;
@@ -79,13 +81,15 @@ export const regularizationApi = {
   },
 
   // Step 6: Reject Regularization Request (PUT /regularization/requests/:id/reject)
-  rejectRegularization: async (id, data) => {
+  rejectRegularization: async (id, data = {}) => {
+    const text = typeof data === 'string' ? data : (data?.remark || data?.reviewRemarks || data?.reason || 'Rejected by manager');
+    const payload = { remark: text, reviewRemarks: text };
     try {
-      const res = await apiClient.put(`/regularization/requests/${id}/reject`, data);
+      const res = await apiClient.put(`/regularization/requests/${id}/reject`, payload);
       return res.data;
     } catch (err) {
       if (err.response?.status === 404) {
-        const fallback = await apiClient.put(`/attendance/office/regularizations/${id}/reject`, data);
+        const fallback = await apiClient.put(`/attendance/office/regularizations/${id}/reject`, payload);
         return fallback.data;
       }
       throw err;

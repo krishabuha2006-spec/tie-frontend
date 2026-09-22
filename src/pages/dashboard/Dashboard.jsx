@@ -362,31 +362,26 @@ export const Dashboard = () => {
       const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       const addressStr = activeCoords.address || `${activeCoords.latitude.toFixed(4)}, ${activeCoords.longitude.toFixed(4)}`;
 
-      const payload = {
-        employee: myEmpId,
-        date: todayStr,
-        time: timeStr,
-        checkInTime: now.toISOString(),
-        checkOutTime: now.toISOString(),
+      // Backend only accepts: latitude, longitude, gpsAccuracy, capturedImage, confidenceScore
+      // Employee is resolved from JWT token server-side
+      const checkInPayload = {
         latitude: activeCoords.latitude,
         longitude: activeCoords.longitude,
-        address: addressStr,
         gpsAccuracy: activeCoords.gpsAccuracy || 15,
-        attendanceType: 'OFFICE',
-        attendanceStatus: 'PRESENT',
-        faceVerificationStatus: 'MATCHED',
-        faceVerificationLogId: faceRes?.logId || faceRes?.data?.logId,
         capturedImage: capturedPhoto,
-        photoUrl: capturedPhoto,
         confidenceScore: confidence || 0.95,
-        remarks: `Dashboard Biometric Attendance: Face Verified (${Math.round((confidence || 0.95) * 100)}%)`,
+      };
+      const checkOutPayload = {
+        latitude: activeCoords.latitude,
+        longitude: activeCoords.longitude,
+        gpsAccuracy: activeCoords.gpsAccuracy || 15,
       };
 
       if (punchMode === 'CHECK_IN') {
-        await attendanceApi.officeCheckIn(payload);
+        await attendanceApi.officeCheckIn(checkInPayload);
         showToast('✓ Check-In successfully recorded with Face Verification!', 'success');
       } else {
-        await attendanceApi.officeCheckOut(payload);
+        await attendanceApi.officeCheckOut(checkOutPayload);
         showToast('✓ Check-Out successfully recorded with Face Verification!', 'success');
       }
 

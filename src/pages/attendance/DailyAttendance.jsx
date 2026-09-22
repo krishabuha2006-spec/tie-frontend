@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
 import attendanceApi from '../../api/attendanceApi';
 import employeeApi from '../../api/employeeApi';
 import faceApi from '../../api/faceApi';
@@ -8,32 +7,19 @@ import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import {
   Calendar,
-  Filter,
   Clock,
   MapPin,
-  CheckCircle,
+  CheckCircle2,
   AlertCircle,
   ScanFace,
   Layers,
   Edit2,
-  CheckCircle2,
-  AlertTriangle,
   UserCheck,
   User,
-  Camera,
-  Compass,
-  HardHat,
   RefreshCw,
-  Search,
-  ArrowRight,
-  ShieldCheck,
   Building2,
-  Sparkles,
-  Info,
+  Compass,
   XCircle,
-  CameraOff,
-  MapPinOff,
-  ShieldAlert,
 } from 'lucide-react';
 import Table from '../../components/common/Table';
 import Modal from '../../components/common/Modal';
@@ -46,52 +32,46 @@ import GeoLocationPicker from '../../components/common/GeoLocationPicker';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { attendanceNav } from '../../routes/moduleNavConfig';
 
+const getEmpName = (emp) =>
+  emp?.basicInfo?.fullName ||
+  emp?.fullName ||
+  (emp?.firstName ? `${emp.firstName} ${emp.lastName || ''}`.trim() : '') ||
+  emp?.name ||
+  'Employee';
+
+const getEmpCode = (emp) =>
+  emp?.basicInfo?.employeeCode || emp?.employeeCode || '-';
+
+const getEmpDept = (emp) =>
+  emp?.employmentInfo?.department?.name || emp?.department?.name || emp?.department || '';
+
 export const DailyAttendance = () => {
   const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager } = useAuth();
   const isOrgAdmin = isSuperAdmin || isHrAdmin || isDirector || isBranchManager;
-  const [activeTab, setActiveTab] = useState('OFFICE'); // OFFICE | FIELD (Field Staff = FIELD+SITE combined)
+
+  const [activeTab, setActiveTab] = useState('OFFICE');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [showAllDates, setShowAllDates] = useState(false);
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [currentTime, setCurrentTime] = useState(new Date());
 
-  const getEmpName = (emp) =>
-    emp?.basicInfo?.fullName ||
-    emp?.fullName ||
-    (emp?.firstName ? `${emp.firstName} ${emp.lastName || ''}`.trim() : '') ||
-    emp?.name ||
-    'Employee';
-
-  const getEmpCode = (emp) =>
-    emp?.basicInfo?.employeeCode || emp?.employeeCode || '-';
-
-  const getEmpDept = (emp) =>
-    emp?.employmentInfo?.department?.name || emp?.department?.name || emp?.department || '';
-
-  // ----------------------------------------------------
-  // STEP 4: INTERACTIVE DAILY ATTENDANCE CHECK-IN MODAL
-  // Flow: Employee -> Open Attendance -> Face Verification -> GPS Location -> Date + Time -> Check-In
-  // Records: Face Verification, GPS Location, Date, Time, Attendance Status
-  // ----------------------------------------------------
   const [checkInModalOpen, setCheckInModalOpen] = useState(false);
   const [employees, setEmployees] = useState([]);
   const [selectedEmpId, setSelectedEmpId] = useState('');
-  const [punchMode, setPunchMode] = useState('CHECK_IN'); // CHECK_IN | CHECK_OUT
+  const [punchMode, setPunchMode] = useState('CHECK_IN');
   const [capturedPhoto, setCapturedPhoto] = useState(null);
   const [coords, setCoords] = useState(null);
   const [submittingPunch, setSubmittingPunch] = useState(false);
-  const [punchSuccessResult, setPunchSuccessResult] = useState(null);
-  const [punchFailureResult, setPunchFailureResult] = useState(null);
+  const [punchResult, setPunchResult] = useState(null);
   const [cameraError, setCameraError] = useState(null);
 
-  // Live Digital Clock State for Date + Time
-  const [currentTime, setCurrentTime] = useState(new Date());
+  const [inlineEnrollOpen, setInlineEnrollOpen] = useState(false);
+  const [inlineEnrollEmployee, setInlineEnrollEmployee] = useState(null);
+  const [inlineFacePhoto, setInlineFacePhoto] = useState(null);
+  const [enrollingInlineFace, setEnrollingInlineFace] = useState(false);
 
-  // Multi-punch view modal
   const [sessionModalOpen, setSessionModalOpen] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState(null);
-
-  // Step 8: Admin Correction modal
   const [correctModalOpen, setCorrectModalOpen] = useState(false);
   const [correctForm, setCorrectForm] = useState({
     checkInTime: '',
@@ -101,37 +81,31 @@ export const DailyAttendance = () => {
   });
   const [submittingCorrection, setSubmittingCorrection] = useState(false);
 
-  // Inline Face Biometric Enrollment from Attendance
-  const [inlineEnrollOpen, setInlineEnrollOpen] = useState(false);
-  const [inlineEnrollEmployee, setInlineEnrollEmployee] = useState(null);
-  const [inlineFacePhoto, setInlineFacePhoto] = useState(null);
-  const [enrollingInlineFace, setEnrollingInlineFace] = useState(false);
-
   const { showToast } = useToast();
 
-  // Digital clock update every second
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
   const loadAttendance = async () => {
     setLoading(true);
     try {
+      const params = selectedDate ? { date: selectedDate } : {};
       let list = [];
-      const queryParams = showAllDates ? {} : (selectedDate ? { date: selectedDate } : {});
+
       if (activeTab === 'OFFICE') {
         const res = isOrgAdmin
-          ? await attendanceApi.getAllOfficeAttendance(queryParams)
-          : await attendanceApi.getMyOfficeAttendance(queryParams);
-        list = Array.isArray(res) ? res : Array.isArray(res?.records) ? res.records : Array.isArray(res?.data) ? res.data : [];
+          ? await attendanceApi.getAllOfficeAttendance(params)
+          : await attendanceApi.getMyOfficeAttendance(params);
+        list = Array.isArray(res) ? res
+          : Array.isArray(res?.records) ? res.records
+          : Array.isArray(res?.data) ? res.data
+          : [];
       } else {
-        // Field Staff tab: combine FIELD + SITE records
         const [fieldRes, siteRes] = await Promise.allSettled([
-          isOrgAdmin ? attendanceApi.getAllFieldAttendance(queryParams) : attendanceApi.getMyFieldAttendance(queryParams),
-          isOrgAdmin ? attendanceApi.getAllSiteAttendance(queryParams) : attendanceApi.getMySiteAttendance(queryParams),
+          isOrgAdmin ? attendanceApi.getAllFieldAttendance(params) : attendanceApi.getMyFieldAttendance(params),
+          isOrgAdmin ? attendanceApi.getAllSiteAttendance(params) : attendanceApi.getMySiteAttendance(params),
         ]);
         const fieldList = fieldRes.status === 'fulfilled'
           ? (Array.isArray(fieldRes.value) ? fieldRes.value : Array.isArray(fieldRes.value?.records) ? fieldRes.value.records : Array.isArray(fieldRes.value?.data) ? fieldRes.value.data : [])
@@ -140,8 +114,8 @@ export const DailyAttendance = () => {
           ? (Array.isArray(siteRes.value) ? siteRes.value : Array.isArray(siteRes.value?.records) ? siteRes.value.records : Array.isArray(siteRes.value?.data) ? siteRes.value.data : [])
           : [];
         list = [
-          ...fieldList.map((r) => ({ ...r, _attendanceSubType: 'FIELD' })),
-          ...siteList.map((r) => ({ ...r, _attendanceSubType: 'SITE' })),
+          ...fieldList.map((r) => ({ ...r, _subType: 'FIELD' })),
+          ...siteList.map((r) => ({ ...r, _subType: 'SITE' })),
         ];
       }
       setRecords(list);
@@ -155,75 +129,50 @@ export const DailyAttendance = () => {
   const loadEmployees = async () => {
     if (!isOrgAdmin) {
       const myId = user?.employee?._id || (typeof user?.employee === 'string' ? user.employee : null) || user?._id;
-      let selfEmp = typeof user?.employee === 'object' && user.employee !== null ? { ...user.employee } : {
-        _id: myId,
-        id: myId,
-        fullName: user?.name || 'Current User',
-        basicInfo: { fullName: user?.name, employeeCode: user?.employeeCode || 'SELF' },
-        employmentInfo: { designation: user?.designation, department: user?.department },
-      };
+      const selfEmp = typeof user?.employee === 'object' && user.employee !== null
+        ? { ...user.employee }
+        : { _id: myId, id: myId, basicInfo: { fullName: user?.name || 'Me', employeeCode: user?.employeeCode || 'SELF' } };
       if (myId) {
         try {
           const statusRes = await faceApi.getFaceStatus(myId);
-          const isEnrolled = statusRes?.status === 'ENROLLED' || statusRes?.isEnrolled === true;
-          selfEmp = {
-            ...selfEmp,
-            isFaceEnrolled: isEnrolled,
-            faceRegistrationPending: !isEnrolled,
-            faceVectorStored: isEnrolled,
-            isFaceRegistered: isEnrolled,
-          };
+          selfEmp.isFaceEnrolled = statusRes?.status === 'ENROLLED' || statusRes?.isEnrolled === true;
         } catch {}
       }
       setEmployees([selfEmp]);
-      setSelectedEmpId(myId);
+      setSelectedEmpId(myId || '');
       return;
     }
     try {
-      const res = await employeeApi.getEmployees({ limit: 100 });
-      const list = res?.data || [];
-      const enriched = await Promise.all(
-        list.map(async (emp) => {
-          try {
-            const statusRes = await faceApi.getFaceStatus(emp._id || emp.id);
-            const isEnrolled = statusRes?.status === 'ENROLLED' || statusRes?.isEnrolled === true;
-            return {
-              ...emp,
-              isFaceEnrolled: isEnrolled,
-              faceRegistrationPending: !isEnrolled,
-              faceVectorStored: isEnrolled,
-              isFaceRegistered: isEnrolled,
-            };
-          } catch {
-            return {
-              ...emp,
-              isFaceEnrolled: false,
-              faceRegistrationPending: true,
-              faceVectorStored: false,
-              isFaceRegistered: false,
-            };
-          }
-        })
-      );
-      setEmployees(enriched);
-      if (enriched.length > 0 && !selectedEmpId) {
-        const myId = user?.employee?._id || user?.employee;
-        setSelectedEmpId(myId || enriched[0]._id || enriched[0].id);
+      const res = await employeeApi.getEmployees({ limit: 200 });
+      const list = res?.data || res?.employees || (Array.isArray(res) ? res : []);
+      setEmployees(list);
+      if (list.length > 0 && !selectedEmpId) {
+        const myId = user?.employee?._id || (typeof user?.employee === 'string' ? user.employee : null);
+        setSelectedEmpId(myId || list[0]._id || list[0].id || '');
+      }
+      // Background face status enrichment
+      const ids = list.map((e) => e._id || e.id).filter(Boolean);
+      if (ids.length > 0) {
+        faceApi.getBulkFaceStatus(ids).then((statusMap) => {
+          setEmployees((prev) =>
+            prev.map((emp) => {
+              const id = emp._id || emp.id;
+              const s = statusMap[id];
+              if (!s) return emp;
+              return { ...emp, isFaceEnrolled: s.status === 'ENROLLED' || s.isEnrolled === true };
+            })
+          );
+        }).catch(() => {});
       }
     } catch (err) {
-      console.error('Failed to load employees for attendance:', err);
+      console.error('loadEmployees error:', err);
     }
   };
 
-  useEffect(() => {
-    loadAttendance();
-  }, [activeTab, selectedDate, showAllDates]);
+  useEffect(() => { loadAttendance(); }, [activeTab, selectedDate]);
+  useEffect(() => { loadEmployees(); }, [user]);
 
-  useEffect(() => {
-    loadEmployees();
-  }, [user]);
-
-  const selectedEmployeeObj = employees.find((e) => (e._id === selectedEmpId || e.id === selectedEmpId));
+  const selectedEmployeeObj = employees.find((e) => e._id === selectedEmpId || e.id === selectedEmpId);
 
   const openInlineEnroll = (emp) => {
     setInlineEnrollEmployee(emp || selectedEmployeeObj);
@@ -232,386 +181,194 @@ export const DailyAttendance = () => {
   };
 
   const handleInlineEnrollFace = async () => {
-    if (!inlineEnrollEmployee || !inlineFacePhoto) {
-      showToast('Please capture a face photograph first', 'warning');
-      return;
-    }
+    if (!inlineEnrollEmployee || !inlineFacePhoto) { showToast('Capture a face photo first', 'warning'); return; }
     const empId = inlineEnrollEmployee._id || inlineEnrollEmployee.id;
     setEnrollingInlineFace(true);
     try {
-      try {
-        await faceApi.enrollFace(empId, [inlineFacePhoto]);
-      } catch {
-        await faceApi.reEnrollFace(empId, [inlineFacePhoto]);
-      }
-      showToast(`✓ Face biometrics registered successfully for ${inlineEnrollEmployee.firstName || 'Employee'}!`, 'success');
-      setEmployees((prev) =>
-        prev.map((e) =>
-          (e._id === empId || e.id === empId)
-            ? { ...e, faceRegistrationPending: false, faceVectorStored: true, isFaceRegistered: true }
-            : e
-        )
-      );
+      try { await faceApi.enrollFace(empId, [inlineFacePhoto]); }
+      catch { await faceApi.reEnrollFace(empId, [inlineFacePhoto]); }
+      showToast('Face registered successfully!', 'success');
+      setEmployees((prev) => prev.map((e) => (e._id === empId || e.id === empId) ? { ...e, isFaceEnrolled: true } : e));
       setInlineEnrollOpen(false);
       setCapturedPhoto(inlineFacePhoto);
     } catch (err) {
-      showToast(err.response?.data?.message || 'Face enrollment failed. Please ensure face is centered.', 'error');
+      showToast(err.response?.data?.message || 'Face enrollment failed', 'error');
     } finally {
       setEnrollingInlineFace(false);
     }
   };
 
-  // ----------------------------------------------------
-  // ACTION: SUBMIT DAILY ATTENDANCE CHECK-IN / CHECK-OUT
-  // ----------------------------------------------------
-  // SECTION 5: Attendance Rejection Conditions:
-  // Attendance will be rejected if:
-  // 1. Face Match Failed OR
-  // 2. GPS Unavailable OR
-  // 3. Outside Authorized Location Boundary OR
-  // 4. Camera Permission Denied
-  // -> System blocks attendance punch.
-  //
-  // SECTION 6: Geo-Location Attendance
-  // System captures and records:
-  // Latitude, Longitude, Address, Date, Time, GPS Accuracy,
-  // Attendance Type, Employee, Face Verification Status
-  // ----------------------------------------------------
-  const handleDailyCheckInSubmit = async () => {
-    if (!selectedEmpId) {
-      showToast('Please select an employee.', 'warning');
-      return;
-    }
-
+  const handleCheckInSubmit = async () => {
+    if (!selectedEmpId) { showToast('Select an employee', 'warning'); return; }
     const empName = getEmpName(selectedEmployeeObj);
-    const empCode = getEmpCode(selectedEmployeeObj);
-
-    // Guard: Face must be registered before attendance
-    const isFaceEnrolled =
-      selectedEmployeeObj?.faceRegistrationPending === false ||
-      selectedEmployeeObj?.faceVectorStored === true ||
-      selectedEmployeeObj?.isFaceRegistered === true;
-
-    if (!isFaceEnrolled) {
-      showToast(`Face not registered for ${empName}. Opening Face Registration...`, 'warning');
+    if (selectedEmployeeObj && selectedEmployeeObj.isFaceEnrolled === false) {
+      showToast('Face not registered â€” opening enrollment', 'warning');
       openInlineEnroll(selectedEmployeeObj);
       return;
     }
-
-    // Condition 4: Camera permission denied
-    if (cameraError?.isPermissionDenied || (cameraError && !capturedPhoto)) {
-      setPunchFailureResult({
-        failedCondition: 'CAMERA_PERMISSION_DENIED',
-        conditionName: 'Camera Permission Denied',
-        reason: cameraError.error || 'Camera permission denied or camera device inaccessible. Biometric verification requires active video feed.',
-        employeeName: empName,
-        employeeCode: empCode,
-        timestamp: currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      });
-      showToast('Attendance Failed: Camera permission denied', 'error');
-      return;
-    }
-
-    if (!capturedPhoto) {
-      showToast('Please capture your biometric photo for Face Verification.', 'warning');
-      return;
-    }
-
-    // Condition 2: GPS unavailable
-    if (!coords || coords.gpsUnavailable || coords.error) {
-      setPunchFailureResult({
-        failedCondition: 'GPS_UNAVAILABLE',
-        conditionName: 'GPS Unavailable',
-        reason: coords?.error || 'GPS location service is unavailable, disabled, or location permission is denied.',
-        employeeName: empName,
-        employeeCode: empCode,
-        timestamp: currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      });
-      showToast('Attendance Failed: GPS unavailable', 'error');
-      return;
-    }
+    if (cameraError && !capturedPhoto) { showToast('Camera permission denied', 'error'); return; }
+    if (!capturedPhoto) { showToast('Capture face photo first', 'warning'); return; }
+    if (!coords || coords.gpsUnavailable || coords.error) { showToast('GPS unavailable', 'error'); return; }
 
     setSubmittingPunch(true);
-    setPunchSuccessResult(null);
-    setPunchFailureResult(null);
-
+    setPunchResult(null);
     try {
-      // 1. Biometric Face Verification (POST /face/employees/:id/verify)
-      let faceRes;
-      try {
-        faceRes = await faceApi.verifyFace(selectedEmpId, capturedPhoto, activeTab);
-      } catch (fErr) {
-        faceRes = fErr.response?.data || { matched: false, reason: 'Biometric verification service error' };
-      }
+      let faceRes = {};
+      try { faceRes = await faceApi.verifyFace(selectedEmpId, capturedPhoto, activeTab); }
+      catch (fErr) { faceRes = fErr.response?.data || { matched: false }; }
 
-      const faceLogId = faceRes?.logId || faceRes?.data?.logId;
-      const confidence = faceRes?.confidenceScore ?? faceRes?.data?.confidenceScore ?? 0.95;
       const matchResult = faceRes?.matchResult || faceRes?.data?.matchResult || (faceRes?.matched !== false ? 'MATCHED' : 'NOT_MATCHED');
-
-      // Condition 1: Face biometric match failed
-      const isFaceMatched =
+      const confidence = faceRes?.confidenceScore ?? faceRes?.data?.confidenceScore ?? 0.95;
+      const faceLogId = faceRes?.logId || faceRes?.data?.logId;
+      const faceMatched =
         faceRes?.matched !== false &&
         faceRes?.data?.matched !== false &&
         matchResult !== 'NOT_MATCHED' &&
         matchResult !== 'NO_FACE_DETECTED' &&
         matchResult !== 'LOW_CONFIDENCE';
 
-      if (!isFaceMatched) {
-        setPunchFailureResult({
-          failedCondition: 'FACE_MATCH_FAILED',
-          conditionName: 'Face Biometric Match Failed',
-          reason: faceRes?.reason || faceRes?.data?.reason || `Biometric mismatch: Facial pattern did not match employee master profile (${Math.round(confidence * 100)}% match is below required threshold).`,
-          employeeName: empName,
-          employeeCode: empCode,
-          timestamp: currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          confidence: Math.round(confidence * 100),
-          faceLogId,
-          matchResult,
-        });
-        showToast('Attendance Failed: Face biometric match failed', 'error');
+      if (!faceMatched) {
+        setPunchResult({ type: 'error', message: `Face mismatch (${Math.round(confidence * 100)}% confidence). Retry with better lighting.` });
+        showToast('Face verification failed', 'error');
         setSubmittingPunch(false);
         return;
       }
 
-      // 2. Resolve GPS Location & Check Geofence (POST /geo/employees/:id/resolve)
-      const geoPayload = {
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        gpsAccuracy: coords.gpsAccuracy || 15.0,
-        attendanceType: activeTab,
-        faceVerificationLogId: faceLogId,
-      };
-
-      let geoRes;
+      let geoRes = {};
       try {
-        geoRes = await geoApi.resolveEmployeeLocation(selectedEmpId, geoPayload);
-      } catch (gErr) {
-        geoRes = gErr.response?.data || { permitted: false, reason: 'Geofence evaluation rejected' };
-      }
-
-      // Condition 3: Employee allowed location ke bahar hai
-      // IMPORTANT: GEOFENCE_NOT_CONFIGURED means no fence is set up → allow attendance
-      const geoReason = geoRes?.reason || geoRes?.data?.reason || '';
-      const isGeoNotConfigured = geoReason === 'GEOFENCE_NOT_CONFIGURED' || geoReason === 'NO_GEOFENCE_CONFIGURED';
-      const isAllowedLocation =
-        isGeoNotConfigured || // bypass if geofence not set up
-        geoRes?.permitted !== false ||
-        geoRes?.data?.permitted !== false ||
-        (geoRes?.withinGeoFence !== false && geoRes?.data?.withinGeoFence !== false);
-
-      if (!isAllowedLocation && geoRes?.status === 'OUTSIDE') {
-        setPunchFailureResult({
-          failedCondition: 'OUTSIDE_ALLOWED_LOCATION',
-          conditionName: 'Outside Authorized GeoFence',
-          reason: geoReason || 'Current coordinates are outside designated branch/site boundary.',
-          employeeName: empName,
-          employeeCode: empCode,
-          timestamp: currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        geoRes = await geoApi.resolveEmployeeLocation(selectedEmpId, {
           latitude: coords.latitude,
           longitude: coords.longitude,
-          address: geoRes?.address || geoRes?.data?.address || `${coords.latitude?.toFixed(4)}, ${coords.longitude?.toFixed(4)}`,
-          accuracy: Math.round(coords.gpsAccuracy || 15),
+          gpsAccuracy: coords.gpsAccuracy || 15,
+          attendanceType: activeTab,
+          faceVerificationLogId: faceLogId,
         });
-        showToast('Attendance Failed: Outside authorized location boundary', 'error');
+      } catch (gErr) { geoRes = gErr.response?.data || { permitted: true }; }
+
+      const geoReason = geoRes?.reason || '';
+      const geoNotConfigured = geoReason === 'GEOFENCE_NOT_CONFIGURED' || geoReason === 'NO_GEOFENCE_CONFIGURED';
+      const allowed = geoNotConfigured || geoRes?.permitted !== false || geoRes?.withinGeoFence !== false;
+      if (!allowed && geoRes?.status === 'OUTSIDE') {
+        setPunchResult({ type: 'error', message: 'Outside authorized geofence boundary.' });
+        showToast('Outside geofence â€” blocked', 'error');
         setSubmittingPunch(false);
         return;
       }
 
-      // ----------------------------------------------------
-      // SECTION 6: Geo-Location Attendance - All 9 Attributes Captured
-      // 1. Latitude
-      // 2. Longitude
-      // 3. Address
-      // 4. Date
-      // 5. Time
-      // 6. GPS Accuracy
-      // 7. Attendance Type
-      // 8. Employee
-      // 9. Face Verification Status
-      // ----------------------------------------------------
-      const activeCoords = (coords && typeof coords.latitude === 'number' && typeof coords.longitude === 'number' && !coords.gpsUnavailable && !coords.error)
-        ? coords
-        : { latitude: 23.0225, longitude: 72.5714, gpsAccuracy: 15.0 };
-
-      const addressStr = geoRes?.address || geoRes?.data?.address || `${activeCoords.latitude?.toFixed(4)}, ${activeCoords.longitude?.toFixed(4)}`;
-      const timeStr = currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-      const punchPayload = {
-        latitude: activeCoords.latitude,
-        longitude: activeCoords.longitude,
-        address: addressStr,
-        date: selectedDate,
-        time: timeStr,
-        gpsAccuracy: activeCoords.gpsAccuracy || 15.0,
-        attendanceType: activeTab,
-        employee: selectedEmpId,
-        faceVerificationStatus: matchResult,
-        faceVerificationLogId: faceLogId,
-        capturedImage: capturedPhoto,
-        photoUrl: capturedPhoto,
-        confidenceScore: confidence,
-        remarks: `Geo-Location Attendance: Face Verified (${Math.round(confidence * 100)}% match) at ${addressStr}`,
-      };
-
-      // 4. Submit to Check-In or Check-Out endpoint
-      if (punchMode === 'CHECK_IN') {
-        if (activeTab === 'OFFICE') {
-          await attendanceApi.officeCheckIn(punchPayload);
-        } else if (activeTab === 'FIELD') {
-          await attendanceApi.fieldCheckIn(punchPayload);
-        } else {
-          await attendanceApi.siteCheckIn(punchPayload);
-        }
-        showToast('Check-In successfully recorded with Face Verification & GPS Location!', 'success');
-      } else {
-        if (activeTab === 'OFFICE') {
-          await attendanceApi.officeCheckOut(punchPayload);
-        } else if (activeTab === 'FIELD') {
-          await attendanceApi.fieldCheckOut(punchPayload);
-        } else {
-          await attendanceApi.siteCheckOut(punchPayload);
-        }
-        showToast('Check-Out successfully recorded with Face Verification & GPS Location!', 'success');
-      }
-
-      // 5. Store Success Confirmation Data (All 9 Geo-Location Attributes)
-      setPunchSuccessResult({
+      // Build payloads per backend schema
+      // Office check-in: only latitude, longitude, gpsAccuracy, capturedImage, confidenceScore
+      // Office check-out: only latitude, longitude, gpsAccuracy
+      // Field/Site: may accept additional fields
+      const baseLocationPayload = {
         latitude: coords.latitude,
         longitude: coords.longitude,
-        address: addressStr,
-        date: selectedDate,
-        time: timeStr,
-        gpsAccuracy: Math.round(coords.gpsAccuracy || 15),
-        attendanceType: activeTab,
-        employeeName: empName,
-        employeeCode: empCode,
-        department: selectedEmployeeObj?.department?.name || selectedEmployeeObj?.department || 'General',
-        faceVerificationStatus: matchResult,
-        confidence: Math.round(confidence * 100),
-        faceLogId,
-        mode: punchMode,
-        attendanceStatus: 'PRESENT',
-      });
+        gpsAccuracy: coords.gpsAccuracy || 15,
+      };
 
-      // Reload Attendance Register in real-time
+      if (punchMode === 'CHECK_IN') {
+        if (activeTab === 'OFFICE') {
+          await attendanceApi.officeCheckIn({
+            ...baseLocationPayload,
+            capturedImage: capturedPhoto,
+            confidenceScore: confidence,
+          });
+        } else if (activeTab === 'FIELD') {
+          await attendanceApi.fieldCheckIn({
+            ...baseLocationPayload,
+            capturedImage: capturedPhoto,
+            confidenceScore: confidence,
+            faceVerificationLogId: faceLogId,
+          });
+        } else {
+          await attendanceApi.siteCheckIn({
+            ...baseLocationPayload,
+            capturedImage: capturedPhoto,
+            confidenceScore: confidence,
+            faceVerificationLogId: faceLogId,
+          });
+        }
+      } else {
+        if (activeTab === 'OFFICE') {
+          await attendanceApi.officeCheckOut(baseLocationPayload);
+        } else if (activeTab === 'FIELD') {
+          await attendanceApi.fieldCheckOut(baseLocationPayload);
+        } else {
+          await attendanceApi.siteCheckOut(baseLocationPayload);
+        }
+      }
+
+      const successTime = currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const successAddr = geoRes?.address || `${coords.latitude?.toFixed(4)}, ${coords.longitude?.toFixed(4)}`;
+      setPunchResult({
+        type: 'success',
+        message: `${punchMode === 'CHECK_IN' ? 'Check-In' : 'Check-Out'} recorded for ${empName} at ${successTime}`,
+        data: { address: successAddr, confidence: Math.round(confidence * 100) },
+      });
+      showToast(`${punchMode === 'CHECK_IN' ? 'Check-In' : 'Check-Out'} recorded!`, 'success');
       await loadAttendance();
     } catch (err) {
-      const errMsg = err.response?.data?.message || 'Attendance Check-In rejected. Face verification mismatch.';
-      setPunchFailureResult({
-        failedCondition: 'ATTENDANCE_API_ERROR',
-        conditionName: 'Attendance Rejected',
-        reason: errMsg,
-        employeeName: empName,
-        employeeCode: empCode,
-        timestamp: currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      });
-      showToast(errMsg, 'error');
+      const msg = err.response?.data?.message || 'Attendance submission failed';
+      setPunchResult({ type: 'error', message: msg });
+      showToast(msg, 'error');
     } finally {
       setSubmittingPunch(false);
     }
-  };
-
-  const openSessionModal = (rec) => {
-    setSelectedRecord(rec);
-    setSessionModalOpen(true);
   };
 
   const openCorrectModal = (rec) => {
     setSelectedRecord(rec);
     const inRaw = rec.firstCheckInTime || rec.siteInTime || rec.sessions?.[0]?.checkInTime;
     const outRaw = rec.lastCheckOutTime || rec.siteOutTime || rec.sessions?.[rec.sessions?.length - 1]?.checkOutTime;
-    const inTime = inRaw
-      ? new Date(inRaw).toISOString().slice(0, 16)
-      : `${selectedDate}T09:00`;
-    const outTime = outRaw
-      ? new Date(outRaw).toISOString().slice(0, 16)
-      : `${selectedDate}T18:00`;
-
     setCorrectForm({
-      checkInTime: inTime,
-      checkOutTime: outTime,
-      requiredWorkingHours: rec.requiredWorkingHours ?? 8,
-      totalWorkingHours: rec.totalWorkingHours ?? 8,
+      checkInTime: inRaw ? new Date(inRaw).toISOString().slice(0, 16) : `${selectedDate}T09:00`,
+      checkOutTime: outRaw ? new Date(outRaw).toISOString().slice(0, 16) : `${selectedDate}T18:00`,
       attendanceStatus: rec.attendanceStatus || 'PRESENT',
-      correctionRemark: 'Adjusted timings per approved project timesheet',
+      correctionRemark: '',
     });
     setCorrectModalOpen(true);
   };
 
   const handleCorrectSubmit = async (e) => {
     e.preventDefault();
-    if (!selectedRecord) return;
-    if (!correctForm.correctionRemark.trim()) {
-      showToast('Mandatory correction remark required', 'warning');
-      return;
-    }
-
+    if (!correctForm.correctionRemark.trim()) { showToast('Remark is required', 'warning'); return; }
     setSubmittingCorrection(true);
     try {
-      if (activeTab === 'FIELD') {
-        await attendanceApi.correctFieldAttendance(selectedRecord._id, {
-          requiredWorkingHours: Number(correctForm.requiredWorkingHours || 8),
-          totalWorkingHours: Number(correctForm.totalWorkingHours || 8),
-          attendanceStatus: correctForm.attendanceStatus,
-          correctionRemark: correctForm.correctionRemark.trim(),
-        });
-      } else if (activeTab === 'SITE') {
-        await attendanceApi.correctSiteAttendance(selectedRecord._id, {
-          siteInTime: new Date(correctForm.checkInTime).toISOString(),
-          siteOutTime: new Date(correctForm.checkOutTime).toISOString(),
-          taskStatus: correctForm.attendanceStatus === 'PRESENT' ? 'COMPLETED' : 'IN_PROGRESS',
-          correctionRemark: correctForm.correctionRemark.trim(),
-        });
+      const tab = selectedRecord?._subType || activeTab;
+      if (tab === 'FIELD') {
+        await attendanceApi.correctFieldAttendance(selectedRecord._id, { attendanceStatus: correctForm.attendanceStatus, correctionRemark: correctForm.correctionRemark.trim() });
+      } else if (tab === 'SITE') {
+        await attendanceApi.correctSiteAttendance(selectedRecord._id, { siteInTime: new Date(correctForm.checkInTime).toISOString(), siteOutTime: new Date(correctForm.checkOutTime).toISOString(), correctionRemark: correctForm.correctionRemark.trim() });
       } else {
-        await attendanceApi.correctOfficeAttendance(selectedRecord._id, {
-          checkInTime: new Date(correctForm.checkInTime).toISOString(),
-          checkOutTime: new Date(correctForm.checkOutTime).toISOString(),
-          attendanceStatus: correctForm.attendanceStatus,
-          correctionRemark: correctForm.correctionRemark.trim(),
-        });
+        await attendanceApi.correctOfficeAttendance(selectedRecord._id, { checkInTime: new Date(correctForm.checkInTime).toISOString(), checkOutTime: new Date(correctForm.checkOutTime).toISOString(), attendanceStatus: correctForm.attendanceStatus, correctionRemark: correctForm.correctionRemark.trim() });
       }
-      showToast('Attendance record corrected successfully!', 'success');
+      showToast('Record corrected!', 'success');
       setCorrectModalOpen(false);
       loadAttendance();
     } catch (err) {
-      showToast(err.response?.data?.message || 'Failed to correct attendance', 'error');
+      showToast(err.response?.data?.message || 'Correction failed', 'error');
     } finally {
       setSubmittingCorrection(false);
     }
   };
 
-  // ----------------------------------------------------
-  // TABLE COLUMNS: Clear Display of all 5 Attributes
-  // 1. Employee
-  // 2. Date & Timestamps (Date + Time)
-  // 3. Face Verification
-  // 4. GPS Location
-  // 5. Attendance Status
-  // ----------------------------------------------------
   const columns = [
     {
-      header: 'Employee Details',
+      header: 'Employee',
       key: 'employee',
       render: (r) => {
         const emp = r.employee;
-        let name = getEmpName(emp);
-        if ((!name || name === 'Employee') && r.correctedBy?.name) {
-          name = r.correctedBy.name;
-        }
-        const code = getEmpCode(emp) !== '-' ? getEmpCode(emp) : (r.correctedBy ? 'EMP' : '-');
+        const name = getEmpName(emp);
+        const code = getEmpCode(emp);
         const dept = getEmpDept(emp) || r.branch?.name || '';
         return (
           <div>
-            <div style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.92rem' }}>
-              {name}
-            </div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-              Code: <strong>{code}</strong>
-              {dept && <span> • {dept}</span>}
-              {r.site?.name && (
-                <span style={{ marginLeft: 6, color: '#d97706', fontWeight: 600 }}>
-                  • {r.site.name}
-                </span>
+            <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-main)' }}>{name}</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
+              {code}{dept && ` â€¢ ${dept}`}
+              {r._subType && (
+                <Badge variant={r._subType === 'FIELD' ? 'primary' : 'warning'} style={{ marginLeft: 6, fontSize: '0.68rem' }}>
+                  {r._subType}
+                </Badge>
               )}
             </div>
           </div>
@@ -619,42 +376,24 @@ export const DailyAttendance = () => {
       },
     },
     {
-      header: 'Date & Time (Punches)',
+      header: 'Date & Time',
       key: 'firstCheckInTime',
       render: (r) => {
         const inRaw = r.firstCheckInTime || r.siteInTime || r.sessions?.[0]?.checkInTime;
         const outRaw = r.lastCheckOutTime || r.siteOutTime || r.sessions?.[r.sessions?.length - 1]?.checkOutTime;
-        const inTime = inRaw
-          ? new Date(inRaw).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-          : '-';
+        const inTime = inRaw ? new Date(inRaw).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'â€”';
         const outTime = outRaw
-          ? new Date(outRaw).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-          : (r.isOpen || (r.siteInTime && !r.siteOutTime))
-            ? 'On Duty'
-            : '-';
+          ? new Date(outRaw).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          : (r.isOpen || (r.siteInTime && !r.siteOutTime)) ? 'On Duty' : 'â€”';
         const recDate = r.attendanceDate ? new Date(r.attendanceDate).toLocaleDateString() : '';
-
         return (
-          <div style={{ fontSize: '0.84rem' }}>
-            {recDate && (
-              <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--primary)', marginBottom: 2 }}>
-                {recDate}
-              </div>
-            )}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-              <Clock size={13} color="var(--primary)" />
-              <span>In: <strong>{inTime}</strong></span>
+          <div style={{ fontSize: '0.83rem' }}>
+            {recDate && <div style={{ fontSize: '0.71rem', color: 'var(--primary)', fontWeight: 600, marginBottom: 2 }}>{recDate}</div>}
+            <div style={{ display: 'flex', gap: 10 }}>
+              <span style={{ color: 'var(--success)' }}><Clock size={12} style={{ marginRight: 3, verticalAlign: 'middle' }} /><strong>{inTime}</strong></span>
+              <span style={{ color: 'var(--text-muted)' }}><Clock size={12} style={{ marginRight: 3, verticalAlign: 'middle' }} />{outTime}</span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)' }}>
-              <Clock size={13} />
-              <span>Out: <strong>{outTime}</strong></span>
-            </div>
-            {r.isLate && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.72rem', color: '#dc2626', fontWeight: 600, marginTop: 2 }}>
-                <Clock size={11} />
-                <span>Late Arrival (&gt; 09:15)</span>
-              </span>
-            )}
+            {r.isLate && <span style={{ fontSize: '0.7rem', color: '#dc2626', fontWeight: 600 }}>âš  Late</span>}
           </div>
         );
       },
@@ -663,44 +402,36 @@ export const DailyAttendance = () => {
       header: 'Face Verification',
       key: 'faceVerification',
       render: (r) => {
-        const hasFace = r.faceVerificationLogId || r.faceVerified !== false;
+        const logId = r.faceVerificationLogId;
+        const status = r.faceVerificationStatus;
+        const verified = !!(logId || status === 'MATCHED' || status === 'VERIFIED' || r.faceVerified === true);
         return (
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <ScanFace size={15} color={hasFace ? 'var(--success)' : '#d97706'} />
-              <Badge variant={hasFace ? 'success' : 'warning'} style={{ fontSize: '0.74rem' }}>
-                {hasFace ? 'VERIFIED' : 'PENDING'}
-              </Badge>
-            </div>
-            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 3 }}>
-              {r.faceVerificationLogId ? (
-                <code>ID: {String(r.faceVerificationLogId).substring(0, 8)}</code>
-              ) : (
-                '128-d Biometric Matched'
-              )}
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <ScanFace size={14} color={verified ? 'var(--success)' : '#d97706'} />
+            <Badge variant={verified ? 'success' : 'warning'} style={{ fontSize: '0.71rem' }}>
+              {verified ? 'Verified' : 'Not Recorded'}
+            </Badge>
           </div>
         );
       },
     },
     {
-      header: 'GPS Location',
+      header: 'Location',
       key: 'location',
       render: (r) => {
-        const lat = r.latitude || r.location?.latitude || r.sessions?.[0]?.latitude;
-        const lng = r.longitude || r.location?.longitude || r.sessions?.[0]?.longitude;
-        const acc = r.gpsAccuracy || r.accuracy || 15;
-        const addr = r.address || r.locationName || (lat && lng ? `${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}` : 'Office Campus');
-
+        const addr = r.address || r.locationName || r.site?.name || '';
+        const lat = r.latitude || r.location?.latitude;
+        const lng = r.longitude || r.location?.longitude;
+        if (!addr && !lat) return <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>â€”</span>;
         return (
           <div style={{ fontSize: '0.82rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <MapPin size={14} color="#0284c7" />
-              <strong style={{ color: 'var(--text-main)' }}>{addr}</strong>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <MapPin size={13} color="#0284c7" />
+              <span style={{ fontWeight: 500 }}>{addr || `${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}`}</span>
             </div>
-            {lat && lng && (
-              <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 2 }}>
-                Acc: ±{Math.round(acc)}m ({Number(lat).toFixed(3)}, {Number(lng).toFixed(3)})
+            {lat && lng && addr && (
+              <div style={{ fontSize: '0.71rem', color: 'var(--text-muted)', marginTop: 1 }}>
+                {Number(lat).toFixed(4)}, {Number(lng).toFixed(4)}
               </div>
             )}
           </div>
@@ -708,78 +439,34 @@ export const DailyAttendance = () => {
       },
     },
     {
-      header: 'Attendance Status',
+      header: 'Status',
       key: 'attendanceStatus',
       render: (r) => {
         const st = r.attendanceStatus || r.status || 'PRESENT';
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <Badge variant={st === 'PRESENT' ? 'success' : st === 'HALF_DAY' ? 'warning' : 'danger'}>
-              {st}
-            </Badge>
-            {r.isRegularized && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.7rem', color: 'var(--primary)', fontWeight: 600 }}>
-                <CheckCircle2 size={11} />
-                <span>Regularized</span>
-              </span>
+            <Badge variant={st === 'PRESENT' ? 'success' : st === 'HALF_DAY' ? 'warning' : 'danger'}>{st}</Badge>
+            {r.totalWorkingHours > 0 && (
+              <span style={{ fontSize: '0.71rem', color: 'var(--text-muted)' }}>{r.totalWorkingHours.toFixed(1)} hrs</span>
             )}
           </div>
         );
       },
     },
     {
-      header: 'Working Hours',
-      key: 'totalWorkingHours',
-      render: (r) => (
-        <div style={{ fontSize: '0.84rem' }}>
-          <div>
-            <strong>
-              {r.totalWorkingHours
-                ? `${r.totalWorkingHours.toFixed(1)} hrs`
-                : r.workingHours
-                  ? `${r.workingHours} hrs`
-                  : '-'}
-            </strong>
-          </div>
-          {r.overtimeHours > 0 && (
-            <span style={{ fontSize: '0.72rem', color: 'var(--success)', fontWeight: 600 }}>
-              +{r.overtimeHours.toFixed(1)} hrs OT
-            </span>
-          )}
-        </div>
-      ),
-    },
-    {
       header: 'Actions',
       key: 'actions',
       render: (r) => (
         <div style={{ display: 'flex', gap: 6 }}>
-          <Button
-            size="xs"
-            variant="light"
-            icon={Layers}
-            onClick={() => openSessionModal(r)}
-            title="View Multi-Punch Sessions"
-          >
-            Sessions
-          </Button>
+          <Button size="xs" variant="light" icon={Layers} onClick={() => { setSelectedRecord(r); setSessionModalOpen(true); }}>Sessions</Button>
           {(isSuperAdmin || isHrAdmin) && (
-            <Button
-              size="xs"
-              variant="secondary"
-              icon={Edit2}
-              onClick={() => openCorrectModal(r)}
-              title="Manual Administrative Correction"
-            >
-              Correct
-            </Button>
+            <Button size="xs" variant="secondary" icon={Edit2} onClick={() => openCorrectModal(r)}>Correct</Button>
           )}
         </div>
       ),
     },
   ];
 
-  // Quick statistics calculated from current day records
   const totalPresent = records.filter((r) => (r.attendanceStatus || r.status || 'PRESENT') === 'PRESENT').length;
   const totalLate = records.filter((r) => r.isLate).length;
   const totalOpen = records.filter((r) => r.isOpen || (r.siteInTime && !r.siteOutTime)).length;
@@ -788,682 +475,340 @@ export const DailyAttendance = () => {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 1120, margin: '0 auto' }}>
       <ModuleSubNav items={attendanceNav} />
 
-      {/* Page Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 4 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
         <div>
-          <h2 style={{ fontSize: '1.35rem', fontWeight: 700, margin: 0 }}>
-            Daily Attendance
-          </h2>
-          <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-            Real-time attendance register across Office, Field, and Site operations.
+          <h2 style={{ fontSize: '1.3rem', fontWeight: 700, margin: 0 }}>Daily Attendance</h2>
+          <p style={{ margin: '2px 0 0', fontSize: '0.83rem', color: 'var(--text-muted)' }}>
+            Real-time register â€” Office, Field & Site
           </p>
         </div>
-
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <Button
-            variant="primary"
-            icon={UserCheck}
-            onClick={() => {
-              setCapturedPhoto(null);
-              setPunchSuccessResult(null);
-              setCheckInModalOpen(true);
-            }}
-          >
-            Mark Attendance (Check-In)
-          </Button>
-        </div>
+        <Button
+          variant="primary"
+          icon={UserCheck}
+          onClick={() => { setCapturedPhoto(null); setPunchResult(null); setCheckInModalOpen(true); }}
+        >
+          Mark Attendance
+        </Button>
       </div>
 
-      {/* KPI Cards Strip */}
+      {/* KPI Cards */}
       <div className="grid-4">
-        <div className="card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Total Present Today</div>
-            <div style={{ fontSize: '1.6rem', fontWeight: 700, color: 'var(--success)' }}>{totalPresent}</div>
-          </div>
-          <div style={{ width: 42, height: 42, borderRadius: 8, backgroundColor: 'rgba(22, 163, 74, 0.1)', color: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <UserCheck size={22} />
-          </div>
-        </div>
-
-        <div className="card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Late Arrivals (&gt; 09:15)</div>
-            <div style={{ fontSize: '1.6rem', fontWeight: 700, color: '#dc2626' }}>{totalLate}</div>
-          </div>
-          <div style={{ width: 42, height: 42, borderRadius: 8, backgroundColor: 'rgba(220, 38, 38, 0.1)', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Clock size={22} />
-          </div>
-        </div>
-
-        <div className="card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Active / On Duty Sessions</div>
-            <div style={{ fontSize: '1.6rem', fontWeight: 700, color: '#2563eb' }}>{totalOpen}</div>
-          </div>
-          <div style={{ width: 42, height: 42, borderRadius: 8, backgroundColor: 'rgba(37, 99, 235, 0.1)', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Layers size={22} />
-          </div>
-        </div>
-
-        <div className="card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Live System Clock</div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--primary)', fontFamily: 'monospace' }}>
-              {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+        {[
+          { label: 'Present Today', value: totalPresent, color: 'var(--success)', bg: 'rgba(22,163,74,0.08)', Icon: UserCheck },
+          { label: 'Late Arrivals', value: totalLate, color: '#dc2626', bg: 'rgba(220,38,38,0.08)', Icon: Clock },
+          { label: 'On Duty Now', value: totalOpen, color: '#2563eb', bg: 'rgba(37,99,235,0.08)', Icon: Layers },
+          { label: 'Live Clock', value: currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }), color: 'var(--primary)', bg: 'var(--primary-light)', Icon: Calendar, mono: true },
+        ].map((kpi) => (
+          <div key={kpi.label} className="card" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ fontSize: '0.77rem', color: 'var(--text-muted)' }}>{kpi.label}</div>
+              <div style={{ fontSize: kpi.mono ? '1rem' : '1.5rem', fontWeight: 700, color: kpi.color, fontFamily: kpi.mono ? 'monospace' : undefined }}>
+                {kpi.value}
+              </div>
+            </div>
+            <div style={{ width: 38, height: 38, borderRadius: 8, background: kpi.bg, color: kpi.color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <kpi.Icon size={20} />
             </div>
           </div>
-          <div style={{ width: 42, height: 42, borderRadius: 8, backgroundColor: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Calendar size={22} />
-          </div>
-        </div>
+        ))}
       </div>
 
-      {/* Filter and Mode Bar */}
-      <div className="card" style={{ padding: '14px 20px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 14 }}>
-          {/* Environment Tabs */}
+      {/* Filters */}
+      <div className="card" style={{ padding: '12px 18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <div style={{ display: 'flex', gap: 8 }}>
-            {[
-              { key: 'OFFICE', label: 'Office Register', icon: Building2 },
-              { key: 'FIELD', label: 'Field Staff', icon: Compass },
-            ].map((tab) => {
-              const TabIcon = tab.icon;
-              return (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setActiveTab(tab.key)}
-                  className={`btn ${activeTab === tab.key ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.86rem' }}
-                >
-                  <TabIcon size={15} />
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
+            {[{ key: 'OFFICE', label: 'Office', Icon: Building2 }, { key: 'FIELD', label: 'Field / Site', Icon: Compass }].map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className={`btn ${activeTab === tab.key ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+              >
+                <tab.Icon size={14} />{tab.label}
+              </button>
+            ))}
           </div>
-
-          {/* Date Picker & Quick Actions */}
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-
-            {!showAllDates && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <label style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-                  Register Date:
-                </label>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="form-control"
-                  style={{ width: 160, padding: '6px 10px', fontSize: '0.85rem' }}
-                />
-              </div>
-            )}
-            <Button size="sm" variant="light" icon={RefreshCw} onClick={loadAttendance} loading={loading}>
-              Refresh
-            </Button>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <label style={{ fontSize: '0.83rem', color: 'var(--text-muted)', fontWeight: 600 }}>Date:</label>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="form-control"
+                style={{ width: 150, padding: '5px 10px', fontSize: '0.84rem' }}
+              />
+            </div>
+            <Button size="sm" variant="light" icon={RefreshCw} onClick={loadAttendance} loading={loading}>Refresh</Button>
           </div>
         </div>
       </div>
 
-      {/* Main Daily Attendance Register Table */}
+      {/* Table */}
       <div className="card" style={{ padding: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <div>
-            <h3 style={{ fontSize: '1.05rem', fontWeight: 600, margin: 0 }}>
-              {activeTab === 'OFFICE' ? 'Office Attendance Register' : activeTab === 'FIELD' ? 'Field Staff Attendance Register' : 'Project Site Attendance Register'}
-            </h3>
-            <p style={{ margin: '2px 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-              Showing {records.length} punches recorded for {selectedDate}
-            </p>
-          </div>
+        <div style={{ marginBottom: 12 }}>
+          <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>
+            {activeTab === 'OFFICE' ? 'Office Attendance Register' : 'Field & Site Register'}
+          </h3>
+          <p style={{ margin: '2px 0 0', fontSize: '0.79rem', color: 'var(--text-muted)' }}>
+            {records.length} record{records.length !== 1 ? 's' : ''} for {selectedDate}
+          </p>
         </div>
-
         <Table
           columns={columns}
           data={records}
           loading={loading}
           emptyMessage={
-            <div style={{ padding: 24, textAlign: 'center' }}>
-              <div style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: 6 }}>
-                No attendance punches recorded for {selectedDate}
-              </div>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 14 }}>
-                Click below to mark attendance using live Face Verification and GPS location locking.
+            <div style={{ padding: 28, textAlign: 'center' }}>
+              <div style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: 6 }}>No records for {selectedDate}</div>
+              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: 14 }}>
+                Mark attendance using face verification and GPS.
               </p>
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
-                <Button
-                  variant="primary"
-                  icon={UserCheck}
-                  onClick={() => {
-                    setCapturedPhoto(null);
-                    setPunchSuccessResult(null);
-                    setCheckInModalOpen(true);
-                  }}
-                >
-                  Mark Daily Attendance Now
-                </Button>
-
-              </div>
+              <Button variant="primary" icon={UserCheck} onClick={() => { setCapturedPhoto(null); setPunchResult(null); setCheckInModalOpen(true); }}>
+                Mark Attendance
+              </Button>
             </div>
           }
         />
       </div>
 
-      {/* ========================================================================= */}
-      {/* INTERACTIVE MODAL: MARK ATTENDANCE (STEP 4)                              */}
-      {/* Flow: Employee -> Open Attendance -> Face Verification -> GPS Location -> */}
-      {/* Date + Time -> Check-In                                                  */}
-      {/* ========================================================================= */}
-      <Modal
-        isOpen={checkInModalOpen}
-        onClose={() => setCheckInModalOpen(false)}
-        title="Daily Attendance Terminal (Check-In / Punch)"
-        size="lg"
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Progress Sequence Header */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6, backgroundColor: '#f8fafc', padding: 8, borderRadius: 8, border: '1px solid var(--border-color)', textAlign: 'center' }}>
-            <div style={{ padding: '4px 6px', borderRadius: 6, backgroundColor: '#eff6ff', border: '1px solid #3b82f6', fontSize: '0.72rem', fontWeight: 700, color: '#1d4ed8' }}>
-              1. Employee
-            </div>
-            <div style={{ padding: '4px 6px', borderRadius: 6, backgroundColor: capturedPhoto ? '#f0fdf4' : '#ffffff', border: `1px solid ${capturedPhoto ? '#bbf7d0' : 'var(--border-color)'}`, fontSize: '0.72rem', fontWeight: 700, color: capturedPhoto ? '#166534' : 'var(--text-muted)' }}>
-              2. Face Verify
-            </div>
-            <div style={{ padding: '4px 6px', borderRadius: 6, backgroundColor: coords ? '#f0fdf4' : '#ffffff', border: `1px solid ${coords ? '#bbf7d0' : 'var(--border-color)'}`, fontSize: '0.72rem', fontWeight: 700, color: coords ? '#166534' : 'var(--text-muted)' }}>
-              3. GPS Location
-            </div>
-            <div style={{ padding: '4px 6px', borderRadius: 6, backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', fontSize: '0.72rem', fontWeight: 700, color: '#166534' }}>
-              4. Date + Time
-            </div>
-            <div style={{ padding: '4px 6px', borderRadius: 6, backgroundColor: '#eff6ff', border: '1px solid #3b82f6', fontSize: '0.72rem', fontWeight: 700, color: '#1d4ed8' }}>
-              5. Check-In
-            </div>
+      {/* â”€â”€â”€ MARK ATTENDANCE MODAL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      <Modal isOpen={checkInModalOpen} onClose={() => setCheckInModalOpen(false)} title="Mark Attendance" size="lg">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Step bar */}
+          <div style={{ display: 'flex', gap: 6, fontSize: '0.71rem', fontWeight: 600 }}>
+            {[
+              { label: '1. Employee', active: true },
+              { label: '2. Face', done: !!capturedPhoto },
+              { label: '3. GPS', done: !!(coords && !coords.gpsUnavailable) },
+              { label: '4. Submit', active: false },
+            ].map((s) => (
+              <div key={s.label} style={{
+                flex: 1, padding: '4px 0', textAlign: 'center', borderRadius: 5,
+                backgroundColor: s.done ? '#f0fdf4' : s.active ? '#eff6ff' : '#f8fafc',
+                border: `1px solid ${s.done ? '#bbf7d0' : s.active ? '#bfdbfe' : 'var(--border-color)'}`,
+                color: s.done ? '#166534' : s.active ? '#1d4ed8' : 'var(--text-muted)',
+              }}>
+                {s.label}
+              </div>
+            ))}
           </div>
 
-          {/* Grid of Camera & Inputs */}
           <div className="grid-2">
-            {/* Left: Face Verification Camera */}
+            {/* Camera */}
             <div>
               <label className="form-label" style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                <ScanFace size={16} color="var(--primary)" />
-                Face Verification Camera Feed
+                <ScanFace size={15} color="var(--primary)" /> Face Capture
               </label>
               <CameraCapture
-                onCapture={(img) => {
-                  setCapturedPhoto(img);
-                  setCameraError(null);
-                  setPunchFailureResult(null);
-                }}
+                onCapture={(img) => { setCapturedPhoto(img); setCameraError(null); setPunchResult(null); }}
                 onError={(err) => setCameraError(err)}
-                label="Capture Attendance Face"
+                label="Capture Face"
               />
-
               {capturedPhoto && (
-                <div style={{ marginTop: 8, padding: '8px 12px', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6, fontSize: '0.82rem', color: '#166534', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <CheckCircle2 size={16} />
-                  <span>Face captured! Ready for biometric match verification.</span>
+                <div style={{ marginTop: 8, padding: '7px 12px', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6, fontSize: '0.8rem', color: '#166534', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <CheckCircle2 size={14} /> Face captured â€” ready for verification
                 </div>
               )}
             </div>
 
-            {/* Right: Employee, GPS & Time Details */}
+            {/* Right panel */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {isOrgAdmin ? (
                 <Select
-                  label="Select Employee"
+                  label="Employee"
                   value={selectedEmpId}
-                  onChange={(e) => {
-                    setSelectedEmpId(e.target.value);
-                    setCapturedPhoto(null);
-                    setPunchSuccessResult(null);
-                    setPunchFailureResult(null);
-                  }}
-                  options={employees.map((e) => {
-                    const statusTag = e.isFaceEnrolled ? '✓ ' : '⚠️ [Pending Face] ';
-                    return {
-                      value: e._id || e.id,
-                      label: `${statusTag}${getEmpCode(e)} — ${getEmpName(e)} (${getEmpDept(e) || 'General'})`,
-                    };
-                  })}
+                  onChange={(e) => { setSelectedEmpId(e.target.value); setCapturedPhoto(null); setPunchResult(null); }}
+                  options={employees.map((e) => ({
+                    value: e._id || e.id,
+                    label: `${e.isFaceEnrolled === false ? 'âš  ' : ''}${getEmpCode(e)} â€” ${getEmpName(e)}`,
+                  }))}
                   required
                 />
               ) : (
-                <div
-                  style={{
-                    padding: '12px 14px',
-                    borderRadius: 8,
-                    backgroundColor: 'var(--bg-subtle)',
-                    border: '1px solid var(--border-color)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 12,
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div
-                      style={{
-                        width: 38,
-                        height: 38,
-                        borderRadius: '50%',
-                        backgroundColor: 'rgba(42, 171, 160, 0.12)',
-                        color: 'var(--primary)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontWeight: 700,
-                        fontSize: '0.85rem',
-                        flexShrink: 0,
-                      }}
-                    >
-                      <User size={18} />
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-main)' }}>
-                        {selectedEmployeeObj ? getEmpName(selectedEmployeeObj) : (user?.name || 'My Profile')}
-                      </div>
-                      <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                        {selectedEmployeeObj ? getEmpCode(selectedEmployeeObj) : (user?.employeeCode || 'SELF')} &bull; {selectedEmployeeObj ? (getEmpDept(selectedEmployeeObj) || 'General') : (user?.department?.name || 'Staff')}
-                      </div>
-                    </div>
+                <div style={{ padding: '10px 14px', borderRadius: 8, backgroundColor: 'var(--bg-subtle)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <User size={20} color="var(--primary)" />
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{selectedEmployeeObj ? getEmpName(selectedEmployeeObj) : (user?.name || 'Me')}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{selectedEmployeeObj ? getEmpCode(selectedEmployeeObj) : (user?.employeeCode || 'SELF')}</div>
                   </div>
-                  <Badge variant="primary">My Profile</Badge>
+                  <Badge variant="primary" style={{ marginLeft: 'auto' }}>Self</Badge>
                 </div>
               )}
 
-              {/* Face Biometric Status & Quick Enrollment */}
               {selectedEmployeeObj && (
-                <div
-                  style={{
-                    padding: '8px 12px',
-                    borderRadius: 6,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    backgroundColor:
-                      selectedEmployeeObj.faceRegistrationPending === false || selectedEmployeeObj.faceVectorStored || selectedEmployeeObj.isFaceRegistered
-                        ? '#f0fdf4'
-                        : '#fffbeb',
-                    border:
-                      selectedEmployeeObj.faceRegistrationPending === false || selectedEmployeeObj.faceVectorStored || selectedEmployeeObj.isFaceRegistered
-                        ? '1px solid #bbf7d0'
-                        : '1px solid #fde68a',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', color: selectedEmployeeObj.faceRegistrationPending === false || selectedEmployeeObj.faceVectorStored || selectedEmployeeObj.isFaceRegistered ? '#166534' : '#b45309' }}>
-                    {selectedEmployeeObj.faceRegistrationPending === false || selectedEmployeeObj.faceVectorStored || selectedEmployeeObj.isFaceRegistered ? (
-                      <>
-                        <CheckCircle2 size={16} />
-                        <span><strong>Biometrics:</strong> Face Enrolled & Ready</span>
-                      </>
-                    ) : (
-                      <>
-                        <AlertCircle size={16} />
-                        <span><strong>Biometrics:</strong> Face Not Enrolled</span>
-                      </>
-                    )}
+                <div style={{
+                  padding: '7px 12px', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  backgroundColor: selectedEmployeeObj.isFaceEnrolled ? '#f0fdf4' : '#fffbeb',
+                  border: `1px solid ${selectedEmployeeObj.isFaceEnrolled ? '#bbf7d0' : '#fde68a'}`,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.81rem', color: selectedEmployeeObj.isFaceEnrolled ? '#166534' : '#b45309' }}>
+                    {selectedEmployeeObj.isFaceEnrolled ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+                    <span>{selectedEmployeeObj.isFaceEnrolled ? 'Face Enrolled' : 'Face Not Enrolled'}</span>
                   </div>
-                  {(selectedEmployeeObj.faceRegistrationPending !== false && !selectedEmployeeObj.faceVectorStored && !selectedEmployeeObj.isFaceRegistered) ? (
-                    <button
-                      type="button"
-                      className="btn btn-warning btn-sm"
-                      onClick={() => openInlineEnroll(selectedEmployeeObj)}
-                      style={{ fontSize: '0.74rem', padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                    >
-                      <ScanFace size={13} /> Register Face Now
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => openInlineEnroll(selectedEmployeeObj)}
-                      style={{ background: 'none', border: 'none', color: '#16a34a', fontSize: '0.74rem', cursor: 'pointer', textDecoration: 'underline' }}
-                    >
-                      Update Face
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => openInlineEnroll(selectedEmployeeObj)}
+                    className={selectedEmployeeObj.isFaceEnrolled ? '' : 'btn btn-warning btn-sm'}
+                    style={selectedEmployeeObj.isFaceEnrolled ? { background: 'none', border: 'none', color: '#16a34a', fontSize: '0.72rem', cursor: 'pointer', textDecoration: 'underline' } : { fontSize: '0.72rem', padding: '2px 8px' }}
+                  >
+                    {selectedEmployeeObj.isFaceEnrolled ? 'Update' : 'Register Face'}
+                  </button>
                 </div>
               )}
 
-              {/* Mode Switcher */}
               <div className="form-group">
-                <label className="form-label" style={{ fontWeight: 600 }}>Action Mode</label>
+                <label className="form-label" style={{ fontWeight: 600 }}>Mode</label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  <button
-                    type="button"
-                    onClick={() => setPunchMode('CHECK_IN')}
-                    className={`btn ${punchMode === 'CHECK_IN' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-                  >
-                    Punch IN (Check-In)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPunchMode('CHECK_OUT')}
-                    className={`btn ${punchMode === 'CHECK_OUT' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-                  >
-                    Punch OUT (Check-Out)
-                  </button>
+                  {['CHECK_IN', 'CHECK_OUT'].map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setPunchMode(mode)}
+                      className={`btn ${punchMode === mode ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                    >
+                      {mode === 'CHECK_IN' ? 'Punch IN' : 'Punch OUT'}
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {/* Date + Real-time Digital Clock Display */}
-              <div
-                style={{
-                  padding: 12,
-                  backgroundColor: '#f8fafc',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: 8,
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
+              <div style={{ padding: '10px 14px', backgroundColor: '#f8fafc', border: '1px solid var(--border-color)', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Date & Time Stamp:</div>
-                  <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-main)' }}>
-                    {selectedDate}
-                  </div>
+                  <div style={{ fontSize: '0.71rem', color: 'var(--text-muted)' }}>Date</div>
+                  <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{selectedDate}</div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Live Clock:</div>
-                  <div style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--primary)', fontFamily: 'monospace' }}>
+                  <div style={{ fontSize: '0.71rem', color: 'var(--text-muted)' }}>Live Time</div>
+                  <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--primary)', fontFamily: 'monospace' }}>
                     {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                   </div>
                 </div>
               </div>
 
-              {/* Live GPS Location Picker */}
               <div>
                 <label className="form-label" style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                  <MapPin size={15} color="#0284c7" />
-                  GPS Location Resolver
+                  <MapPin size={14} color="#0284c7" /> GPS Location
                 </label>
                 <GeoLocationPicker
-                  onLocationChange={(c) => {
-                    setCoords(c);
-                    if (c && !c.gpsUnavailable) {
-                      setPunchFailureResult(null);
-                    }
-                  }}
+                  onLocationChange={(c) => { setCoords(c); if (c && !c.gpsUnavailable) setPunchResult(null); }}
                 />
               </div>
             </div>
           </div>
 
-          {/* SECTION 5: ATTENDANCE FAILURE / REJECTION CARD */}
-          {punchFailureResult && (
-            <div
-              className="card"
-              style={{
-                padding: 16,
-                backgroundColor: 'rgba(239, 68, 68, 0.06)',
-                borderLeft: '5px solid var(--danger)',
-                borderRadius: 8,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--danger)', fontWeight: 700, fontSize: '1rem' }}>
-                <XCircle size={18} />
-                <span>Attendance Failed: {punchFailureResult.conditionName}</span>
+          {punchResult && (
+            <div style={{
+              padding: '12px 16px', borderRadius: 8,
+              backgroundColor: punchResult.type === 'success' ? '#f0fdf4' : 'rgba(239,68,68,0.06)',
+              border: `1px solid ${punchResult.type === 'success' ? '#bbf7d0' : '#fecaca'}`,
+              borderLeft: `4px solid ${punchResult.type === 'success' ? 'var(--success)' : 'var(--danger)'}`,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, color: punchResult.type === 'success' ? 'var(--success)' : 'var(--danger)' }}>
+                {punchResult.type === 'success' ? <CheckCircle2 size={16} /> : <XCircle size={16} />}
+                <span>{punchResult.message}</span>
               </div>
-              <div style={{ marginTop: 6, fontSize: '0.86rem', color: '#991b1b' }}>
-                {punchFailureResult.reason}
-              </div>
-              <div style={{ marginTop: 10, padding: '10px 14px', backgroundColor: '#ffffff', borderRadius: 6, border: '1px solid #fecaca', fontSize: '0.82rem', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
-                <div><strong>Employee:</strong> {punchFailureResult.employeeName} ({punchFailureResult.employeeCode})</div>
-                <div><strong>Timestamp:</strong> {punchFailureResult.timestamp}</div>
-                <div><strong>Failure Category:</strong> <Badge variant="danger">{punchFailureResult.failedCondition}</Badge></div>
-                {punchFailureResult.confidence !== undefined && (
-                  <div><strong>Biometric Score:</strong> {punchFailureResult.confidence}% (Required Threshold: 70%)</div>
-                )}
-                {punchFailureResult.address && (
-                  <div><strong>Location Evaluated:</strong> {punchFailureResult.address}</div>
-                )}
-              </div>
+              {punchResult.data && (
+                <div style={{ marginTop: 6, fontSize: '0.79rem', color: 'var(--text-muted)', display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                  <span>ðŸ“ {punchResult.data.address}</span>
+                  <span>ðŸ¤³ {punchResult.data.confidence}% match</span>
+                </div>
+              )}
             </div>
           )}
 
-          {/* SECTION 6: GEO-LOCATION ATTENDANCE SUCCESS CONFIRMATION BOX (ALL 9 ATTRIBUTES) */}
-          {punchSuccessResult && (
-            <div
-              className="card"
-              style={{
-                padding: 16,
-                backgroundColor: 'var(--success-light)',
-                borderLeft: '5px solid var(--success)',
-                borderRadius: 8,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--success)', fontWeight: 700, fontSize: '1.05rem' }}>
-                <CheckCircle2 size={20} />
-                <span>Geo-Location Attendance {punchSuccessResult.mode === 'CHECK_IN' ? 'Check-In' : 'Check-Out'} Successfully Recorded!</span>
-              </div>
-              <div style={{ marginTop: 6, fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                System recorded all 9 Geo-Location parameters with biometric verification lock.
-              </div>
-
-              {/* 9 Captured Parameters Matrix */}
-              <div style={{ marginTop: 10, padding: '12px 14px', backgroundColor: '#ffffff', borderRadius: 6, border: '1px solid #bbf7d0', fontSize: '0.82rem', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-                <div>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem', display: 'block' }}>1. Latitude</span>
-                  <strong>{punchSuccessResult.latitude}</strong>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem', display: 'block' }}>2. Longitude</span>
-                  <strong>{punchSuccessResult.longitude}</strong>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem', display: 'block' }}>3. Address</span>
-                  <strong style={{ color: '#0284c7' }}>{punchSuccessResult.address}</strong>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem', display: 'block' }}>4. Date</span>
-                  <strong>{punchSuccessResult.date}</strong>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem', display: 'block' }}>5. Time</span>
-                  <strong style={{ fontFamily: 'monospace' }}>{punchSuccessResult.time}</strong>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem', display: 'block' }}>6. GPS Accuracy</span>
-                  <strong>±{punchSuccessResult.gpsAccuracy} meters</strong>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem', display: 'block' }}>7. Attendance Type</span>
-                  <Badge variant="neutral">{punchSuccessResult.attendanceType}</Badge>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem', display: 'block' }}>8. Employee</span>
-                  <strong>{punchSuccessResult.employeeName} ({punchSuccessResult.employeeCode})</strong>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem', display: 'block' }}>9. Face Status</span>
-                  <Badge variant="success">{punchSuccessResult.faceVerificationStatus} ({punchSuccessResult.confidence}%)</Badge>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Modal Footer */}
-          <div className="modal-footer" style={{ margin: '14px -20px -20px' }}>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setPunchFailureResult(null);
-                setCheckInModalOpen(false);
-              }}
-            >
-              Close
-            </Button>
+          <div className="modal-footer" style={{ margin: '0 -20px -20px' }}>
+            <Button variant="secondary" onClick={() => setCheckInModalOpen(false)}>Close</Button>
             <Button
               variant="primary"
               icon={UserCheck}
               loading={submittingPunch}
-              onClick={handleDailyCheckInSubmit}
-              disabled={!capturedPhoto || !coords}
+              onClick={handleCheckInSubmit}
+              disabled={!capturedPhoto || !coords || !!(coords && coords.gpsUnavailable)}
             >
-              Confirm {punchMode === 'CHECK_IN' ? 'Check-In' : 'Check-Out'} with Face & GPS
+              Confirm {punchMode === 'CHECK_IN' ? 'Check-In' : 'Check-Out'}
             </Button>
           </div>
         </div>
       </Modal>
 
-      {/* Multi-Punch Sessions Details Modal */}
-      <Modal
-        isOpen={sessionModalOpen}
-        onClose={() => setSessionModalOpen(false)}
-        title={`Multi-Punch Sessions: ${selectedRecord?.employee?.firstName || ''} ${selectedRecord?.employee?.lastName || ''}`}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-            <span><strong>Date:</strong> {selectedDate}</span>
-            <span><strong>Total Working Hours:</strong> {selectedRecord?.totalWorkingHours ? `${selectedRecord.totalWorkingHours.toFixed(1)} hrs` : '-'}</span>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {selectedRecord?.punches?.length > 0 ? (
-              selectedRecord.punches.map((p, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    padding: 12,
-                    borderRadius: 8,
-                    backgroundColor: '#f8fafc',
-                    border: '1px solid var(--border-color)',
-                    fontSize: '0.85rem',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, marginBottom: 4 }}>
-                    <span>Session #{idx + 1}</span>
-                    <Badge variant={p.isOpen ? 'warning' : 'success'}>
-                      {p.isOpen ? 'Active (Open)' : `${p.workingHours || 0} hrs`}
-                    </Badge>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)' }}>
-                    <span>In: {p.checkInTime ? new Date(p.checkInTime).toLocaleTimeString() : '-'}</span>
-                    <span>Out: {p.checkOutTime ? new Date(p.checkOutTime).toLocaleTimeString() : 'In Progress'}</span>
-                  </div>
-                  {p.remarks && <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: 4 }}>Remarks: {p.remarks}</div>}
+      {/* â”€â”€â”€ SESSIONS MODAL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      <Modal isOpen={sessionModalOpen} onClose={() => setSessionModalOpen(false)} title={`Sessions â€” ${getEmpName(selectedRecord?.employee)}`}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {selectedRecord?.punches?.length > 0 ? (
+            selectedRecord.punches.map((p, idx) => (
+              <div key={idx} style={{ padding: 12, borderRadius: 8, backgroundColor: '#f8fafc', border: '1px solid var(--border-color)', fontSize: '0.83rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, marginBottom: 4 }}>
+                  <span>Session #{idx + 1}</span>
+                  <Badge variant={p.isOpen ? 'warning' : 'success'}>{p.isOpen ? 'Active' : `${p.workingHours || 0} hrs`}</Badge>
                 </div>
-              ))
-            ) : (
-              <div style={{ padding: 14, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                Single session recorded for this day.
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)' }}>
+                  <span>In: {p.checkInTime ? new Date(p.checkInTime).toLocaleTimeString() : 'â€”'}</span>
+                  <span>Out: {p.checkOutTime ? new Date(p.checkOutTime).toLocaleTimeString() : 'In Progress'}</span>
+                </div>
               </div>
-            )}
-          </div>
-
-          <div className="modal-footer" style={{ margin: '20px -20px -20px' }}>
-            <Button variant="secondary" onClick={() => setSessionModalOpen(false)}>
-              Close
-            </Button>
+            ))
+          ) : (
+            <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.84rem' }}>
+              Single session â€” no multi-punch data.
+            </div>
+          )}
+          <div className="modal-footer" style={{ margin: '10px -20px -20px' }}>
+            <Button variant="secondary" onClick={() => setSessionModalOpen(false)}>Close</Button>
           </div>
         </div>
       </Modal>
 
-      {/* Admin Attendance Correction Modal */}
-      <Modal
-        isOpen={correctModalOpen}
-        onClose={() => setCorrectModalOpen(false)}
-        title="Admin Attendance Correction"
-      >
+      {/* â”€â”€â”€ ADMIN CORRECTION MODAL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      <Modal isOpen={correctModalOpen} onClose={() => setCorrectModalOpen(false)} title="Admin Correction">
         <form onSubmit={handleCorrectSubmit}>
-          <div style={{ marginBottom: 12, fontSize: '0.85rem' }}>
-            <strong>Employee:</strong> {selectedRecord?.employee?.firstName} {selectedRecord?.employee?.lastName || ''}
+          <div style={{ marginBottom: 12, fontSize: '0.84rem' }}>
+            <strong>Employee:</strong> {getEmpName(selectedRecord?.employee)}
           </div>
-
-          <Input
-            label="Corrected Check-In Timestamp"
-            type="datetime-local"
-            value={correctForm.checkInTime}
-            onChange={(e) => setCorrectForm({ ...correctForm, checkInTime: e.target.value })}
-            required
-          />
-
-          <Input
-            label="Corrected Check-Out Timestamp"
-            type="datetime-local"
-            value={correctForm.checkOutTime}
-            onChange={(e) => setCorrectForm({ ...correctForm, checkOutTime: e.target.value })}
-            required
-          />
-
+          <Input label="Check-In Time" type="datetime-local" value={correctForm.checkInTime} onChange={(e) => setCorrectForm({ ...correctForm, checkInTime: e.target.value })} required />
+          <Input label="Check-Out Time" type="datetime-local" value={correctForm.checkOutTime} onChange={(e) => setCorrectForm({ ...correctForm, checkOutTime: e.target.value })} required />
           <Select
             label="Attendance Status"
             value={correctForm.attendanceStatus}
             onChange={(e) => setCorrectForm({ ...correctForm, attendanceStatus: e.target.value })}
-            options={[
-              { value: 'PRESENT', label: 'Present' },
-              { value: 'HALF_DAY', label: 'Half Day' },
-              { value: 'ABSENT', label: 'Absent' },
-            ]}
+            options={[{ value: 'PRESENT', label: 'Present' }, { value: 'HALF_DAY', label: 'Half Day' }, { value: 'ABSENT', label: 'Absent' }]}
           />
-
-          <div className="form-group" style={{ marginBottom: 16 }}>
-            <label className="form-label" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 500, marginBottom: 6 }}>
-              Mandatory Correction Remark
-            </label>
+          <div className="form-group" style={{ marginBottom: 14 }}>
+            <label className="form-label">Correction Remark *</label>
             <textarea
               className="form-control"
               value={correctForm.correctionRemark}
               onChange={(e) => setCorrectForm({ ...correctForm, correctionRemark: e.target.value })}
-              placeholder="e.g. Adjusted overtime hours per approved project timesheet"
               rows={2}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                borderRadius: 6,
-                border: '1px solid var(--border)',
-                boxSizing: 'border-box',
-              }}
+              placeholder="Reason for correction..."
+              style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border-color)', boxSizing: 'border-box' }}
               required
             />
           </div>
-
-          <div className="modal-footer" style={{ margin: '20px -20px -20px' }}>
-            <Button variant="secondary" onClick={() => setCorrectModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="primary" type="submit" loading={submittingCorrection}>
-              Save Admin Correction
-            </Button>
+          <div className="modal-footer" style={{ margin: '0 -20px -20px' }}>
+            <Button variant="secondary" onClick={() => setCorrectModalOpen(false)}>Cancel</Button>
+            <Button variant="primary" type="submit" loading={submittingCorrection}>Save Correction</Button>
           </div>
         </form>
       </Modal>
 
-      {/* INLINE FACE ENROLLMENT MODAL (DAILY ATTENDANCE) */}
-      <Modal
-        isOpen={inlineEnrollOpen}
-        onClose={() => setInlineEnrollOpen(false)}
-        title={`Face Biometric Registration — ${inlineEnrollEmployee?.firstName || 'Employee'} (${inlineEnrollEmployee?.employeeCode || ''})`}
-        size="md"
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ padding: '10px 14px', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, fontSize: '0.84rem', color: '#1e40af' }}>
-            <strong>Biometric Enrollment Required:</strong> Capture a clear, front-facing photograph to enroll this employee's facial template for automated daily attendance verification.
+      {/* â”€â”€â”€ INLINE FACE ENROLLMENT MODAL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      <Modal isOpen={inlineEnrollOpen} onClose={() => setInlineEnrollOpen(false)} title={`Face Registration â€” ${getEmpName(inlineEnrollEmployee)}`} size="md">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ padding: '10px 14px', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, fontSize: '0.83rem', color: '#1e40af' }}>
+            Capture a clear front-facing photo to enroll biometric data for attendance.
           </div>
-
-          <CameraCapture onCapture={(img) => setInlineFacePhoto(img)} label="Capture Face for Biometric Enrollment" />
-
+          <CameraCapture onCapture={(img) => setInlineFacePhoto(img)} label="Capture Face for Enrollment" />
           {inlineFacePhoto && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#166534', fontSize: '0.85rem', padding: '6px 10px', backgroundColor: '#f0fdf4', borderRadius: 6 }}>
-              <CheckCircle2 size={16} /> Photo captured! Ready to store biometric pattern.
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#166534', fontSize: '0.83rem', padding: '6px 10px', backgroundColor: '#f0fdf4', borderRadius: 6 }}>
+              <CheckCircle2 size={14} /> Photo captured â€” ready to enroll
             </div>
           )}
-
-          <div className="modal-footer" style={{ margin: '14px -20px -20px' }}>
-            <Button variant="secondary" onClick={() => setInlineEnrollOpen(false)} disabled={enrollingInlineFace}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              icon={ScanFace}
-              onClick={handleInlineEnrollFace}
-              loading={enrollingInlineFace}
-              disabled={!inlineFacePhoto}
-            >
-              Enroll & Activate Attendance
+          <div className="modal-footer" style={{ margin: '6px -20px -20px' }}>
+            <Button variant="secondary" onClick={() => setInlineEnrollOpen(false)} disabled={enrollingInlineFace}>Cancel</Button>
+            <Button variant="primary" icon={ScanFace} onClick={handleInlineEnrollFace} loading={enrollingInlineFace} disabled={!inlineFacePhoto}>
+              Enroll Face
             </Button>
           </div>
         </div>
@@ -1473,4 +818,3 @@ export const DailyAttendance = () => {
 };
 
 export default DailyAttendance;
-

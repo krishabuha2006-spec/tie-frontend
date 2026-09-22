@@ -35,6 +35,7 @@ export const CameraCapture = ({
   const countdownTimerRef = useRef(null);
   const detectionIntervalRef = useRef(null);
   const faceStableCountRef = useRef(0);
+  const retakeCooldownRef = useRef(false);
 
   // ----------------------------------------------------
   // CAMERA START / STOP
@@ -45,6 +46,10 @@ export const CameraCapture = ({
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error('Camera access is not supported by your browser.');
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
       }
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -58,6 +63,7 @@ export const CameraCapture = ({
       setStream(mediaStream);
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
+        videoRef.current.play().catch(() => {});
       }
     } catch (err) {
       console.error('Camera error:', err);
@@ -94,6 +100,16 @@ export const CameraCapture = ({
       stopCamera();
     };
   }, []);
+
+  // Ensure video element plays and receives stream when active
+  useEffect(() => {
+    if (videoRef.current && streamRef.current && !capturedImage) {
+      if (videoRef.current.srcObject !== streamRef.current) {
+        videoRef.current.srcObject = streamRef.current;
+      }
+      videoRef.current.play().catch(() => {});
+    }
+  }, [stream, capturedImage]);
 
   // ----------------------------------------------------
   // CAPTURE FRAME ACTION
@@ -147,7 +163,7 @@ export const CameraCapture = ({
     }
 
     const analyzeFrame = async () => {
-      if (!videoRef.current || videoRef.current.readyState < 2) return;
+      if (!videoRef.current || videoRef.current.readyState < 2 || retakeCooldownRef.current) return;
       const video = videoRef.current;
 
       let detected = false;
@@ -269,8 +285,27 @@ export const CameraCapture = ({
     setFaceDetected(false);
     setCountdown(null);
     faceStableCountRef.current = 0;
+    retakeCooldownRef.current = true;
+    setTimeout(() => {
+      retakeCooldownRef.current = false;
+    }, 1500);
+
     if (onCapture) {
       onCapture(null);
+    }
+
+    const isAlive =
+      streamRef.current &&
+      streamRef.current.active &&
+      streamRef.current.getVideoTracks().some((t) => t.readyState === 'live');
+
+    if (!isAlive) {
+      startCamera();
+    } else if (videoRef.current) {
+      if (videoRef.current.srcObject !== streamRef.current) {
+        videoRef.current.srcObject = streamRef.current;
+      }
+      videoRef.current.play().catch(() => {});
     }
   };
 
@@ -317,24 +352,25 @@ export const CameraCapture = ({
             transition: 'border-color 0.3s, box-shadow 0.3s',
           }}
         >
-          {!capturedImage ? (
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'cover',
-                transform: 'scaleX(-1)', // Mirror feed for intuitive positioning
-              }}
-            />
-          ) : (
+          {/* Always keep video mounted so stream is never detached on recapture */}
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              transform: 'scaleX(-1)', // Mirror feed for intuitive positioning
+              display: capturedImage ? 'none' : 'block',
+            }}
+          />
+          {capturedImage && (
             <img
               src={capturedImage}
               alt="Captured Biometric Frame"
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
             />
           )}
 

@@ -18,7 +18,23 @@ export const performanceApi = {
 
   // POST /kra-templates
   createKraTemplate: async (data) => {
-    const res = await apiClient.post('/kra-templates', data);
+    const items = Array.isArray(data?.kraItems) ? data.kraItems : [];
+    const cleanItems = items.map((item) => ({
+      name: String(item.name || '').trim(),
+      description: item.description || '',
+      weightPercent: Number(item.weightPercent ?? item.weight ?? 0),
+      metricType: item.metricType || 'MANUAL_RATING',
+    }));
+
+    const payload = {
+      name: String(data.name || '').trim(),
+      kraItems: cleanItems,
+    };
+    if (data.company) payload.company = data.company;
+    if (Array.isArray(data.applicableDesignations)) payload.applicableDesignations = data.applicableDesignations;
+    if (data.requireSelfAssessment !== undefined) payload.requireSelfAssessment = Boolean(data.requireSelfAssessment);
+
+    const res = await apiClient.post('/kra-templates', payload);
     return res.data;
   },
 
@@ -30,7 +46,23 @@ export const performanceApi = {
 
   // PUT /kra-templates/:id
   updateKraTemplate: async (id, data) => {
-    const res = await apiClient.put(`/kra-templates/${id}`, data);
+    const items = Array.isArray(data?.kraItems) ? data.kraItems : [];
+    const cleanItems = items.map((item) => ({
+      name: String(item.name || '').trim(),
+      description: item.description || '',
+      weightPercent: Number(item.weightPercent ?? item.weight ?? 0),
+      metricType: item.metricType || 'MANUAL_RATING',
+    }));
+
+    const payload = {
+      name: String(data.name || '').trim(),
+      kraItems: cleanItems,
+    };
+    if (data.company) payload.company = data.company;
+    if (Array.isArray(data.applicableDesignations)) payload.applicableDesignations = data.applicableDesignations;
+    if (data.requireSelfAssessment !== undefined) payload.requireSelfAssessment = Boolean(data.requireSelfAssessment);
+
+    const res = await apiClient.put(`/kra-templates/${id}`, payload);
     return res.data;
   },
 

@@ -130,6 +130,10 @@ export const recruitmentApi = {
   createCandidate: async (data) => {
     return recruitmentApi.applyCandidate(data);
   },
+  deleteCandidate: async (id) => {
+    const res = await apiClient.delete(`/candidates/${id}`);
+    return res.data;
+  },
 
   // Step 4: Update Candidate Pipeline Stage
   updateCandidateStage: async (id, stageOrStatus) => {

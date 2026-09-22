@@ -218,6 +218,10 @@ export const FacePunch = () => {
           sData?.isRegistered === true ||
           sData?.status === 'REGISTERED' ||
           sData?.status === 'ENROLLED' ||
+          sData?.status === 'ACTIVE' ||
+          sData?.data?.status === 'ENROLLED' ||
+          sData?.data?.status === 'REGISTERED' ||
+          sData?.data?.isRegistered === true ||
           sData?.isEnrolled === true;
         return { ...emp, isFaceEnrolled: isEnrolled, faceRegistrationPending: !isEnrolled };
       });
@@ -247,7 +251,12 @@ export const FacePunch = () => {
     finally { setLoadingLogs(false); }
   };
 
-  useEffect(() => { loadEmps(); loadLogs(); }, [user]);
+  const userEmpId = user?.employee?._id || (typeof user?.employee === 'string' ? user.employee : null) || user?._id;
+  useEffect(() => {
+    if (!userEmpId && !isOrgAdmin) return;
+    loadEmps();
+    loadLogs();
+  }, [userEmpId, isOrgAdmin]);
 
   useEffect(() => {
     if (!selectedEmpId) return;
@@ -289,6 +298,9 @@ export const FacePunch = () => {
       } else { await faceApi.enrollFace(regEmpId, [regPhoto]); }
       showToast(`Face biometrics stored for ${empName}!`, 'success');
       setRegSuccess({ empName, timestamp: new Date().toLocaleTimeString() });
+      setEmployees((prev) =>
+        prev.map((e) => ((e._id || e.id) === regEmpId ? { ...e, isFaceEnrolled: true, faceRegistrationPending: false } : e))
+      );
       await loadEmps();
     } catch (err) { showToast(err.response?.data?.message || 'Face registration failed', 'error'); }
     finally { setRegistering(false); }
@@ -307,6 +319,9 @@ export const FacePunch = () => {
       } else { await faceApi.enrollFace(regEmpId, [img]); }
       showToast(`Face captured & registered for ${empName}!`, 'success');
       setRegSuccess({ empName, timestamp: new Date().toLocaleTimeString() });
+      setEmployees((prev) =>
+        prev.map((e) => ((e._id || e.id) === regEmpId ? { ...e, isFaceEnrolled: true, faceRegistrationPending: false } : e))
+      );
       await loadEmps();
     } catch (err) { showToast(err.response?.data?.message || 'Face registration failed', 'error'); }
     finally { setRegistering(false); }
@@ -352,23 +367,47 @@ export const FacePunch = () => {
       }
       const addressStr = geoRes?.address || geoRes?.data?.address || `${activeCoords.latitude?.toFixed(4)}, ${activeCoords.longitude?.toFixed(4)}`;
       const now = new Date();
-      const punchPayload = {
-        latitude: activeCoords.latitude, longitude: activeCoords.longitude, address: addressStr,
-        date: now.toISOString().split('T')[0],
-        time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        gpsAccuracy: activeCoords.gpsAccuracy || 15, attendanceType, employee: selectedEmpId,
-        faceVerificationStatus: matchResult, faceVerificationLogId: faceLogId,
-        capturedImage: capturedPhoto, photoUrl: capturedPhoto, confidenceScore: confidence,
-        remarks: `Face verified (${Math.round(confidence * 100)}%) at ${addressStr}`,
+      const baseLocation = {
+        latitude: activeCoords.latitude,
+        longitude: activeCoords.longitude,
+        gpsAccuracy: activeCoords.gpsAccuracy || 15,
       };
+
       if (punchMode === 'CHECK_IN') {
-        if (attendanceType === 'OFFICE') await attendanceApi.officeCheckIn(punchPayload);
-        else if (attendanceType === 'FIELD') await attendanceApi.fieldCheckIn(punchPayload);
-        else await attendanceApi.siteCheckIn(punchPayload);
+        if (attendanceType === 'OFFICE') {
+          await attendanceApi.officeCheckIn({
+            ...baseLocation,
+            capturedImage: capturedPhoto,
+            confidenceScore: confidence,
+          });
+        } else if (attendanceType === 'FIELD') {
+          await attendanceApi.fieldCheckIn({
+            ...baseLocation,
+            capturedImage: capturedPhoto,
+            confidenceScore: confidence,
+          });
+        } else {
+          await attendanceApi.siteCheckIn({
+            ...baseLocation,
+            capturedImage: capturedPhoto,
+            confidenceScore: confidence,
+            faceVerificationLogId: faceLogId,
+          });
+        }
       } else {
-        if (attendanceType === 'OFFICE') await attendanceApi.officeCheckOut(punchPayload);
-        else if (attendanceType === 'FIELD') await attendanceApi.fieldCheckOut(punchPayload);
-        else await attendanceApi.siteCheckOut(punchPayload);
+        if (attendanceType === 'OFFICE') {
+          await attendanceApi.officeCheckOut({
+            ...baseLocation,
+            remarks: `Face checked out at ${addressStr}`,
+          });
+        } else if (attendanceType === 'FIELD') {
+          await attendanceApi.fieldCheckOut({
+            ...baseLocation,
+            remarks: `Field checked out at ${addressStr}`,
+          });
+        } else {
+          await attendanceApi.siteCheckOut(baseLocation);
+        }
       }
       showToast(`${punchMode === 'CHECK_IN' ? 'Check-In' : 'Check-Out'} recorded successfully!`, 'success');
       setPunchResult({ success: true, punchMode, attendanceType, empName, empCode, confidence: Math.round(confidence * 100), address: addressStr, time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), date: now.toLocaleDateString() });

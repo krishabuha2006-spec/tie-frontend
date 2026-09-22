@@ -32,9 +32,15 @@ export const GeoFences = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // Step 5: Location Audit Logs
   const [locationLogs, setLocationLogs] = useState([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
+
+  // Module 5: GPS Accuracy & Fail-Closed Settings
+  const [accuracySettings, setAccuracySettings] = useState({
+    maxAcceptableAccuracyMeters: 100,
+    failClosedOnMissingFence: false,
+  });
+  const [savingSettings, setSavingSettings] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -51,10 +57,11 @@ export const GeoFences = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [fRes, bRes, pRes] = await Promise.all([
+      const [fRes, bRes, pRes, sRes] = await Promise.all([
         geoApi.getGeoFences(),
         masterApi.getBranches(),
         projectTaskApi.getProjects().catch(() => ({ data: [] })),
+        geoApi.getAccuracySettings().catch(() => null),
       ]);
       const fenceList = Array.isArray(fRes) ? fRes : (Array.isArray(fRes?.data) ? fRes.data : (fRes?.geofences || fRes?.fences || []));
       const branchList = Array.isArray(bRes) ? bRes : (Array.isArray(bRes?.data) ? bRes.data : (bRes?.branches || []));
@@ -62,10 +69,30 @@ export const GeoFences = () => {
       setFences(fenceList);
       setBranches(branchList);
       setProjects(projectList);
+
+      if (sRes) {
+        const sData = sRes?.data || sRes;
+        setAccuracySettings({
+          maxAcceptableAccuracyMeters: sData?.maxAcceptableAccuracyMeters || sData?.threshold || 100,
+          failClosedOnMissingFence: Boolean(sData?.failClosedOnMissingFence),
+        });
+      }
     } catch (err) {
       showToast('Failed to load geo-fences', 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSaveAccuracySettings = async () => {
+    setSavingSettings(true);
+    try {
+      await geoApi.updateAccuracySettings(accuracySettings);
+      showToast('Geofence enforcement & accuracy policy updated successfully!', 'success');
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to update geofence policy', 'error');
+    } finally {
+      setSavingSettings(false);
     }
   };
 
@@ -112,6 +139,7 @@ export const GeoFences = () => {
     const payload = {
       name: formData.name.trim(),
       scope: formData.scope,
+      reference: formData.referenceId,
       referenceId: formData.referenceId,
       referenceModel: formData.scope === 'BRANCH' ? 'Branch' : 'ProjectSite',
       centerLatitude: parseFloat(formData.centerLatitude),
@@ -286,6 +314,37 @@ export const GeoFences = () => {
         <Button variant="primary" icon={Plus} onClick={openAddModal}>
           Create Geo-Fence
         </Button>
+      </div>
+
+      {/* Geofence Enforcement Policy Card */}
+      <div className="card" style={{ padding: '14px 18px', backgroundColor: 'var(--bg-subtle)', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 14 }}>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Shield size={16} color="var(--primary)" />
+            Office Geofence Enforcement Policy
+          </div>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 2 }}>
+            Status: <strong>{accuracySettings.failClosedOnMissingFence ? 'Strict Block (Fail-Closed)' : 'Allowed when fence unconfigured'}</strong> • Max GPS Accuracy: <strong>{accuracySettings.maxAcceptableAccuracyMeters}m</strong>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={!accuracySettings.failClosedOnMissingFence}
+              onChange={(e) => setAccuracySettings({ ...accuracySettings, failClosedOnMissingFence: !e.target.checked })}
+            />
+            <span>Allow Check-In if branch fence missing</span>
+          </label>
+          <Button
+            size="sm"
+            variant="secondary"
+            loading={savingSettings}
+            onClick={handleSaveAccuracySettings}
+          >
+            Save Policy
+          </Button>
+        </div>
       </div>
 
       {/* Geo-Fences Table */}

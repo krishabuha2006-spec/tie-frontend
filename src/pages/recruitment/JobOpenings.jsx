@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import recruitmentApi from '../../api/recruitmentApi';
 import masterApi from '../../api/masterApi';
 import { useToast } from '../../context/ToastContext';
 import { useConfirm } from '../../context/ConfirmContext';
-import { Plus, Briefcase, RefreshCw, XCircle, Search } from 'lucide-react';
+import { Plus, Briefcase, RefreshCw, XCircle, Search, Users } from 'lucide-react';
 import Table from '../../components/common/Table';
 import Modal from '../../components/common/Modal';
 import Button from '../../components/common/Button';
@@ -17,6 +18,7 @@ export const JobOpenings = () => {
   const confirm = useConfirm();
   const { showToast } = useToast();
   const [jobs, setJobs] = useState([]);
+  const [candidates, setCandidates] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [branches, setBranches] = useState([]);
   const [companies, setCompanies] = useState([]);
@@ -40,22 +42,25 @@ export const JobOpenings = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [jRes, dRes, bRes, cRes] = await Promise.all([
+      const [jRes, dRes, bRes, cRes, candRes] = await Promise.all([
         recruitmentApi.getJobOpenings(),
         masterApi.getDepartments(),
         masterApi.getBranches(),
         masterApi.getCompanies(),
+        recruitmentApi.getCandidates().catch(() => ({ data: [] })),
       ]);
 
       const jobsList = jRes?.data || jRes?.jobs || jRes?.jobOpenings || (Array.isArray(jRes) ? jRes : []);
       const deptList = dRes?.data || dRes?.departments || (Array.isArray(dRes) ? dRes : []);
       const branchList = bRes?.data || bRes?.branches || (Array.isArray(bRes) ? bRes : []);
       const compList = cRes?.data || cRes?.companies || (Array.isArray(cRes) ? cRes : []);
+      const candList = candRes?.data || candRes?.candidates || (Array.isArray(candRes) ? candRes : []);
 
       setJobs(jobsList);
       setDepartments(deptList);
       setBranches(branchList);
       setCompanies(compList);
+      setCandidates(candList);
     } catch (err) {
       console.error(err);
       showToast('Failed to load job openings from server', 'error');
@@ -67,6 +72,14 @@ export const JobOpenings = () => {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const getJobCandidateCount = (jobId) => {
+    if (!jobId) return 0;
+    return candidates.filter((c) => {
+      const cJobId = c.jobOpening?._id || c.jobOpening?.id || (typeof c.jobOpening === 'string' ? c.jobOpening : null);
+      return cJobId === jobId;
+    }).length;
+  };
 
   const openAddModal = () => {
     setFormData({
@@ -123,6 +136,27 @@ export const JobOpenings = () => {
   };
 
   const handleDeleteJob = async (job) => {
+    const candCount = getJobCandidateCount(job._id);
+    if (candCount > 0) {
+      const shouldClose = await confirm({
+        title: 'Cannot Delete Opening With Candidates',
+        message: `Job opening "${job.title}" has ${candCount} candidate application(s) linked to it.\n\nPer database safety rules, openings with applicants cannot be permanently deleted. Would you like to CLOSE this job opening instead to stop receiving further applications?`,
+        confirmText: 'Close Opening',
+        cancelText: 'Keep Open',
+        variant: 'warning',
+      });
+      if (shouldClose) {
+        try {
+          await recruitmentApi.closeJobOpening(job._id);
+          showToast(`Job opening "${job.title}" closed successfully!`, 'info');
+          await loadData();
+        } catch (err) {
+          showToast(err.response?.data?.message || 'Failed to close job opening', 'error');
+        }
+      }
+      return;
+    }
+
     const isConfirmed = await confirm({
       title: 'Delete Job Opening',
       message: `Are you sure you want to delete job opening "${job.title}"? This cannot be undone.`,
@@ -136,7 +170,27 @@ export const JobOpenings = () => {
       showToast('Job opening deleted successfully', 'success');
       await loadData();
     } catch (err) {
-      showToast(err.response?.data?.message || 'Failed to delete job opening', 'error');
+      const errorMsg = err.response?.data?.message || 'Failed to delete job opening';
+      if (err.response?.status === 409 || errorMsg.toLowerCase().includes('candidate')) {
+        const shouldClose = await confirm({
+          title: 'Opening Has Candidates',
+          message: `${errorMsg}\n\nWould you like to CLOSE this job opening instead to archive it?`,
+          confirmText: 'Close Opening',
+          cancelText: 'Cancel',
+          variant: 'warning',
+        });
+        if (shouldClose) {
+          try {
+            await recruitmentApi.closeJobOpening(job._id);
+            showToast(`Job opening "${job.title}" closed successfully!`, 'info');
+            await loadData();
+          } catch (closeErr) {
+            showToast(closeErr.response?.data?.message || 'Failed to close job opening', 'error');
+          }
+        }
+      } else {
+        showToast(errorMsg, 'error');
+      }
     }
   };
 
@@ -193,6 +247,25 @@ export const JobOpenings = () => {
           </span>
         </div>
       ),
+    },
+    {
+      header: 'Candidates',
+      key: 'candidates',
+      render: (r) => {
+        const count = getJobCandidateCount(r._id);
+        return (
+          <Link
+            to={`/recruitment/candidates?jobId=${r._id}`}
+            style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
+            title={count > 0 ? `View ${count} candidate application(s)` : 'No applicants yet'}
+          >
+            <Badge variant={count > 0 ? 'info' : 'neutral'} style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <Users size={12} />
+              <span>{count} {count === 1 ? 'Candidate' : 'Candidates'}</span>
+            </Badge>
+          </Link>
+        );
+      },
     },
     {
       header: 'Status',

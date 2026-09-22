@@ -12,7 +12,7 @@ const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 30000,
+  timeout: 45000,
 });
 
 // Request Interceptor: Attach Access Token
@@ -114,6 +114,22 @@ apiClient.interceptors.response.use(
       } finally {
         isRefreshing = false;
       }
+    }
+
+    // Automatic retry once for transient network drop / ERR_NETWORK_CHANGED on GET
+    const isNetworkError =
+      error.code === 'ERR_NETWORK' ||
+      error.code === 'ECONNABORTED' ||
+      (typeof error.message === 'string' && error.message.toLowerCase().includes('network'));
+
+    if (
+      !originalRequest?._retryNetwork &&
+      isNetworkError &&
+      (!originalRequest?.method || originalRequest.method.toLowerCase() === 'get')
+    ) {
+      originalRequest._retryNetwork = true;
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      return apiClient(originalRequest);
     }
 
     return Promise.reject(error);

@@ -226,10 +226,16 @@ export const Regularization = () => {
     setSubmittingReview(true);
     try {
       if (reviewAction === 'approve') {
-        await regularizationApi.approveRegularization(selectedRequest._id, { reviewRemarks });
+        await regularizationApi.approveRegularization(selectedRequest._id, {
+          remark: reviewRemarks,
+          reviewRemarks,
+        });
         showToast('Regularization approved! Attendance write-through updated.', 'success');
       } else {
-        await regularizationApi.rejectRegularization(selectedRequest._id, { reviewRemarks });
+        await regularizationApi.rejectRegularization(selectedRequest._id, {
+          remark: reviewRemarks,
+          reviewRemarks,
+        });
         showToast('Regularization request rejected', 'info');
       }
       setReviewModalOpen(false);

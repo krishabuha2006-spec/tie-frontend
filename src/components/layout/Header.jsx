@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { Menu, LogOut, ScanFace, Building2, User } from 'lucide-react';
+import { Menu, LogOut, Building2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { Link } from 'react-router-dom';
 import UserProfileModal from '../common/UserProfileModal';
 
 export const Header = ({ onToggleMobileSidebar, title = 'HRMS Portal' }) => {
@@ -43,16 +42,6 @@ export const Header = ({ onToggleMobileSidebar, title = 'HRMS Portal' }) => {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-        {/* Quick Punch Button */}
-        <Link
-          to="/attendance/face-punch"
-          className="btn btn-light btn-sm header-punch-btn"
-          style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}
-          title="Biometric Face Punch"
-        >
-          <ScanFace size={16} />
-          <span>Biometric Punch</span>
-        </Link>
 
         {/* User Badge - Clickable to open Profile */}
         <div

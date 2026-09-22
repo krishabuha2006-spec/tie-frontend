@@ -23,11 +23,23 @@ export const geoApi = {
   },
 
   createGeoFence: async (data) => {
+    const ref = data.reference || data.referenceId;
+    const payload = {
+      name: data.name,
+      scope: data.scope || 'BRANCH',
+      reference: ref,
+      referenceId: ref,
+      referenceModel: data.referenceModel || (data.scope === 'BRANCH' ? 'Branch' : 'ProjectSite'),
+      centerLatitude: Number(data.centerLatitude),
+      centerLongitude: Number(data.centerLongitude),
+      radiusMeters: Number(data.radiusMeters) || 100,
+      isActive: data.isActive !== false,
+    };
     try {
-      const res = await apiClient.post('/geo/geofences', data);
+      const res = await apiClient.post('/geo/geofences', payload);
       return res.data;
     } catch {
-      const fallback = await apiClient.post('/geo/fences', data);
+      const fallback = await apiClient.post('/geo/fences', payload);
       return fallback.data;
     }
   },
@@ -99,7 +111,13 @@ export const geoApi = {
   },
 
   updateAccuracySettings: async (accuracyData) => {
-    const payload = typeof accuracyData === 'object' ? accuracyData : { threshold: Number(accuracyData) };
+    const payload = typeof accuracyData === 'object' ? {
+      maxAcceptableAccuracyMeters: Number(accuracyData.maxAcceptableAccuracyMeters || accuracyData.threshold || 100),
+      failClosedOnMissingFence: accuracyData.failClosedOnMissingFence !== undefined ? Boolean(accuracyData.failClosedOnMissingFence) : false,
+    } : {
+      maxAcceptableAccuracyMeters: Number(accuracyData) || 100,
+      failClosedOnMissingFence: false,
+    };
     const res = await apiClient.put('/geo/settings/accuracy-threshold', payload);
     return res.data;
   },

@@ -221,20 +221,9 @@ export const OfficeCheckOut = () => {
       const overtimeHours = Math.max(0, parseFloat((totalWorkingHours - 8).toFixed(2)));
 
       const payload = {
-        employee: selectedEmpId,
-        checkOutTime: now.toISOString(),
         latitude: activeCoords.latitude,
         longitude: activeCoords.longitude,
-        address,
         gpsAccuracy: activeCoords.gpsAccuracy || 15,
-        faceVerificationStatus: faceResult?.matchResult || 'MATCHED',
-        faceVerificationLogId: faceResult?.logId,
-        capturedImage: capturedPhoto, photoUrl: capturedPhoto,
-        totalWorkingHours, overtimeHours,
-        date: now.toISOString().split('T')[0],
-        time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        attendanceType: 'OFFICE', attendanceStatus: 'PRESENT',
-        confidenceScore: faceResult?.confidence ? faceResult.confidence / 100 : 0.95,
         remarks: `Office Check-Out: Face ${faceResult?.confidence || 95}% match at ${address}`,
       };
 

@@ -319,7 +319,14 @@ export const PerformanceReviews = () => {
       setTemplateForm({
         name: tpl.name || '',
         company: tpl.company?._id || tpl.company || companies[0]?._id || '',
-        kraItems: tpl.kraItems || [],
+        kraItems: (tpl.kraItems && tpl.kraItems.length > 0)
+          ? tpl.kraItems.map((item) => ({
+              name: item.name || '',
+              weightPercent: item.weightPercent ?? item.weight ?? 0,
+              metricType: item.metricType || 'MANUAL_RATING',
+              description: item.description || '',
+            }))
+          : [{ name: '', weightPercent: 100, metricType: 'MANUAL_RATING', description: '' }],
       });
     } else {
       setEditingTemplateId(null);
@@ -327,7 +334,7 @@ export const PerformanceReviews = () => {
         name: '',
         company: companies[0]?._id || '',
         kraItems: [
-          { name: '', weight: 100, description: '' },
+          { name: '', weightPercent: 100, metricType: 'MANUAL_RATING', description: '' },
         ],
       });
     }
@@ -335,11 +342,13 @@ export const PerformanceReviews = () => {
   };
 
   const addKraItemRow = () => {
+    const currentSum = templateForm.kraItems.reduce((acc, it) => acc + (Number(it.weightPercent) || 0), 0);
+    const remainder = Math.max(0, 100 - currentSum);
     setTemplateForm({
       ...templateForm,
       kraItems: [
         ...templateForm.kraItems,
-        { name: '', weight: 10, description: '' },
+        { name: '', weightPercent: remainder, metricType: 'MANUAL_RATING', description: '' },
       ],
     });
   };
@@ -352,6 +361,11 @@ export const PerformanceReviews = () => {
 
   const handleSaveTemplate = async (e) => {
     e.preventDefault();
+    const currentSum = templateForm.kraItems.reduce((acc, it) => acc + (Number(it.weightPercent) || 0), 0);
+    if (currentSum !== 100) {
+      showToast(`Total weight must equal exactly 100%. Current sum: ${currentSum}%.`, 'error');
+      return;
+    }
     setSubmittingTemplate(true);
     try {
       if (editingTemplateId) {
@@ -1026,12 +1040,51 @@ export const PerformanceReviews = () => {
           </div>
 
           <div style={{ marginTop: 14, marginBottom: 14 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600 }}>KRA Target Areas</h4>
-              <Button size="sm" variant="secondary" icon={Plus} onClick={addKraItemRow}>
-                Add KRA Area
-              </Button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600 }}>KRA Target Areas</h4>
+                {(() => {
+                  const currentSum = templateForm.kraItems.reduce((acc, it) => acc + (Number(it.weightPercent) || 0), 0);
+                  const is100 = currentSum === 100;
+                  return (
+                    <span style={{
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      padding: '2px 8px',
+                      borderRadius: 12,
+                      backgroundColor: is100 ? '#dcfce7' : '#fee2e2',
+                      color: is100 ? '#15803d' : '#b91c1c',
+                    }}>
+                      Total Weight: {currentSum}% {is100 ? '✓' : '(Must be 100%)'}
+                    </span>
+                  );
+                })()}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="light"
+                  onClick={() => {
+                    const count = templateForm.kraItems.length;
+                    if (count === 0) return;
+                    const base = Math.floor(100 / count);
+                    const remainder = 100 - (base * count);
+                    const distributed = templateForm.kraItems.map((it, i) => ({
+                      ...it,
+                      weightPercent: i === 0 ? base + remainder : base,
+                    }));
+                    setTemplateForm({ ...templateForm, kraItems: distributed });
+                  }}
+                >
+                  Distribute Evenly
+                </Button>
+                <Button size="sm" type="button" variant="secondary" icon={Plus} onClick={addKraItemRow}>
+                  Add KRA Area
+                </Button>
+              </div>
             </div>
+
             {templateForm.kraItems.map((item, idx) => (
               <div
                 key={idx}
@@ -1045,7 +1098,7 @@ export const PerformanceReviews = () => {
               >
                 <Input
                   value={item.name}
-                  placeholder="KRA Area Name"
+                  placeholder="KRA Area Name (e.g. Code Quality)"
                   onChange={(e) => {
                     const copy = [...templateForm.kraItems];
                     copy[idx].name = e.target.value;
@@ -1055,18 +1108,20 @@ export const PerformanceReviews = () => {
                 />
                 <Input
                   type="number"
-                  value={item.weight}
+                  min="1"
+                  max="100"
+                  value={item.weightPercent}
                   placeholder="Weight %"
                   onChange={(e) => {
                     const copy = [...templateForm.kraItems];
-                    copy[idx].weight = Number(e.target.value);
+                    copy[idx].weightPercent = e.target.value === '' ? '' : Number(e.target.value);
                     setTemplateForm({ ...templateForm, kraItems: copy });
                   }}
                   required
                 />
                 <Input
                   value={item.description}
-                  placeholder="Measurement Criteria"
+                  placeholder="Measurement Criteria / Goals"
                   onChange={(e) => {
                     const copy = [...templateForm.kraItems];
                     copy[idx].description = e.target.value;
@@ -1075,6 +1130,7 @@ export const PerformanceReviews = () => {
                 />
                 <Button
                   size="sm"
+                  type="button"
                   variant="danger"
                   icon={Trash2}
                   onClick={() => removeKraItemRow(idx)}

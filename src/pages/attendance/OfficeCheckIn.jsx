@@ -200,22 +200,11 @@ export const OfficeCheckIn = () => {
       const confidence = faceResult?.confidence || 95;
 
       await attendanceApi.officeCheckIn({
-        employee: selectedEmpId,
-        checkInTime: now.toISOString(),
         latitude: activeCoords.latitude,
         longitude: activeCoords.longitude,
-        address,
         gpsAccuracy: activeCoords.gpsAccuracy || 15,
-        faceVerificationStatus: faceResult?.matchResult || 'MATCHED',
-        faceVerificationLogId: faceResult?.logId,
         capturedImage: capturedPhoto,
-        photoUrl: capturedPhoto,
-        date: now.toISOString().split('T')[0],
-        time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        attendanceType: 'OFFICE',
-        attendanceStatus: 'PRESENT',
         confidenceScore: faceResult?.confidence ? faceResult.confidence / 100 : 0.95,
-        remarks: `Office Check-In: Face ${confidence}% match at ${address}`,
       });
 
       showToast('Check-In recorded successfully!', 'success');

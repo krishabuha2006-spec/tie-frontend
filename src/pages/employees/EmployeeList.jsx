@@ -482,24 +482,28 @@ export const EmployeeList = () => {
         ? res
         : (Array.isArray(res?.data) ? res.data : (res?.employees || res?.data?.employees || []));
 
-      // Fetch real face status for each employee from backend
-      const enriched = await Promise.all(
-        list.map(async (emp) => {
-          const empId = emp._id || emp.id;
-          try {
-            const faceRes = await faceApi.getFaceStatus(empId);
-            const status = faceRes?.status || faceRes?.data?.status || 'UNREGISTERED';
-            const isEnrolled = status === 'ENROLLED' || status === 'REGISTERED' || status === 'ACTIVE';
-            return { ...emp, _faceStatus: status, isFaceEnrolled: isEnrolled };
-          } catch {
-            return { ...emp, _faceStatus: 'UNREGISTERED', isFaceEnrolled: false };
-          }
-        })
-      );
-
-      setEmployees(enriched);
+      // Immediately show employees without blocking network on parallel face calls
+      setEmployees(list);
       const count = res?.total || res?.totalCount || res?.count || (Array.isArray(list) ? list.length : 0);
       setTotalCount(count);
+
+      // Asynchronously enrich face status in background using batched calls
+      const empIds = list.map((e) => e._id || e.id).filter(Boolean);
+      if (empIds.length > 0) {
+        faceApi.getBulkFaceStatus(empIds).then((statusMap) => {
+          if (!statusMap || Object.keys(statusMap).length === 0) return;
+          setEmployees((prev) =>
+            prev.map((emp) => {
+              const empId = emp._id || emp.id;
+              const sData = statusMap[empId];
+              if (!sData) return emp;
+              const status = sData?.status || sData?.data?.status || 'UNREGISTERED';
+              const isEnrolled = status === 'ENROLLED' || status === 'REGISTERED' || status === 'ACTIVE' || sData?.isRegistered === true;
+              return { ...emp, _faceStatus: status, isFaceEnrolled: isEnrolled };
+            })
+          );
+        }).catch(() => {});
+      }
     } catch (err) {
       console.error('Failed to load employees:', err);
       setEmployees([]);
@@ -585,27 +589,173 @@ export const EmployeeList = () => {
     setAddModalOpen(true);
   };
 
+  // Step-by-Step Validation for Multi-Step Employee Creation
+  const validateStep = (stepKey) => {
+    if (stepKey === 'basic') {
+      if (!newEmp.firstName?.trim()) {
+        showToast('First Name is required', 'warning');
+        return false;
+      }
+      if (!newEmp.lastName?.trim()) {
+        showToast('Last Name is required', 'warning');
+        return false;
+      }
+      if (!newEmp.email?.trim()) {
+        showToast('Official Email is required', 'warning');
+        return false;
+      }
+      const emailErr = validateEmail(newEmp.email, { fieldName: 'Official email' });
+      if (emailErr) {
+        showToast(emailErr, 'warning');
+        return false;
+      }
+      if (!newEmp.phone?.trim()) {
+        showToast('Mobile Number is required', 'warning');
+        return false;
+      }
+      const phoneErr = validatePhone(newEmp.phone, { fieldName: 'Mobile number' });
+      if (phoneErr) {
+        showToast(phoneErr, 'warning');
+        return false;
+      }
+      if (newEmp.alternateNumber?.trim()) {
+        const altErr = validatePhone(newEmp.alternateNumber, { required: false, fieldName: 'Alternate number' });
+        if (altErr) {
+          showToast(altErr, 'warning');
+          return false;
+        }
+        const cleanPhone = newEmp.phone.replace(/\D/g, '');
+        const cleanAlt = newEmp.alternateNumber.replace(/\D/g, '');
+        if (cleanAlt && cleanPhone && cleanPhone === cleanAlt) {
+          showToast('Mobile Number and Alternate Number cannot be the same', 'warning');
+          return false;
+        }
+      }
+      if (!newEmp.gender) {
+        showToast('Gender is required', 'warning');
+        return false;
+      }
+      if (!newEmp.dateOfBirth) {
+        showToast('Date of Birth is required', 'warning');
+        return false;
+      }
+      if (!newEmp.initialPassword?.trim()) {
+        showToast('Initial Password is required', 'warning');
+        return false;
+      }
+      if (newEmp.initialPassword.trim().length < 6) {
+        showToast('Initial Password must be at least 6 characters long', 'warning');
+        return false;
+      }
+      return true;
+    }
+
+    if (stepKey === 'employment') {
+      if (!newEmp.company) {
+        showToast('Company selection is required', 'warning');
+        return false;
+      }
+      if (!newEmp.branch) {
+        showToast('Branch selection is required', 'warning');
+        return false;
+      }
+      if (!newEmp.department) {
+        showToast('Department selection is required', 'warning');
+        return false;
+      }
+      if (!newEmp.designation) {
+        showToast('Designation selection is required', 'warning');
+        return false;
+      }
+      if (!newEmp.employeeRole) {
+        showToast('Assigned System Role is required', 'warning');
+        return false;
+      }
+      if (!newEmp.employmentType) {
+        showToast('Employment Type is required', 'warning');
+        return false;
+      }
+      if (!newEmp.employeeStatus) {
+        showToast('Employee Status is required', 'warning');
+        return false;
+      }
+      if (!newEmp.workType) {
+        showToast('Work Type is required', 'warning');
+        return false;
+      }
+      if (!newEmp.dateOfJoining) {
+        showToast('Date of Joining is required', 'warning');
+        return false;
+      }
+      return true;
+    }
+
+    if (stepKey === 'government') {
+      if (newEmp.panNumber?.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/i.test(newEmp.panNumber.trim())) {
+        showToast('Invalid PAN format (e.g. ABCDE1234F)', 'warning');
+        return false;
+      }
+      if (newEmp.aadhaarNumber?.trim()) {
+        const cleanAadhaar = newEmp.aadhaarNumber.replace(/\D/g, '');
+        if (cleanAadhaar.length !== 12) {
+          showToast('Aadhaar Number must be exactly 12 digits', 'warning');
+          return false;
+        }
+      }
+      return true;
+    }
+
+    if (stepKey === 'emergency') {
+      if (newEmp.emergencyPhone?.trim()) {
+        const emgErr = validatePhone(newEmp.emergencyPhone, { required: false, fieldName: 'Emergency mobile phone' });
+        if (emgErr) {
+          showToast(emgErr, 'warning');
+          return false;
+        }
+      }
+      return true;
+    }
+
+    return true;
+  };
+
+  const handleTabClick = (targetTabKey) => {
+    const stepOrder = ['basic', 'employment', 'government', 'emergency', 'documents'];
+    const currentIndex = stepOrder.indexOf(createTab);
+    const targetIndex = stepOrder.indexOf(targetTabKey);
+
+    if (targetIndex <= currentIndex) {
+      setCreateTab(targetTabKey);
+      return;
+    }
+
+    for (let i = currentIndex; i < targetIndex; i++) {
+      const stepToValidate = stepOrder[i];
+      if (!validateStep(stepToValidate)) {
+        setCreateTab(stepToValidate);
+        return;
+      }
+    }
+    setCreateTab(targetTabKey);
+  };
+
+  const handleNextStep = () => {
+    if (!validateStep(createTab)) {
+      return;
+    }
+    if (createTab === 'basic') setCreateTab('employment');
+    else if (createTab === 'employment') setCreateTab('government');
+    else if (createTab === 'government') setCreateTab('emergency');
+    else if (createTab === 'emergency') setCreateTab('documents');
+  };
+
   // Create Employee (POST /employees)
   const handleCreateEmployee = async (e) => {
     e.preventDefault();
-    if (!newEmp.firstName?.trim() || !newEmp.email?.trim() || !newEmp.phone?.trim()) {
-      showToast('Please fill all mandatory fields (Name, Email, Mobile Number)', 'warning');
-      return;
-    }
-    const emailErr = validateEmail(newEmp.email, { fieldName: 'Official email' });
-    if (emailErr) {
-      showToast(emailErr, 'warning');
-      return;
-    }
-    const phoneErr = validatePhone(newEmp.phone, { fieldName: 'Mobile number' });
-    if (phoneErr) {
-      showToast(phoneErr, 'warning');
-      return;
-    }
-    if (newEmp.alternateNumber) {
-      const altErr = validatePhone(newEmp.alternateNumber, { required: false, fieldName: 'Alternate number' });
-      if (altErr) {
-        showToast(altErr, 'warning');
+    const stepsToValidate = ['basic', 'employment', 'government', 'emergency'];
+    for (const stepKey of stepsToValidate) {
+      if (!validateStep(stepKey)) {
+        setCreateTab(stepKey);
         return;
       }
     }
@@ -784,10 +934,17 @@ export const EmployeeList = () => {
           setSavingSection(false);
           return;
         }
-        if (editFormData.alternateNumber) {
+        if (editFormData.alternateNumber?.trim()) {
           const altErr = validatePhone(editFormData.alternateNumber, { required: false, fieldName: 'Alternate number' });
           if (altErr) {
             showToast(altErr, 'warning');
+            setSavingSection(false);
+            return;
+          }
+          const cleanMobile = editFormData.mobileNumber?.replace(/\D/g, '') || '';
+          const cleanAlt = editFormData.alternateNumber?.replace(/\D/g, '') || '';
+          if (cleanAlt && cleanMobile && cleanMobile === cleanAlt) {
+            showToast('Mobile Number and Alternate Number cannot be the same', 'warning');
             setSavingSection(false);
             return;
           }
@@ -1422,7 +1579,7 @@ export const EmployeeList = () => {
             <button
               key={tab.key}
               type="button"
-              onClick={() => setCreateTab(tab.key)}
+              onClick={() => handleTabClick(tab.key)}
               style={{
                 flex: '1 0 auto',
                 padding: '10px 14px',
@@ -1611,7 +1768,7 @@ export const EmployeeList = () => {
                 required
               />
               <Input
-                label="Mobile Number"
+                label="Mobile Number *"
                 type="tel"
                 isPhone={true}
                 value={newEmp.phone}
@@ -1625,10 +1782,10 @@ export const EmployeeList = () => {
                 isPhone={true}
                 value={newEmp.alternateNumber}
                 onChange={(e) => setNewEmp({ ...newEmp, alternateNumber: e.target.value })}
-                placeholder="10-digit alternate mobile (optional)"
+                placeholder="10-digit alternate mobile (cannot match mobile)"
               />
               <Select
-                label="Gender"
+                label="Gender *"
                 value={newEmp.gender}
                 onChange={(e) => setNewEmp({ ...newEmp, gender: e.target.value })}
                 options={[
@@ -1639,7 +1796,7 @@ export const EmployeeList = () => {
                 required
               />
               <Input
-                label="Date of Birth"
+                label="Date of Birth *"
                 type="date"
                 value={newEmp.dateOfBirth}
                 onChange={(e) => setNewEmp({ ...newEmp, dateOfBirth: e.target.value })}
@@ -1662,11 +1819,12 @@ export const EmployeeList = () => {
                 ]}
               />
               <Input
-                label="Custom Initial Password (Optional)"
+                label="Initial Password *"
                 type="password"
                 value={newEmp.initialPassword}
                 onChange={(e) => setNewEmp({ ...newEmp, initialPassword: e.target.value })}
-                placeholder="Default: Tie@<EmpCode>"
+                placeholder="Enter password (minimum 6 characters)"
+                required
               />
             </div>
           )}
@@ -2069,12 +2227,7 @@ export const EmployeeList = () => {
                 <Button
                   type="button"
                   variant="secondary"
-                  onClick={() => {
-                    if (createTab === 'basic') setCreateTab('employment');
-                    else if (createTab === 'employment') setCreateTab('government');
-                    else if (createTab === 'government') setCreateTab('emergency');
-                    else if (createTab === 'emergency') setCreateTab('documents');
-                  }}
+                  onClick={handleNextStep}
                 >
                   Next Step
                 </Button>

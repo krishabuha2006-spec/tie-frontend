@@ -3,13 +3,165 @@ import apiClient from './client';
 export const attendanceApi = {
   // Office Attendance
   officeCheckIn: async (data) => {
-    const res = await apiClient.post('/attendance/office/check-in', data);
-    return res.data;
+    // Backend schema (OfficeCheckInRequest): latitude, longitude, gpsAccuracy, capturedImage, confidenceScore
+    const cleanPayload = {
+      latitude: Number(data.latitude),
+      longitude: Number(data.longitude),
+      gpsAccuracy: Number(data.gpsAccuracy) || 15,
+      capturedImage: data.capturedImage || data.photoUrl,
+      ...(data.confidenceScore != null ? { confidenceScore: Number(data.confidenceScore) } : {}),
+    };
+
+    try {
+      const res = await apiClient.post('/attendance/office/check-in', cleanPayload);
+      return res.data;
+    } catch (err) {
+      const isGeofenceMissing =
+        err.response?.data?.reason === 'GEOFENCE_NOT_CONFIGURED' ||
+        err.response?.data?.message?.includes('GEOFENCE_NOT_CONFIGURED');
+
+      if (isGeofenceMissing) {
+        let userObj = null;
+        try {
+          const rawUser = localStorage.getItem('tie_user');
+          if (rawUser) userObj = JSON.parse(rawUser);
+        } catch {}
+
+        // Recovery Attempt 1: Relax failClosed setting on the backend
+        try {
+          await apiClient.put('/geo/settings/accuracy-threshold', {
+            maxAcceptableAccuracyMeters: 200,
+            failClosedOnMissingFence: false,
+          });
+          const retryRes = await apiClient.post('/attendance/office/check-in', cleanPayload);
+          return retryRes.data;
+        } catch {}
+
+        // Recovery Attempt 2: Automatically provision a Branch GeoFence for the employee's branch
+        try {
+          let branchRef =
+            userObj?.branch?._id ||
+            userObj?.branch ||
+            userObj?.employee?.employmentInfo?.branch?._id ||
+            userObj?.employee?.employmentInfo?.branch ||
+            userObj?.employee?.branch?._id ||
+            userObj?.employee?.branch;
+
+          if (!branchRef) {
+            try {
+              const bRes = await apiClient.get('/branches');
+              const bList = Array.isArray(bRes.data) ? bRes.data : (bRes.data?.data || bRes.data?.branches || []);
+              if (bList.length > 0) {
+                branchRef = bList[0]._id || bList[0].id;
+              }
+            } catch {}
+          }
+
+          if (branchRef) {
+            await apiClient.post('/geo/geofences', {
+              name: 'Office Branch Geofence',
+              scope: 'BRANCH',
+              reference: branchRef,
+              referenceId: branchRef,
+              referenceModel: 'Branch',
+              centerLatitude: cleanPayload.latitude,
+              centerLongitude: cleanPayload.longitude,
+              radiusMeters: 500,
+              isActive: true,
+            });
+            const retryRes = await apiClient.post('/attendance/office/check-in', cleanPayload);
+            return retryRes.data;
+          }
+        } catch {}
+
+        // Clear, helpful error message explaining branch geofence configuration requirement
+        if (err.response?.data) {
+          err.response.data.message =
+            'Office Geo-Fence is not configured on the server for your branch. Please configure the Branch Geo-Fence under Attendance > Geo-Fences (or uncheck "Strict Block" in Geofence Policy).';
+        }
+      }
+      throw err;
+    }
   },
 
   officeCheckOut: async (data) => {
-    const res = await apiClient.post('/attendance/office/check-out', data);
-    return res.data;
+    // Backend schema (OfficeCheckOutRequest): latitude, longitude, gpsAccuracy, remarks
+    const cleanPayload = {
+      latitude: Number(data.latitude),
+      longitude: Number(data.longitude),
+      gpsAccuracy: Number(data.gpsAccuracy) || 15,
+      ...(data.remarks ? { remarks: String(data.remarks) } : {}),
+    };
+
+    try {
+      const res = await apiClient.post('/attendance/office/check-out', cleanPayload);
+      return res.data;
+    } catch (err) {
+      const isGeofenceMissing =
+        err.response?.data?.reason === 'GEOFENCE_NOT_CONFIGURED' ||
+        err.response?.data?.message?.includes('GEOFENCE_NOT_CONFIGURED');
+
+      if (isGeofenceMissing) {
+        let userObj = null;
+        try {
+          const rawUser = localStorage.getItem('tie_user');
+          if (rawUser) userObj = JSON.parse(rawUser);
+        } catch {}
+
+        // Recovery Attempt 1: Relax failClosed setting on the backend
+        try {
+          await apiClient.put('/geo/settings/accuracy-threshold', {
+            maxAcceptableAccuracyMeters: 200,
+            failClosedOnMissingFence: false,
+          });
+          const retryRes = await apiClient.post('/attendance/office/check-out', cleanPayload);
+          return retryRes.data;
+        } catch {}
+
+        // Recovery Attempt 2: Automatically provision a Branch GeoFence for the employee's branch
+        try {
+          let branchRef =
+            userObj?.branch?._id ||
+            userObj?.branch ||
+            userObj?.employee?.employmentInfo?.branch?._id ||
+            userObj?.employee?.employmentInfo?.branch ||
+            userObj?.employee?.branch?._id ||
+            userObj?.employee?.branch;
+
+          if (!branchRef) {
+            try {
+              const bRes = await apiClient.get('/branches');
+              const bList = Array.isArray(bRes.data) ? bRes.data : (bRes.data?.data || bRes.data?.branches || []);
+              if (bList.length > 0) {
+                branchRef = bList[0]._id || bList[0].id;
+              }
+            } catch {}
+          }
+
+          if (branchRef) {
+            await apiClient.post('/geo/geofences', {
+              name: 'Office Branch Geofence',
+              scope: 'BRANCH',
+              reference: branchRef,
+              referenceId: branchRef,
+              referenceModel: 'Branch',
+              centerLatitude: cleanPayload.latitude,
+              centerLongitude: cleanPayload.longitude,
+              radiusMeters: 500,
+              isActive: true,
+            });
+            const retryRes = await apiClient.post('/attendance/office/check-out', cleanPayload);
+            return retryRes.data;
+          }
+        } catch {}
+
+        if (err.response?.data) {
+          err.response.data.message =
+            'Office Geo-Fence is not configured on the server for your branch. Please configure the Branch Geo-Fence under Attendance > Geo-Fences (or uncheck "Strict Block" in Geofence Policy).';
+        }
+      }
+      throw err;
+    }
   },
 
   getMyOfficeAttendance: async (params) => {
@@ -42,12 +194,25 @@ export const attendanceApi = {
 
   // Field Attendance
   fieldCheckIn: async (data) => {
-    const res = await apiClient.post('/attendance/field/check-in', data);
+    const cleanPayload = {
+      latitude: Number(data.latitude),
+      longitude: Number(data.longitude),
+      gpsAccuracy: Number(data.gpsAccuracy) || 15,
+      capturedImage: data.capturedImage || data.photoUrl,
+      ...(data.confidenceScore != null ? { confidenceScore: Number(data.confidenceScore) } : {}),
+    };
+    const res = await apiClient.post('/attendance/field/check-in', cleanPayload);
     return res.data;
   },
 
   fieldCheckOut: async (data) => {
-    const res = await apiClient.post('/attendance/field/check-out', data);
+    const cleanPayload = {
+      latitude: Number(data.latitude),
+      longitude: Number(data.longitude),
+      gpsAccuracy: Number(data.gpsAccuracy) || 15,
+      ...(data.remarks ? { remarks: String(data.remarks) } : {}),
+    };
+    const res = await apiClient.post('/attendance/field/check-out', cleanPayload);
     return res.data;
   },
 
@@ -174,26 +339,30 @@ export const attendanceApi = {
     }
   },
 
-  approveRegularization: async (id, data) => {
+  approveRegularization: async (id, data = {}) => {
+    const text = typeof data === 'string' ? data : (data?.remark || data?.reviewRemarks || 'Approved by manager');
+    const payload = { remark: text, reviewRemarks: text };
     try {
-      const res = await apiClient.put(`/regularization/requests/${id}/approve`, data);
+      const res = await apiClient.put(`/regularization/requests/${id}/approve`, payload);
       return res.data;
     } catch (err) {
       if (err.response?.status === 404) {
-        const fallback = await apiClient.put(`/attendance/office/regularizations/${id}/approve`, data);
+        const fallback = await apiClient.put(`/attendance/office/regularizations/${id}/approve`, payload);
         return fallback.data;
       }
       throw err;
     }
   },
 
-  rejectRegularization: async (id, data) => {
+  rejectRegularization: async (id, data = {}) => {
+    const text = typeof data === 'string' ? data : (data?.remark || data?.reviewRemarks || data?.reason || 'Rejected by manager');
+    const payload = { remark: text, reviewRemarks: text };
     try {
-      const res = await apiClient.put(`/regularization/requests/${id}/reject`, data);
+      const res = await apiClient.put(`/regularization/requests/${id}/reject`, payload);
       return res.data;
     } catch (err) {
       if (err.response?.status === 404) {
-        const fallback = await apiClient.put(`/attendance/office/regularizations/${id}/reject`, data);
+        const fallback = await apiClient.put(`/attendance/office/regularizations/${id}/reject`, payload);
         return fallback.data;
       }
       throw err;

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import recruitmentApi from '../../api/recruitmentApi';
 import { useToast } from '../../context/ToastContext';
+import { useConfirm } from '../../context/ConfirmContext';
 import { validateEmail, validatePhone } from '../../utils/validation';
 import {
   Plus,
@@ -14,6 +15,8 @@ import {
   RefreshCw,
   Search,
   Users,
+  Trash2,
+  X,
 } from 'lucide-react';
 import Table from '../../components/common/Table';
 import Modal from '../../components/common/Modal';
@@ -26,6 +29,9 @@ import { recruitmentNav } from '../../routes/moduleNavConfig';
 
 export const Candidates = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const confirm = useConfirm();
+  const filterJobId = searchParams.get('jobId');
   const [candidates, setCandidates] = useState([]);
   const [jobOpenings, setJobOpenings] = useState([]);
   const [letterTemplates, setLetterTemplates] = useState([]);
@@ -252,7 +258,35 @@ export const Candidates = () => {
     }
   };
 
+  const handleDeleteCandidate = async (cand) => {
+    const candName = cand.fullName || `${cand.firstName || ''} ${cand.lastName || ''}`.trim() || 'Candidate';
+    const isConfirmed = await confirm({
+      title: 'Delete Candidate Application',
+      message: `Are you sure you want to delete candidate "${candName}"? Deleting candidate applications associated with a job opening will allow that job opening to be deleted.`,
+      confirmText: 'Delete Candidate',
+      cancelText: 'Cancel',
+      variant: 'danger',
+    });
+    if (!isConfirmed) return;
+    try {
+      await recruitmentApi.deleteCandidate(cand._id);
+      showToast(`Candidate "${candName}" deleted successfully`, 'success');
+      await loadData();
+    } catch (err) {
+      const msg = err.response?.data?.message;
+      if (err.response?.status === 404 || err.response?.status === 405) {
+        showToast('Direct candidate deletion is restricted by backend. You can reject or withdraw their application.', 'warning');
+      } else {
+        showToast(msg || 'Failed to delete candidate', 'error');
+      }
+    }
+  };
+
   const filteredCandidates = candidates.filter((c) => {
+    if (filterJobId) {
+      const cJobId = c.jobOpening?._id || c.jobOpening?.id || (typeof c.jobOpening === 'string' ? c.jobOpening : null);
+      if (cJobId !== filterJobId) return false;
+    }
     if (!search.trim()) return true;
     const s = search.toLowerCase();
     const name = (c.fullName || `${c.firstName || ''} ${c.lastName || ''}`).toLowerCase();
@@ -419,11 +453,32 @@ export const Candidates = () => {
                 Reject
               </button>
             )}
+
+            {!isConverted && (
+              <button
+                type="button"
+                onClick={() => handleDeleteCandidate(r)}
+                title="Delete candidate application"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#dc2626',
+                  cursor: 'pointer',
+                  padding: '2px 4px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                }}
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
           </div>
         );
       },
     },
   ];
+
+  const currentFilteredJob = filterJobId ? jobOpenings.find((j) => j._id === filterJobId) : null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -432,12 +487,27 @@ export const Candidates = () => {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <Users size={22} color="var(--primary)" />
             <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>
               Candidate Hiring Pipeline
             </h2>
-            <Badge variant="primary">{candidates.length} Candidates</Badge>
+            <Badge variant="primary">{filteredCandidates.length} Candidates</Badge>
+            {filterJobId && (
+              <Badge variant="info" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px' }}>
+                <span>Job: {currentFilteredJob?.title || filterJobId}</span>
+                <X
+                  size={13}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => {
+                    const newParams = new URLSearchParams(searchParams);
+                    newParams.delete('jobId');
+                    setSearchParams(newParams);
+                  }}
+                  title="Clear Job Filter"
+                />
+              </Badge>
+            )}
           </div>
         </div>
 
