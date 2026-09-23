@@ -21,18 +21,32 @@ import ConfirmDialog from '../../components/common/ConfirmDialog';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { mastersNav } from '../../routes/moduleNavConfig';
 
-// Exactly 10 Core Modules - Balanced into 2 rows of 5
+// Standard 12 granular actions conforming to Backend PermissionActionsSchema
+const ALL_ACTIONS = [
+  'view', 'create', 'edit', 'delete', 'approve', 'reject',
+  'export', 'print', 'download', 'uploadDocuments', 'assignTasks', 'viewReports'
+];
+
+const createActionsObject = (granted = true) => {
+  const actions = {};
+  ALL_ACTIONS.forEach((act) => {
+    actions[act] = Boolean(granted);
+  });
+  return actions;
+};
+
+// Exactly 10 Core Modules - Balanced into 2 rows of 5 with backend submodules
 const CORE_MODULES = [
-  { key: 'employees', backendKey: 'hrmEmployees', label: 'Employees' },
-  { key: 'attendance', backendKey: 'attendance', label: 'Attendance' },
-  { key: 'recruitment', backendKey: 'recruitment', label: 'Recruitment' },
-  { key: 'payroll', backendKey: 'payroll', label: 'Payroll' },
-  { key: 'leaves', backendKey: 'leaves', label: 'Leaves' },
-  { key: 'projects', backendKey: 'operations', label: 'Projects & Tasks' },
-  { key: 'assets', backendKey: 'assetsClaims', label: 'Assets & Loans' },
-  { key: 'performance', backendKey: 'performance', label: 'Performance' },
-  { key: 'masters', backendKey: 'masters', label: 'Settings' },
-  { key: 'reports', backendKey: 'reports', label: 'Reports' },
+  { key: 'employees', backendKey: 'hrmEmployees', submodules: ['hrmEmployees.directory', 'hrmEmployees.onboarding', 'hrmEmployees.documents', 'hrmEmployees.status'], label: 'Employees' },
+  { key: 'attendance', backendKey: 'attendance', submodules: ['attendance.daily', 'attendance.field', 'attendance.biometric', 'attendance.shifts'], label: 'Attendance' },
+  { key: 'recruitment', backendKey: 'recruitment', submodules: ['recruitment.jobOpenings', 'recruitment.candidates', 'recruitment.pipeline'], label: 'Recruitment' },
+  { key: 'payroll', backendKey: 'payroll', submodules: ['payroll.salaryStructure', 'payroll.payRuns', 'payroll.payslips'], label: 'Payroll' },
+  { key: 'leaves', backendKey: 'leaves', submodules: ['leaves.requests', 'leaves.balances', 'leaves.types'], label: 'Leaves' },
+  { key: 'projects', backendKey: 'operations', submodules: ['operations.projects', 'operations.tasks', 'operations.milestones'], label: 'Projects & Tasks' },
+  { key: 'assets', backendKey: 'assetsClaims', submodules: ['assetsClaims.assets', 'assetsClaims.claims', 'assetsClaims.loans'], label: 'Assets & Loans' },
+  { key: 'performance', backendKey: 'performance', submodules: ['performance.appraisals', 'performance.goals', 'performance.reviews'], label: 'Performance' },
+  { key: 'masters', backendKey: 'masters', submodules: ['masters.branches', 'masters.departments', 'masters.designations', 'masters.roles'], label: 'Settings' },
+  { key: 'reports', backendKey: 'reports', submodules: ['reports.attendance', 'reports.payroll', 'reports.employees'], label: 'Reports' },
 ];
 
 // Check if role has access to a module
@@ -129,6 +143,8 @@ export const RolesPermissions = () => {
     const hasAccess = checkModuleAccess(role, currentPerms, mod.key, mod.backendKey);
 
     const updatedPerms = { ...currentPerms };
+    const allActions = createActionsObject(true);
+    const zeroActions = createActionsObject(false);
 
     if (hasAccess) {
       delete updatedPerms[mod.key];
@@ -138,12 +154,22 @@ export const RolesPermissions = () => {
           delete updatedPerms[k];
         }
       });
-      updatedPerms[mod.key] = false;
-      updatedPerms[mod.backendKey] = false;
+      // Store complete object with all false flags (never bare boolean false)
+      updatedPerms[mod.key] = zeroActions;
+      updatedPerms[mod.backendKey] = zeroActions;
+      if (mod.submodules) {
+        mod.submodules.forEach((sub) => {
+          updatedPerms[sub] = zeroActions;
+        });
+      }
     } else {
-      const allActions = { view: true, create: true, edit: true, delete: true, approve: true, export: true };
       updatedPerms[mod.key] = allActions;
       updatedPerms[mod.backendKey] = allActions;
+      if (mod.submodules) {
+        mod.submodules.forEach((sub) => {
+          updatedPerms[sub] = allActions;
+        });
+      }
     }
 
     setPendingChanges((prev) => ({
@@ -156,11 +182,16 @@ export const RolesPermissions = () => {
   const handleSelectAll = (role) => {
     if (role.isSuperAdmin || role.name === 'super_admin') return;
     const updatedPerms = { ...getRolePerms(role) };
-    const allActions = { view: true, create: true, edit: true, delete: true, approve: true, export: true };
+    const allActions = createActionsObject(true);
 
     CORE_MODULES.forEach((mod) => {
       updatedPerms[mod.key] = allActions;
       updatedPerms[mod.backendKey] = allActions;
+      if (mod.submodules) {
+        mod.submodules.forEach((sub) => {
+          updatedPerms[sub] = allActions;
+        });
+      }
     });
 
     setPendingChanges((prev) => ({
@@ -173,9 +204,16 @@ export const RolesPermissions = () => {
   const handleClearAll = (role) => {
     if (role.isSuperAdmin || role.name === 'super_admin') return;
     const updatedPerms = {};
+    const zeroActions = createActionsObject(false);
+
     CORE_MODULES.forEach((mod) => {
-      updatedPerms[mod.key] = false;
-      updatedPerms[mod.backendKey] = false;
+      updatedPerms[mod.key] = zeroActions;
+      updatedPerms[mod.backendKey] = zeroActions;
+      if (mod.submodules) {
+        mod.submodules.forEach((sub) => {
+          updatedPerms[sub] = zeroActions;
+        });
+      }
     });
 
     setPendingChanges((prev) => ({
@@ -199,13 +237,6 @@ export const RolesPermissions = () => {
 
     try {
       await masterApi.updateRolePermissions(roleId, permsToSave);
-
-      try {
-        await masterApi.updateRole(roleId, {
-          ...role,
-          permissions: permsToSave,
-        });
-      } catch {}
 
       setRoles((prev) =>
         prev.map((r) => (r._id === roleId ? { ...r, permissions: permsToSave } : r))
@@ -244,9 +275,6 @@ export const RolesPermissions = () => {
         if (role) {
           const perms = pendingChanges[rId];
           await masterApi.updateRolePermissions(rId, perms);
-          try {
-            await masterApi.updateRole(rId, { ...role, permissions: perms });
-          } catch {}
         }
       }
 

@@ -270,8 +270,54 @@ export const masterApi = {
     }
   },
   updateRolePermissions: async (id, permissions) => {
-    const res = await apiClient.put(`/roles/${id}/permissions`, { permissions });
-    return res.data;
+    // Sanitize permissions to ensure all values are valid PermissionActions objects (never bare booleans)
+    const sanitized = {};
+    const ALL_ACTIONS = [
+      'view', 'create', 'edit', 'delete', 'approve', 'reject',
+      'export', 'print', 'download', 'uploadDocuments', 'assignTasks', 'viewReports'
+    ];
+
+    if (permissions && typeof permissions === 'object') {
+      for (const [k, v] of Object.entries(permissions)) {
+        if (!k || typeof k !== 'string') continue;
+        if (v === true) {
+          const actObj = {};
+          ALL_ACTIONS.forEach((a) => { actObj[a] = true; });
+          sanitized[k] = actObj;
+        } else if (v === false) {
+          const actObj = {};
+          ALL_ACTIONS.forEach((a) => { actObj[a] = false; });
+          sanitized[k] = actObj;
+        } else if (typeof v === 'object' && v !== null) {
+          const actObj = {};
+          ALL_ACTIONS.forEach((a) => {
+            actObj[a] = v[a] !== undefined ? Boolean(v[a]) : Object.values(v).some(Boolean);
+          });
+          sanitized[k] = actObj;
+        }
+      }
+    }
+
+    try {
+      const res = await apiClient.put(`/roles/${id}/permissions`, { permissions: sanitized }, { timeout: 30000 });
+      return res.data;
+    } catch (err) {
+      console.warn('updateRolePermissions primary payload failed, attempting resilient fallback:', err.message);
+      if (err.response?.status === 500 || err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+        try {
+          const res2 = await apiClient.put(`/roles/${id}/permissions`, sanitized, { timeout: 15000 });
+          return res2.data;
+        } catch {
+          try {
+            const res3 = await apiClient.put(`/roles/${id}`, { permissions: sanitized }, { timeout: 15000 });
+            return res3.data;
+          } catch {
+            throw err;
+          }
+        }
+      }
+      throw err;
+    }
   },
 
   // Users
