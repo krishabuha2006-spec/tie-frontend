@@ -73,6 +73,16 @@ export const SiteAttendance = () => {
   const getEmpCode = (emp) =>
     emp?.basicInfo?.employeeCode || emp?.employeeCode || '-';
 
+  const getAddressStr = (addr, fallback = 'Site Area') => {
+    if (!addr) return fallback;
+    if (typeof addr === 'string') return addr;
+    if (typeof addr === 'object') {
+      const parts = [addr.street, addr.city, addr.state].filter(Boolean);
+      return parts.length > 0 ? parts.join(', ') : (addr.city || fallback);
+    }
+    return fallback;
+  };
+
   // Photos & Evidence Viewer Modal
   const [evidenceModalOpen, setEvidenceModalOpen] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState(null);
@@ -328,6 +338,11 @@ export const SiteAttendance = () => {
 
     setSubmittingCheckIn(true);
     try {
+      const formattedAddress = getAddressStr(
+        selectedCandidateSite.address,
+        selectedCandidateSite.siteName || selectedCandidateSite.name || 'Project Site'
+      );
+
       const res = await attendanceApi.siteCheckIn({
         employee: selectedEmpId || user?.employee?._id || user?.employee,
         latitude: coords.latitude,
@@ -336,6 +351,8 @@ export const SiteAttendance = () => {
         capturedImage: capturedFaceImage,
         selectedSiteId: selectedCandidateSite.siteId || selectedCandidateSite._id,
         taskId: selectedTaskId,
+        address: formattedAddress,
+        siteInAddress: formattedAddress,
       });
 
       showToast('Site check-in verified and recorded successfully!', 'success');
@@ -999,7 +1016,7 @@ export const SiteAttendance = () => {
                       >
                         <div style={{ fontWeight: 700, color: '#0f172a' }}>{s.siteName}</div>
                         <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
-                          Project: {s.project?.name || '-'} | {s.address}
+                          Project: {s.project?.name || '-'} | {getAddressStr(s.address)}
                         </div>
                         <div style={{ fontSize: '0.74rem', color: '#d97706', marginTop: 4, fontWeight: 600 }}>
                           {s.eligibleTasks?.length || 0} Open Eligible Task(s)

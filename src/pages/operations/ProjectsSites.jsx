@@ -286,11 +286,10 @@ export const ProjectsSites = () => {
               radiusInMeters: parseInt(siteForm.radiusInMeters, 10) || 500,
             }
           : undefined,
-      address: {
-        street: siteForm.street,
-        city: siteForm.city,
-        state: siteForm.state,
-      },
+      address: [siteForm.street, siteForm.city, siteForm.state]
+        .map((s) => s?.trim())
+        .filter(Boolean)
+        .join(', ') || siteForm.city?.trim() || 'Site Area',
     };
 
     try {
@@ -773,7 +772,9 @@ export const ProjectsSites = () => {
                       <div>
                         <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>{s.name} ({s.code || 'SITE'})</div>
                         <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
-                          {s.address?.city ? `${s.address.city}, ` : ''}{s.address?.state || ''}
+                          {typeof s.address === 'object'
+                            ? [s.address?.street, s.address?.city, s.address?.state].filter(Boolean).join(', ')
+                            : (s.address || 'Site Location')}
                         </div>
                       </div>
                       <Badge variant="success" style={{ fontSize: '0.72rem' }}>

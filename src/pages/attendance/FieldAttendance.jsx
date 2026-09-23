@@ -75,6 +75,16 @@ export const FieldAttendance = () => {
   const getEmpCode = (emp) =>
     emp?.basicInfo?.employeeCode || emp?.employeeCode || '-';
 
+  const getAddressStr = (addr, fallback = 'Site Area') => {
+    if (!addr) return fallback;
+    if (typeof addr === 'string') return addr;
+    if (typeof addr === 'object') {
+      const parts = [addr.street, addr.city, addr.state].filter(Boolean);
+      return parts.length > 0 ? parts.join(', ') : (addr.city || fallback);
+    }
+    return fallback;
+  };
+
   // Client-side search filtering on API records
   const filteredRecords = records.filter((r) => {
     if (!filters.search) return true;
@@ -520,6 +530,10 @@ export const FieldAttendance = () => {
       setPunchResult(null);
       try {
         const taskId = selectedTaskId || selectedCandidateSite?.eligibleTasks?.[0]?._id;
+        const formattedAddress = getAddressStr(
+          selectedCandidateSite?.address,
+          selectedCandidateSite?.name || 'Project Site'
+        );
 
         const res = await attendanceApi.siteCheckIn({
           employee: punchEmpId || user?.employee?._id || user?.employee,
@@ -530,13 +544,15 @@ export const FieldAttendance = () => {
           selectedSiteId: siteId,
           taskId: taskId,
           confidenceScore: 0.95,
+          address: formattedAddress,
+          siteInAddress: formattedAddress,
         });
 
         const now = new Date().toISOString();
         const siteObj = {
           siteId,
           name: selectedCandidateSite?.name || 'Project Site',
-          address: selectedCandidateSite?.address || 'Site Area',
+          address: formattedAddress,
           taskId,
           taskTitle: selectedCandidateSite?.eligibleTasks?.find((t) => t._id === taskId)?.title || 'Field Work',
         };
@@ -1830,7 +1846,7 @@ export const FieldAttendance = () => {
                               >
                                 {detectedSites.map((s) => (
                                   <option key={s.siteId || s._id} value={s.siteId || s._id}>
-                                    📍 {s.name} ({s.address || '500m nearby'}) - {s.eligibleTasks?.length || 0} task(s)
+                                    📍 {s.name} ({getAddressStr(s.address, '500m nearby')}) - {s.eligibleTasks?.length || 0} task(s)
                                   </option>
                                 ))}
                               </select>
@@ -1853,7 +1869,7 @@ export const FieldAttendance = () => {
                                 {projects.map((p) =>
                                   p.sites?.map((s) => (
                                     <option key={s._id} value={s._id}>
-                                      🏢 {p.name} - {s.name} ({s.address || 'Active Site'})
+                                      🏢 {p.name} - {s.name} ({getAddressStr(s.address, 'Active Site')})
                                     </option>
                                   ))
                                 )}
