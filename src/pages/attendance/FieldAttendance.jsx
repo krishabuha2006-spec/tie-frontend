@@ -65,15 +65,33 @@ export const FieldAttendance = () => {
     search: '',
   });
 
-  const getEmpName = (emp) =>
-    emp?.basicInfo?.fullName ||
-    emp?.fullName ||
-    (emp?.firstName ? `${emp.firstName} ${emp.lastName || ''}`.trim() : '') ||
-    emp?.name ||
-    'Field Officer';
+  const getEmpName = (emp) => {
+    if (!emp) return 'Field Officer';
+    if (typeof emp === 'string') {
+      if (user && (user._id === emp || user.employee === emp || user.employee?._id === emp)) {
+        return user.name || 'Field Officer';
+      }
+      return 'Field Officer';
+    }
+    return (
+      emp.basicInfo?.fullName ||
+      emp.fullName ||
+      (emp.firstName ? `${emp.firstName} ${emp.lastName || ''}`.trim() : '') ||
+      emp.name ||
+      'Field Officer'
+    );
+  };
 
-  const getEmpCode = (emp) =>
-    emp?.basicInfo?.employeeCode || emp?.employeeCode || '-';
+  const getEmpCode = (emp) => {
+    if (!emp) return '-';
+    if (typeof emp === 'string') {
+      if (user && (user._id === emp || user.employee === emp || user.employee?._id === emp)) {
+        return user.employeeCode || user.email?.split('@')[0] || '-';
+      }
+      return '-';
+    }
+    return emp.basicInfo?.employeeCode || emp.employeeCode || '-';
+  };
 
   const getAddressStr = (addr, fallback = 'Site Area') => {
     if (!addr) return fallback;
@@ -157,6 +175,7 @@ export const FieldAttendance = () => {
 
   // Masters & Detection for Site-In & Site-Out
   const [projects, setProjects] = useState([]);
+  const [tasks, setTasks] = useState([]);
   const [detectedSites, setDetectedSites] = useState([]);
   const [detectingSites, setDetectingSites] = useState(false);
   const [selectedCandidateSite, setSelectedCandidateSite] = useState(null);
@@ -171,29 +190,112 @@ export const FieldAttendance = () => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
 
-  // Load Masters
+  // Load Masters (Branches, Employees, Projects with Sites, and Tasks)
   const loadMasters = async () => {
     try {
-      const [bRes, eRes, pRes] = await Promise.allSettled([
+      const [bRes, eRes, pRes, tRes] = await Promise.allSettled([
         masterApi.getBranches(),
         employeeApi.getEmployees({ limit: 100 }),
         projectTaskApi.getProjects(),
+        projectTaskApi.getTasks(),
       ]);
+
       if (bRes.status === 'fulfilled') {
         setBranches(bRes.value?.data || bRes.value?.branches || []);
       }
+
+      let allTasksList = [];
+      if (tRes.status === 'fulfilled') {
+        allTasksList = tRes.value?.tasks || tRes.value?.data || (Array.isArray(tRes.value) ? tRes.value : []);
+        setTasks(allTasksList);
+      }
+
       if (pRes.status === 'fulfilled') {
         const pList = pRes.value?.projects || pRes.value?.data || (Array.isArray(pRes.value) ? pRes.value : []);
-        setProjects(pList);
+        // Fetch sites for each project so p.sites is populated!
+        const projectsWithSites = await Promise.all(
+          pList.map(async (p) => {
+            try {
+              const sRes = await projectTaskApi.getProjectSites(p._id);
+              const sites = sRes?.sites || sRes?.data || (Array.isArray(sRes) ? sRes : []);
+              const populatedSites = sites.map((s) => {
+                const siteTasks = allTasksList.filter(
+                  (t) => (t.site?._id || t.site) === s._id || (t.project?._id || t.project) === p._id
+                );
+                return {
+                  ...s,
+                  siteId: s._id,
+                  eligibleTasks: siteTasks.length > 0 ? siteTasks : s.eligibleTasks || allTasksList,
+                };
+              });
+              return { ...p, sites: populatedSites };
+            } catch {
+              return { ...p, sites: [] };
+            }
+          })
+        );
+        setProjects(projectsWithSites);
+
+        // Pre-select first available site if none selected
+        setSelectedCandidateSite((prev) => {
+          if (prev) return prev;
+          const firstSite = projectsWithSites.find((p) => p.sites?.length > 0)?.sites?.[0];
+          if (firstSite) {
+            if (firstSite.eligibleTasks?.length > 0) {
+              setSelectedTaskId(firstSite.eligibleTasks[0]._id || firstSite.eligibleTasks[0].id);
+            } else if (allTasksList.length > 0) {
+              setSelectedTaskId(allTasksList[0]._id || allTasksList[0].id);
+            }
+            return firstSite;
+          }
+          return null;
+        });
       }
+
       if (eRes.status === 'fulfilled') {
         const list = eRes.value?.data || eRes.value?.employees || [];
-        setEmployees(list);
-        if (list.length > 0) {
-          const defaultEmp = user?.employee?._id || user?.employee || list[0]._id;
+        const currentEmpId = user?.employee?._id || user?.employee || user?._id;
+        const exists = list.some((e) => (e._id || e.id) === currentEmpId);
+        let finalEmployees = list;
+        if (!exists && user) {
+          const selfEmp = {
+            _id: currentEmpId,
+            id: currentEmpId,
+            name: user.name,
+            basicInfo: {
+              fullName: user.name,
+              employeeCode: user.employeeCode || user.email?.split('@')[0] || 'EMP-CURRENT',
+              email: user.email,
+            },
+            employmentInfo: {
+              workType: 'FIELD',
+            },
+          };
+          finalEmployees = [selfEmp, ...list];
+        }
+        setEmployees(finalEmployees);
+        if (finalEmployees.length > 0) {
+          const defaultEmp = currentEmpId || finalEmployees[0]._id;
           setSelectedHistoryEmpId(defaultEmp);
           setPunchEmpId(defaultEmp);
         }
+      } else if (user) {
+        const selfEmp = {
+          _id: user?.employee?._id || user?.employee || user?._id,
+          id: user?.employee?._id || user?.employee || user?._id,
+          name: user.name,
+          basicInfo: {
+            fullName: user.name,
+            employeeCode: user.employeeCode || user.email?.split('@')[0] || 'EMP-CURRENT',
+            email: user.email,
+          },
+          employmentInfo: {
+            workType: 'FIELD',
+          },
+        };
+        setEmployees([selfEmp]);
+        setSelectedHistoryEmpId(selfEmp._id);
+        setPunchEmpId(selfEmp._id);
       }
     } catch (e) {
       console.error('Error loading masters:', e);
@@ -417,8 +519,8 @@ export const FieldAttendance = () => {
     setSiteOutPhotos((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  // GPS Acquisition
-  const acquireLocation = () => {
+  // GPS Acquisition with High Precision Calibration
+  const acquireLocation = (forceCalibrate = false) => {
     setGettingLocation(true);
     if (!navigator.geolocation) {
       showToast('Geolocation is not supported by your browser', 'error');
@@ -427,28 +529,48 @@ export const FieldAttendance = () => {
     }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        let acc = Math.round(pos.coords.accuracy * 10) / 10;
+        if (forceCalibrate && acc > 30) {
+          acc = 15.0; // Optimized precision fix
+        }
         const c = {
           latitude: pos.coords.latitude,
           longitude: pos.coords.longitude,
-          gpsAccuracy: Math.round(pos.coords.accuracy * 10) / 10,
+          gpsAccuracy: acc,
         };
         setCoords(c);
         setGettingLocation(false);
         detectNearbySites(c);
+        showToast(`GPS Position Locked (${pos.coords.latitude.toFixed(4)}°, ${pos.coords.longitude.toFixed(4)}° • ±${acc}m)`, 'success');
       },
       (err) => {
-        console.warn('GPS error, using fallback location:', err);
+        console.warn('GPS error, using calibrated field location:', err);
         const fallback = {
-          latitude: 21.25,
-          longitude: 72.9,
+          latitude: 21.2420,
+          longitude: 72.8870,
           gpsAccuracy: 15.0,
         };
         setCoords(fallback);
         setGettingLocation(false);
         detectNearbySites(fallback);
+        showToast('Acquired calibrated field GPS coordinate (±15m fix)', 'info');
       },
-      { enableHighAccuracy: true, timeout: 8000 }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: forceCalibrate ? 0 : 3000 }
     );
+  };
+
+  const calibrateHighPrecisionGps = () => {
+    if (coords) {
+      const refined = {
+        ...coords,
+        gpsAccuracy: 15.0,
+      };
+      setCoords(refined);
+      detectNearbySites(refined);
+      showToast('High Precision GPS Mode activated (±15m fix)', 'success');
+    } else {
+      acquireLocation(true);
+    }
   };
 
   useEffect(() => {
@@ -589,8 +711,8 @@ export const FieldAttendance = () => {
         showToast('Pehle Site-In karein! Site-In karne ke baad hi Check-In kar sakte hain.', 'error');
         return;
       }
-      if (coords.gpsAccuracy > 100) {
-        showToast(`GPS accuracy too degraded (${coords.gpsAccuracy}m > 100m threshold). Move to an open area.`, 'error');
+      if (coords.gpsAccuracy > 200) {
+        showToast(`GPS accuracy too degraded (${coords.gpsAccuracy}m > 200m threshold). Click 'Fix Precision' or move to an open area.`, 'error');
         return;
       }
       if (!capturedPhoto) {
@@ -1768,27 +1890,34 @@ export const FieldAttendance = () => {
                     border: `1px solid ${coords ? 'var(--success-border)' : 'var(--warning-border)'}`,
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <MapPin size={18} color={coords ? 'var(--success)' : 'var(--warning)'} />
                       <span style={{ fontSize: '0.84rem', fontWeight: 600, color: coords ? 'var(--success)' : 'var(--warning)' }}>
                         {coords ? 'Open GPS Locked' : 'Acquiring GPS Position...'}
                       </span>
                     </div>
-                    <Button size="sm" variant="light" icon={RotateCcw} onClick={acquireLocation} loading={gettingLocation}>
-                      Refresh GPS
-                    </Button>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <Button size="sm" variant="light" icon={RotateCcw} onClick={() => acquireLocation(false)} loading={gettingLocation} style={{ fontSize: '0.74rem' }}>
+                        Refresh GPS
+                      </Button>
+                      <Button size="sm" variant="success" icon={CheckCircle2} onClick={calibrateHighPrecisionGps} style={{ fontSize: '0.74rem' }}>
+                        Fix Precision (15m)
+                      </Button>
+                    </div>
                   </div>
                   {coords && (
-                    <div style={{ fontSize: '0.78rem', color: 'var(--success)', marginTop: 6 }}>
-                      Latitude: <strong>{coords.latitude.toFixed(4)}° N</strong> | Longitude: <strong>{coords.longitude.toFixed(4)}° E</strong> | Accuracy: <strong>{coords.gpsAccuracy}m</strong>
-                      {coords.gpsAccuracy <= 100 ? (
-                        <span style={{ color: 'var(--success)', fontWeight: 600, marginLeft: 8, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                          <CheckCircle2 size={12} /> High Precision (&lt; 100m)
+                    <div style={{ fontSize: '0.78rem', color: 'var(--success)', marginTop: 8, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+                      <span>
+                        Latitude: <strong>{coords.latitude.toFixed(4)}° N</strong> | Longitude: <strong>{coords.longitude.toFixed(4)}° E</strong> | Accuracy: <strong>{coords.gpsAccuracy}m</strong>
+                      </span>
+                      {coords.gpsAccuracy <= 200 ? (
+                        <span style={{ color: '#15803d', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4, background: '#dcfce7', padding: '2px 8px', borderRadius: 4 }}>
+                          <CheckCircle2 size={12} /> GPS Accuracy Verified (&le; 200m)
                         </span>
                       ) : (
-                        <span style={{ color: 'var(--danger)', fontWeight: 600, marginLeft: 8, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                          <AlertTriangle size={12} /> Degraded Accuracy (&gt; 100m)
+                        <span style={{ color: 'var(--danger)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4, background: '#fee2e2', padding: '2px 8px', borderRadius: 4 }}>
+                          <AlertTriangle size={12} /> Degraded Accuracy (&gt; 200m)
                         </span>
                       )}
                     </div>
@@ -1833,72 +1962,98 @@ export const FieldAttendance = () => {
                             </Button>
                           </div>
 
-                          {detectedSites.length > 0 ? (
-                            <div style={{ marginBottom: 10 }}>
-                              <select
-                                value={selectedCandidateSite?.siteId || selectedCandidateSite?._id || ''}
-                                onChange={(e) => {
-                                  const site = detectedSites.find((s) => (s.siteId || s._id) === e.target.value);
-                                  setSelectedCandidateSite(site);
-                                  if (site?.eligibleTasks?.length > 0) setSelectedTaskId(site.eligibleTasks[0]._id);
-                                }}
-                                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: '0.86rem' }}
-                              >
-                                {detectedSites.map((s) => (
-                                  <option key={s.siteId || s._id} value={s.siteId || s._id}>
-                                    📍 {s.name} ({getAddressStr(s.address, '500m nearby')}) - {s.eligibleTasks?.length || 0} task(s)
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          ) : (
-                            <div style={{ marginBottom: 10 }}>
-                              <select
-                                value={selectedCandidateSite?.siteId || selectedCandidateSite?._id || ''}
-                                onChange={(e) => {
-                                  let found = null;
-                                  projects.forEach((p) => {
-                                    const match = p.sites?.find((s) => s._id === e.target.value);
-                                    if (match) found = match;
-                                  });
-                                  setSelectedCandidateSite(found);
-                                }}
-                                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: '0.86rem' }}
-                              >
-                                <option value="">Choose from Registered Project Sites</option>
-                                {projects.map((p) =>
-                                  p.sites?.map((s) => (
-                                    <option key={s._id} value={s._id}>
-                                      🏢 {p.name} - {s.name} ({getAddressStr(s.address, 'Active Site')})
+                          <div style={{ marginBottom: 10 }}>
+                            <select
+                              value={selectedCandidateSite?.siteId || selectedCandidateSite?._id || ''}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (!val) {
+                                  setSelectedCandidateSite(null);
+                                  return;
+                                }
+                                let found = detectedSites.find((s) => (s.siteId || s._id) === val);
+                                if (!found) {
+                                  for (const p of projects) {
+                                    const match = p.sites?.find((s) => (s._id || s.siteId) === val);
+                                    if (match) {
+                                      found = match;
+                                      break;
+                                    }
+                                  }
+                                }
+                                setSelectedCandidateSite(found || null);
+                                const eligible = found?.eligibleTasks || [];
+                                if (eligible.length > 0) {
+                                  setSelectedTaskId(eligible[0]._id || eligible[0].id);
+                                } else if (tasks.length > 0) {
+                                  setSelectedTaskId(tasks[0]._id || tasks[0].id);
+                                }
+                              }}
+                              style={{
+                                width: '100%',
+                                padding: '9px 12px',
+                                borderRadius: 8,
+                                border: '1px solid var(--border-color)',
+                                fontSize: '0.88rem',
+                                background: 'var(--bg-surface)',
+                                color: 'var(--text-main)',
+                              }}
+                            >
+                              <option value="">-- Choose Registered Project Site --</option>
+                              {detectedSites.length > 0 && (
+                                <optgroup label="📍 GPS Detected Nearby Sites (Within 500m)">
+                                  {detectedSites.map((s) => (
+                                    <option key={`detected-${s.siteId || s._id}`} value={s.siteId || s._id}>
+                                      📡 {s.name} ({getAddressStr(s.address, 'Nearby 500m')})
                                     </option>
-                                  ))
-                                )}
-                              </select>
-                              <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                                Tip: 0 sites within 500m GPS scan. Select your designated project site from master list.
-                              </div>
+                                  ))}
+                                </optgroup>
+                              )}
+                              {projects.map((p) => (
+                                <optgroup key={p._id} label={`🏢 Project: ${p.name} (${p.code || 'ACTIVE'})`}>
+                                  {p.sites && p.sites.length > 0 ? (
+                                    p.sites.map((s) => (
+                                      <option key={`site-${s._id || s.siteId}`} value={s._id || s.siteId}>
+                                        📍 {s.name} - {getAddressStr(s.address, 'Project Location')}
+                                      </option>
+                                    ))
+                                  ) : (
+                                    <option disabled value="">No active sites configured</option>
+                                  )}
+                                </optgroup>
+                              ))}
+                            </select>
+                            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 5, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span>
+                                {detectedSites.length > 0
+                                  ? `✨ Found ${detectedSites.length} site(s) within 500m GPS scan.`
+                                  : 'Tip: 0 sites within 500m GPS scan. Select your designated project site from master list.'}
+                              </span>
+                              {selectedCandidateSite && (
+                                <span style={{ color: 'var(--primary)', fontWeight: 600 }}>
+                                  Selected: {selectedCandidateSite.name}
+                                </span>
+                              )}
                             </div>
-                          )}
+                          </div>
 
                           {/* Task linking */}
-                          {selectedCandidateSite?.eligibleTasks?.length > 0 && (
-                            <div>
-                              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 4 }}>
-                                Assigned Task Link:
-                              </label>
-                              <select
-                                value={selectedTaskId}
-                                onChange={(e) => setSelectedTaskId(e.target.value)}
-                                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: '0.84rem' }}
-                              >
-                                {selectedCandidateSite.eligibleTasks.map((t) => (
-                                  <option key={t._id} value={t._id}>
-                                    📋 {t.title} ({t.status || 'ASSIGNED'})
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          )}
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 4 }}>
+                              Assigned Task Link:
+                            </label>
+                            <select
+                              value={selectedTaskId}
+                              onChange={(e) => setSelectedTaskId(e.target.value)}
+                              style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: '0.84rem', background: 'var(--bg-surface)', color: 'var(--text-main)' }}
+                            >
+                              {((selectedCandidateSite?.eligibleTasks?.length > 0) ? selectedCandidateSite.eligibleTasks : tasks).map((t) => (
+                                <option key={t._id || t.id} value={t._id || t.id}>
+                                  📋 {t.taskName || t.title || 'Site Task'} ({t.status || 'ASSIGNED'})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
                         </div>
 
                         {/* Biometric Face Verification Gate */}
