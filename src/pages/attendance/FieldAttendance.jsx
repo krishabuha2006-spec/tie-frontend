@@ -708,7 +708,7 @@ export const FieldAttendance = () => {
     // ----------------------------------------------------
     if (punchMode === 'CHECK_IN') {
       if (!workflowState.siteInDone) {
-        showToast('Pehle Site-In karein! Site-In karne ke baad hi Check-In kar sakte hain.', 'error');
+        showToast('Please complete Site-In first! Check-In is only allowed after completing Site-In.', 'error');
         return;
       }
       if (coords.gpsAccuracy > 200) {
@@ -761,7 +761,7 @@ export const FieldAttendance = () => {
     // ----------------------------------------------------
     if (punchMode === 'CHECK_OUT') {
       if (!workflowState.dutyCheckedIn) {
-        showToast('Pehle Check-In karein! Uske baad hi Check-Out kar sakte hain.', 'error');
+        showToast('Please Check-In first! Check-Out is only allowed after an active Check-In.', 'error');
         return;
       }
 
@@ -808,11 +808,11 @@ export const FieldAttendance = () => {
     // ----------------------------------------------------
     if (punchMode === 'SITE_OUT') {
       if (workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut) {
-        showToast('Pehle Check-Out karein! Check-Out karne ke baad hi Site-Out ho sakta hai.', 'error');
+        showToast('Please complete Check-Out first! Site-Out is only allowed after completing Check-Out.', 'error');
         return;
       }
       if (!workflowState.siteInDone) {
-        showToast('Pehle Site-In karein! Uske baad hi Check-Out aur Site-Out ho sakta hai.', 'error');
+        showToast('Please complete Site-In first! Both Check-Out and Site-Out require a verified Site-In.', 'error');
         return;
       }
       if (siteOutPhotos.length === 0 && !capturedPhoto) {
@@ -1623,11 +1623,11 @@ export const FieldAttendance = () => {
                     onClick={() => {
                       if (step.isLocked) {
                         if (step.id === 'CHECK_IN') {
-                          showToast('Pehle Step 1: Site-In karein! Tabhi Check-In unlock hoga.', 'warning');
+                          showToast('Please complete Step 1: Site-In first to unlock Check-In.', 'warning');
                         } else if (step.id === 'CHECK_OUT') {
-                          showToast('Pehle Step 2: Check-In karein! Uske baad hi Check-Out unlock hoga.', 'warning');
+                          showToast('Please complete Step 2: Check-In first to unlock Check-Out.', 'warning');
                         } else if (step.id === 'SITE_OUT') {
-                          showToast('Pehle Step 3: Check-Out karein! Uske baad hi Site-Out unlock hoga.', 'warning');
+                          showToast('Please complete Step 3: Check-Out first to unlock Site-Out.', 'warning');
                         }
                       }
                       setPunchMode(step.id);
@@ -1873,6 +1873,11 @@ export const FieldAttendance = () => {
                     }}
                     required
                   >
+                    {employees.length === 0 && user && (
+                      <option value={user?.employee?._id || user?.employee || user?._id}>
+                        {user.name || 'Field Officer'} ({user.employeeCode || user.email?.split('@')[0] || 'EMP'}) - Work Type: FIELD
+                      </option>
+                    )}
                     {employees.map((emp) => (
                       <option key={emp._id} value={emp._id}>
                         {getEmpName(emp)} ({getEmpCode(emp)}) - Work Type: {emp.employmentInfo?.workType || 'FIELD'}
@@ -2137,7 +2142,7 @@ export const FieldAttendance = () => {
                 {/* ---------------------------------------------------- */}
                 {punchMode === 'CHECK_IN' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                    {/* STRICT LOCK CHECK: Pehle Site-In karein! */}
+                    {/* STRICT LOCK CHECK: Complete Site-In First */}
                     {!workflowState.siteInDone ? (
                       <div
                         style={{
@@ -2157,7 +2162,7 @@ export const FieldAttendance = () => {
                           Step 2: Check-In is Locked
                         </div>
                         <p style={{ margin: 0, fontSize: '0.86rem', color: '#b45309', maxWidth: 420 }}>
-                          Field staff attendance requirement: <strong>Pehle Site-In karein!</strong> Site-In complete hone ke baad hi Check-In unlock hoga.
+                          Field attendance requirement: <strong>Please perform Site-In first!</strong> Check-In will unlock automatically after your site arrival is verified.
                         </p>
                         <Button
                           type="button"
@@ -2294,7 +2299,7 @@ export const FieldAttendance = () => {
                           Step 3: Check-Out is Locked
                         </div>
                         <p style={{ margin: 0, fontSize: '0.86rem', color: '#64748b', maxWidth: 420 }}>
-                          Aapne abhi tak duty Check-In nahi kiya hai. Pehle <strong>Step 2: Check-In</strong> complete karein.
+                          You have not checked in for duty yet. Please complete <strong>Step 2: Check-In</strong> first to activate duty.
                         </p>
                         <Button
                           type="button"
@@ -2371,7 +2376,7 @@ export const FieldAttendance = () => {
                 {/* ---------------------------------------------------- */}
                 {punchMode === 'SITE_OUT' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                    {/* STRICT LOCK CHECK: Pehle Check-Out karein! */}
+                    {/* STRICT LOCK CHECK: Complete Check-Out First */}
                     {workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut ? (
                       <div
                         style={{
@@ -2391,7 +2396,7 @@ export const FieldAttendance = () => {
                           Step 4: Site-Out is Locked
                         </div>
                         <p style={{ margin: 0, fontSize: '0.86rem', color: '#b91c1c', maxWidth: 420 }}>
-                          Field staff duty abhi active hai. <strong>Checkout karne ke baad hi Site-Out kar sakte hain!</strong> Pehle Step 3: Check-Out karein.
+                          Field duty is currently active. <strong>Site-Out is only permitted after duty Check-Out!</strong> Please complete Step 3: Check-Out first.
                         </p>
                         <Button
                           type="button"
@@ -2422,7 +2427,7 @@ export const FieldAttendance = () => {
                           Site-Out Unavailable
                         </div>
                         <p style={{ margin: 0, fontSize: '0.86rem', color: '#64748b', maxWidth: 420 }}>
-                          Aapne abhi tak <strong>Site-In</strong> nahi kiya hai. Pehle Step 1: Site-In complete karein.
+                          You have not performed <strong>Site-In</strong> yet. Please complete Step 1: Site-In first.
                         </p>
                         <Button
                           type="button"
@@ -2635,7 +2640,7 @@ export const FieldAttendance = () => {
                       Site Visit Cycle Finished!
                     </div>
                     <p style={{ margin: 0, fontSize: '0.86rem', color: '#047857', maxWidth: 440 }}>
-                      Aapne Site-In, Check-In, Check-Out aur Site-Out chaaron steps successfully complete kar liye hain.
+                      You have successfully completed all 4 steps: Site-In, Check-In, Check-Out, and Site-Out.
                     </p>
                     <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
                       <Button variant="primary" icon={RotateCcw} onClick={handleStartNextVisit}>
