@@ -63,22 +63,23 @@ export const FieldAttendance = () => {
     attendanceStatus: '',
     isOpen: '',
     search: '',
+    workType: '',
   });
 
   const getEmpName = (emp) => {
-    if (!emp) return 'Field Officer';
+    if (!emp) return 'Staff Member';
     if (typeof emp === 'string') {
       if (user && (user._id === emp || user.employee === emp || user.employee?._id === emp)) {
-        return user.name || 'Field Officer';
+        return user.name || 'Staff Member';
       }
-      return 'Field Officer';
+      return 'Staff Member';
     }
     return (
       emp.basicInfo?.fullName ||
       emp.fullName ||
       (emp.firstName ? `${emp.firstName} ${emp.lastName || ''}`.trim() : '') ||
       emp.name ||
-      'Field Officer'
+      'Staff Member'
     );
   };
 
@@ -93,6 +94,14 @@ export const FieldAttendance = () => {
     return emp.basicInfo?.employeeCode || emp.employeeCode || '-';
   };
 
+  const getEmpWorkType = (emp) => {
+    if (!emp) return 'FIELD';
+    if (typeof emp === 'object') {
+      return (emp.employmentInfo?.workType || emp.workType || 'FIELD').toUpperCase();
+    }
+    return 'FIELD';
+  };
+
   const getAddressStr = (addr, fallback = 'Site Area') => {
     if (!addr) return fallback;
     if (typeof addr === 'string') return addr;
@@ -103,8 +112,12 @@ export const FieldAttendance = () => {
     return fallback;
   };
 
-  // Client-side search filtering on API records
+  // Client-side search & workType filtering on API records
   const filteredRecords = records.filter((r) => {
+    if (filters.workType) {
+      const empWorkType = getEmpWorkType(r.employee);
+      if (empWorkType !== filters.workType.toUpperCase()) return false;
+    }
     if (!filters.search) return true;
     const s = filters.search.toLowerCase();
     const empName = getEmpName(r.employee).toLowerCase();
@@ -121,6 +134,7 @@ export const FieldAttendance = () => {
   // Masters
   const [branches, setBranches] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [punchWorkTypeFilter, setPunchWorkTypeFilter] = useState('ALL'); // 'ALL' | 'FIELD' | 'OFFICE' | 'SITE' | 'HYBRID'
 
   // Multi-punch session modal
   const [sessionModalOpen, setSessionModalOpen] = useState(false);
@@ -147,6 +161,31 @@ export const FieldAttendance = () => {
 
   // Punch Console State
   const [punchEmpId, setPunchEmpId] = useState('');
+
+  // Staff groupings by workType (Office Staff & Field Staff)
+  const fieldStaff = useMemo(
+    () => employees.filter((e) => getEmpWorkType(e) === 'FIELD'),
+    [employees]
+  );
+  const officeStaff = useMemo(
+    () => employees.filter((e) => getEmpWorkType(e) === 'OFFICE'),
+    [employees]
+  );
+  const otherStaff = useMemo(
+    () => employees.filter((e) => !['FIELD', 'OFFICE'].includes(getEmpWorkType(e))),
+    [employees]
+  );
+
+  const filteredEmployeesForPunch = useMemo(() => {
+    if (punchWorkTypeFilter === 'ALL') return employees;
+    if (punchWorkTypeFilter === 'FIELD') return fieldStaff;
+    if (punchWorkTypeFilter === 'OFFICE') return officeStaff;
+    return otherStaff;
+  }, [employees, punchWorkTypeFilter, fieldStaff, officeStaff, otherStaff]);
+
+  const selectedPunchEmp = useMemo(() => {
+    return employees.find((e) => (e._id || e.id) === punchEmpId) || null;
+  }, [employees, punchEmpId]);
   const [punchMode, setPunchMode] = useState('CHECK_IN'); // 'CHECK_IN' | 'CHECK_OUT' | 'COMPLETED'
   const [punchRemarks, setPunchRemarks] = useState('');
   const [coords, setCoords] = useState(null);
@@ -192,7 +231,7 @@ export const FieldAttendance = () => {
     try {
       const [bRes, eRes, pRes, tRes] = await Promise.allSettled([
         masterApi.getBranches(),
-        employeeApi.getEmployees({ limit: 100 }),
+        employeeApi.getEmployees({ limit: 500 }),
         projectTaskApi.getProjects(),
         projectTaskApi.getTasks(),
       ]);
@@ -255,6 +294,10 @@ export const FieldAttendance = () => {
         const exists = list.some((e) => (e._id || e.id) === currentEmpId);
         let finalEmployees = list;
         if (!exists && user) {
+          const selfWorkType =
+            user?.employee?.employmentInfo?.workType ||
+            user?.workType ||
+            (user?.role?.includes('admin') ? 'OFFICE' : 'FIELD');
           const selfEmp = {
             _id: currentEmpId,
             id: currentEmpId,
@@ -265,7 +308,7 @@ export const FieldAttendance = () => {
               email: user.email,
             },
             employmentInfo: {
-              workType: 'FIELD',
+              workType: selfWorkType,
             },
           };
           finalEmployees = [selfEmp, ...list];
@@ -277,6 +320,10 @@ export const FieldAttendance = () => {
           setPunchEmpId(defaultEmp);
         }
       } else if (user) {
+        const selfWorkType =
+          user?.employee?.employmentInfo?.workType ||
+          user?.workType ||
+          (user?.role?.includes('admin') ? 'OFFICE' : 'FIELD');
         const selfEmp = {
           _id: user?.employee?._id || user?.employee || user?._id,
           id: user?.employee?._id || user?.employee || user?._id,
@@ -287,7 +334,7 @@ export const FieldAttendance = () => {
             email: user.email,
           },
           employmentInfo: {
-            workType: 'FIELD',
+            workType: selfWorkType,
           },
         };
         setEmployees([selfEmp]);
@@ -762,19 +809,33 @@ export const FieldAttendance = () => {
   // Table Columns: Org-Wide Records
   const recordColumns = [
     {
-      header: 'Field Employee',
+      header: 'Staff Member',
       key: 'employee',
       render: (r) => {
         const emp = r.employee;
         let name = getEmpName(emp);
-        if ((!name || name === 'Field Officer') && r.correctedBy?.name) {
+        if ((!name || name === 'Staff Member') && r.correctedBy?.name) {
           name = r.correctedBy.name;
         }
         const code = getEmpCode(emp) !== '-' ? getEmpCode(emp) : (r.correctedBy ? 'EMP' : '-');
+        const empWorkType = getEmpWorkType(emp);
         return (
           <div>
-            <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>
-              {name}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{name}</span>
+              <span
+                style={{
+                  fontSize: '0.68rem',
+                  fontWeight: 700,
+                  padding: '1px 6px',
+                  borderRadius: 4,
+                  backgroundColor: empWorkType === 'OFFICE' ? '#eff6ff' : '#f0fdf4',
+                  color: empWorkType === 'OFFICE' ? '#1d4ed8' : '#15803d',
+                  border: `1px solid ${empWorkType === 'OFFICE' ? '#bfdbfe' : '#bbf7d0'}`,
+                }}
+              >
+                {empWorkType}
+              </span>
             </div>
             <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
               Code: {code} | Branch: {r.branch?.name || '-'}
@@ -786,14 +847,17 @@ export const FieldAttendance = () => {
     {
       header: 'Attendance Date',
       key: 'attendanceDate',
-      render: (r) => (
-        <div style={{ fontSize: '0.86rem' }}>
-          <strong>{r.attendanceDate ? new Date(r.attendanceDate).toLocaleDateString() : '-'}</strong>
-          <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-            Type: <span style={{ fontWeight: 600, color: 'var(--primary)' }}>FIELD</span>
+      render: (r) => {
+        const empWorkType = getEmpWorkType(r.employee);
+        return (
+          <div style={{ fontSize: '0.86rem' }}>
+            <strong>{r.attendanceDate ? new Date(r.attendanceDate).toLocaleDateString() : '-'}</strong>
+            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+              Duty: <span style={{ fontWeight: 600, color: 'var(--primary)' }}>FIELD VISIT</span> ({empWorkType})
+            </div>
           </div>
-        </div>
-      ),
+        );
+      },
     },
     {
       header: 'Day Timings & Sessions',
@@ -1267,6 +1331,28 @@ export const FieldAttendance = () => {
                 </select>
               </div>
 
+              {/* Work Type Filter (Office / Field Staff) */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#334155' }}>Staff Type:</span>
+                <select
+                  value={filters.workType || ''}
+                  onChange={(e) => setFilters((prev) => ({ ...prev, workType: e.target.value }))}
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: 6,
+                    border: '1px solid #cbd5e1',
+                    fontSize: '0.85rem',
+                    background: '#ffffff',
+                  }}
+                >
+                  <option value="">All Staff Types</option>
+                  <option value="FIELD">Field Staff (FIELD)</option>
+                  <option value="OFFICE">Office Staff (OFFICE)</option>
+                  <option value="SITE">Site Staff (SITE)</option>
+                  <option value="HYBRID">Hybrid Staff (HYBRID)</option>
+                </select>
+              </div>
+
               {/* Session Filter */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#334155' }}>Session:</span>
@@ -1289,7 +1375,7 @@ export const FieldAttendance = () => {
             </div>
 
             <div style={{ display: 'flex', gap: 8 }}>
-              {(filters.search || filters.branch || filters.attendanceStatus || filters.isOpen || filters.date !== new Date().toISOString().split('T')[0]) && (
+              {(filters.search || filters.branch || filters.attendanceStatus || filters.workType || filters.isOpen || filters.date !== new Date().toISOString().split('T')[0]) && (
                 <Button
                   size="sm"
                   variant="light"
@@ -1300,6 +1386,7 @@ export const FieldAttendance = () => {
                       attendanceStatus: '',
                       isOpen: '',
                       search: '',
+                      workType: '',
                     })
                   }
                 >
@@ -1613,11 +1700,58 @@ export const FieldAttendance = () => {
               </div>
 
               <form onSubmit={handlePunchSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                {/* Employee Selector */}
+                {/* Employee Selector (Office & Field Staff) */}
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 4 }}>
-                    Select Field Officer:
-                  </label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <label style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-main)', margin: 0 }}>
+                      Select Staff Member (Office & Field):
+                    </label>
+                    {selectedPunchEmp && (
+                      <span
+                        style={{
+                          fontSize: '0.72rem',
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: 4,
+                          backgroundColor: getEmpWorkType(selectedPunchEmp) === 'OFFICE' ? '#eff6ff' : '#f0fdf4',
+                          color: getEmpWorkType(selectedPunchEmp) === 'OFFICE' ? '#1d4ed8' : '#15803d',
+                          border: `1px solid ${getEmpWorkType(selectedPunchEmp) === 'OFFICE' ? '#bfdbfe' : '#bbf7d0'}`,
+                        }}
+                      >
+                        Work Type: {getEmpWorkType(selectedPunchEmp)}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Work Type Filter Switcher (All / Field / Office / Site) */}
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+                    {[
+                      { key: 'ALL', label: `All Staff (${employees.length})` },
+                      { key: 'FIELD', label: `Field Staff (${fieldStaff.length})` },
+                      { key: 'OFFICE', label: `Office Staff (${officeStaff.length})` },
+                      ...(otherStaff.length > 0 ? [{ key: 'OTHER', label: `Site/Hybrid (${otherStaff.length})` }] : []),
+                    ].map((tab) => (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => setPunchWorkTypeFilter(tab.key)}
+                        style={{
+                          padding: '4px 10px',
+                          fontSize: '0.74rem',
+                          borderRadius: 6,
+                          border: punchWorkTypeFilter === tab.key ? '1px solid var(--primary)' : '1px solid var(--border-color)',
+                          backgroundColor: punchWorkTypeFilter === tab.key ? 'rgba(42, 171, 160, 0.12)' : 'var(--bg-surface)',
+                          color: punchWorkTypeFilter === tab.key ? 'var(--primary)' : 'var(--text-muted)',
+                          fontWeight: punchWorkTypeFilter === tab.key ? 700 : 500,
+                          cursor: 'pointer',
+                          transition: 'all 0.12s ease',
+                        }}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
                   <select
                     value={punchEmpId}
                     onChange={(e) => {
@@ -1637,14 +1771,46 @@ export const FieldAttendance = () => {
                   >
                     {employees.length === 0 && user && (
                       <option value={user?.employee?._id || user?.employee || user?._id}>
-                        {user.name || 'Field Officer'} ({user.employeeCode || user.email?.split('@')[0] || 'EMP'}) - Work Type: FIELD
+                        {user.name || 'Staff Member'} ({user.employeeCode || user.email?.split('@')[0] || 'EMP'}) - Work Type: {user?.workType || 'FIELD'}
                       </option>
                     )}
-                    {employees.map((emp) => (
-                      <option key={emp._id} value={emp._id}>
-                        {getEmpName(emp)} ({getEmpCode(emp)}) - Work Type: {emp.employmentInfo?.workType || 'FIELD'}
-                      </option>
-                    ))}
+                    {punchWorkTypeFilter === 'ALL' ? (
+                      <>
+                        {fieldStaff.length > 0 && (
+                          <optgroup label="-- Field Staff (FIELD) --">
+                            {fieldStaff.map((emp) => (
+                              <option key={emp._id || emp.id} value={emp._id || emp.id}>
+                                {getEmpName(emp)} ({getEmpCode(emp)}) - FIELD
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {officeStaff.length > 0 && (
+                          <optgroup label="-- Office Staff (OFFICE) --">
+                            {officeStaff.map((emp) => (
+                              <option key={emp._id || emp.id} value={emp._id || emp.id}>
+                                {getEmpName(emp)} ({getEmpCode(emp)}) - OFFICE
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {otherStaff.length > 0 && (
+                          <optgroup label="-- Site & Hybrid Staff --">
+                            {otherStaff.map((emp) => (
+                              <option key={emp._id || emp.id} value={emp._id || emp.id}>
+                                {getEmpName(emp)} ({getEmpCode(emp)}) - {getEmpWorkType(emp)}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </>
+                    ) : (
+                      filteredEmployeesForPunch.map((emp) => (
+                        <option key={emp._id || emp.id} value={emp._id || emp.id}>
+                          {getEmpName(emp)} ({getEmpCode(emp)}) - {getEmpWorkType(emp)}
+                        </option>
+                      ))
+                    )}
                   </select>
                 </div>
 
@@ -2142,7 +2308,7 @@ export const FieldAttendance = () => {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center', marginBottom: 20 }}>
             <div style={{ flex: 1, minWidth: 260 }}>
               <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 4 }}>
-                Select Employee:
+                Select Employee (Office & Field Staff):
               </label>
               <select
                 value={selectedHistoryEmpId}
@@ -2156,11 +2322,33 @@ export const FieldAttendance = () => {
                   background: 'var(--bg-surface)',
                 }}
               >
-                {employees.map((emp) => (
-                  <option key={emp._id || emp.id} value={emp._id || emp.id}>
-                    {getEmpName(emp)} ({getEmpCode(emp)})
-                  </option>
-                ))}
+                {fieldStaff.length > 0 && (
+                  <optgroup label="-- Field Staff (FIELD) --">
+                    {fieldStaff.map((emp) => (
+                      <option key={emp._id || emp.id} value={emp._id || emp.id}>
+                        {getEmpName(emp)} ({getEmpCode(emp)}) - FIELD
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {officeStaff.length > 0 && (
+                  <optgroup label="-- Office Staff (OFFICE) --">
+                    {officeStaff.map((emp) => (
+                      <option key={emp._id || emp.id} value={emp._id || emp.id}>
+                        {getEmpName(emp)} ({getEmpCode(emp)}) - OFFICE
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {otherStaff.length > 0 && (
+                  <optgroup label="-- Site & Hybrid Staff --">
+                    {otherStaff.map((emp) => (
+                      <option key={emp._id || emp.id} value={emp._id || emp.id}>
+                        {getEmpName(emp)} ({getEmpCode(emp)}) - {getEmpWorkType(emp)}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </div>
 
