@@ -196,6 +196,31 @@ export const DEFAULT_PERMISSION_CATALOG = {
   ],
 };
 
+// Clean, short & simple module names
+export const getModuleShortName = (mod) => {
+  if (!mod) return '';
+  const key = mod.moduleKey || mod.key || '';
+  const map = {
+    crm: 'CRM',
+    erpInventory: 'ERP & Inventory',
+    projectManagement: 'Project Management',
+    installationQC: 'Installation & QC',
+    nocProcessing: 'NOC Processing',
+    amcManagement: 'AMC',
+    accountingFinance: 'Accounts & Finance',
+    hrms: 'HRMS',
+    procurement: 'Procurement',
+    administration: 'Administration',
+  };
+  if (map[key]) return map[key];
+  if (mod.shortLabel) return mod.shortLabel;
+  if (typeof mod.displayName === 'string') {
+    const stripped = mod.displayName.replace(/\s*\([^)]*\)/g, '').trim();
+    return stripped || mod.displayName;
+  }
+  return key;
+};
+
 // Check if role has access to a module or any of its sub-modules
 export function checkModuleAccess(role, permissionsMap, modKey, subModules = []) {
   if (!role) return false;
@@ -1008,7 +1033,7 @@ export const RolesPermissions = () => {
                             textOverflow: 'ellipsis',
                           }}
                         >
-                          {mod.shortLabel || mod.displayName}
+                          {getModuleShortName(mod)}
                         </span>
                       </label>
                     );
@@ -1159,7 +1184,7 @@ export const RolesPermissions = () => {
             </div>
 
             {/* Two-Column Layout: Modules on Left (tabs), Sub-modules & 12 Actions on Right */}
-            <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 14, minHeight: 380 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 16, minHeight: 380 }}>
               {/* Left Column: 10 Module Selector */}
               <div
                 style={{
@@ -1180,6 +1205,7 @@ export const RolesPermissions = () => {
                       key={m.moduleKey}
                       type="button"
                       onClick={() => setMatrixActiveMod(m.moduleKey)}
+                      title={m.displayName}
                       style={{
                         textAlign: 'left',
                         padding: '8px 10px',
@@ -1188,7 +1214,7 @@ export const RolesPermissions = () => {
                         backgroundColor: isSelected ? 'rgba(42, 171, 160, 0.1)' : 'transparent',
                         color: isSelected ? 'var(--primary)' : 'var(--text-main)',
                         fontWeight: isSelected ? 700 : 500,
-                        fontSize: '0.8rem',
+                        fontSize: '0.82rem',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
@@ -1197,7 +1223,7 @@ export const RolesPermissions = () => {
                       }}
                     >
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {m.displayName}
+                        {getModuleShortName(m)}
                       </span>
                       <span
                         style={{
@@ -1217,9 +1243,14 @@ export const RolesPermissions = () => {
               {/* Right Column: Sub-Modules and 12 Granular Actions */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 440, overflowY: 'auto', paddingRight: 4 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h4 style={{ margin: 0, fontSize: '0.94rem', fontWeight: 700, color: 'var(--text-main)' }}>
-                    {selectedMatrixModule?.displayName}
-                  </h4>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--text-main)' }}>
+                      {getModuleShortName(selectedMatrixModule)}
+                    </h4>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                      ({selectedMatrixModule?.displayName})
+                    </span>
+                  </div>
                   <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
                     {filteredSubModules.length} Sub-modules
                   </span>
