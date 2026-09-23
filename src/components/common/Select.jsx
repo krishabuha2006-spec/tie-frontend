@@ -16,7 +16,7 @@ export const Select = ({
   disabled = false,
   className = '',
   style,
-  placement = 'auto',
+  placement = 'bottom',
   openUpward: openUpwardProp,
   dropUp,
   ...props
@@ -62,6 +62,13 @@ export const Select = ({
       String(opt.label).toLowerCase().includes(term) || String(opt.value).toLowerCase().includes(term)
     );
   }, [normalizedOptions, searchTerm]);
+
+  // Check if options already include a blank / all / reset option
+  const hasEmptyOption = useMemo(() => {
+    return normalizedOptions.some(
+      (opt) => opt.value === '' || opt.value === null || opt.value === undefined
+    );
+  }, [normalizedOptions]);
 
   const [openUpward, setOpenUpward] = useState(false);
 
@@ -305,8 +312,8 @@ export const Select = ({
               padding: '4px 0',
             }}
           >
-            {/* Placeholder / Reset item (Optional if field not required) */}
-            {!required && (
+            {/* Placeholder / Reset item (Only if not required, has placeholder, and no empty option already in list) */}
+            {!isRequired && placeholder && !hasEmptyOption && (
               <div
                 onClick={() => handleSelect('')}
                 style={{

@@ -1619,7 +1619,6 @@ export const EmployeeList = () => {
                 ...departments.map((d) => ({ value: d._id, label: d.name })),
               ]}
               style={{ marginBottom: 0 }}
-              openUpward={true}
             />
           </div>
 
@@ -1636,7 +1635,6 @@ export const EmployeeList = () => {
                 ...branches.map((b) => ({ value: b._id, label: b.name })),
               ]}
               style={{ marginBottom: 0 }}
-              openUpward={true}
             />
           </div>
 
@@ -1656,7 +1654,6 @@ export const EmployeeList = () => {
                 { value: 'EXITED', label: 'EXITED' },
               ]}
               style={{ marginBottom: 0 }}
-              openUpward={true}
             />
           </div>
 
@@ -1676,7 +1673,6 @@ export const EmployeeList = () => {
                 { value: 'HYBRID', label: 'HYBRID' },
               ]}
               style={{ marginBottom: 0 }}
-              openUpward={true}
             />
           </div>
         </form>
