@@ -16,6 +16,9 @@ export const Select = ({
   disabled = false,
   className = '',
   style,
+  placement = 'auto',
+  openUpward: openUpwardProp,
+  dropUp,
   ...props
 }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -62,19 +65,34 @@ export const Select = ({
 
   const [openUpward, setOpenUpward] = useState(false);
 
-  // Auto-flip upward if too close to bottom of screen
+  const isOpeningUp = Boolean(
+    openUpwardProp ||
+    dropUp ||
+    placement === 'top' ||
+    (placement === 'auto' && openUpward)
+  );
+
+  // Auto-flip upward if too close to bottom of screen or explicitly requested
   useEffect(() => {
+    if (openUpwardProp || dropUp || placement === 'top') {
+      setOpenUpward(true);
+      return;
+    }
+    if (placement === 'bottom') {
+      setOpenUpward(false);
+      return;
+    }
     if (isOpen && containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
       const spaceBelow = window.innerHeight - rect.bottom;
       const spaceAbove = rect.top;
-      if (spaceBelow < 250 && spaceAbove > spaceBelow) {
+      if (spaceBelow < 280 && spaceAbove > 180) {
         setOpenUpward(true);
       } else {
         setOpenUpward(false);
       }
     }
-  }, [isOpen]);
+  }, [isOpen, openUpwardProp, dropUp, placement]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -135,6 +153,7 @@ export const Select = ({
       style={{
         position: 'relative',
         width: '100%',
+        zIndex: isOpen ? 1000 : 1,
         ...style,
       }}
     >
@@ -227,7 +246,7 @@ export const Select = ({
         <div
           style={{
             position: 'absolute',
-            ...(openUpward
+            ...(isOpeningUp
               ? { bottom: 'calc(100% + 6px)', top: 'auto' }
               : { top: 'calc(100% + 6px)', bottom: 'auto' }),
             left: 0,
@@ -235,13 +254,15 @@ export const Select = ({
             backgroundColor: '#ffffff',
             border: '1px solid var(--primary-border, #bce1e6)',
             borderRadius: 'var(--radius-md, 8px)',
-            boxShadow: '0 10px 25px -5px rgba(46, 123, 133, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.08)',
-            zIndex: 1050,
+            boxShadow: isOpeningUp
+              ? '0 -10px 25px -5px rgba(46, 123, 133, 0.22), 0 -8px 10px -6px rgba(0, 0, 0, 0.08)'
+              : '0 10px 25px -5px rgba(46, 123, 133, 0.22), 0 8px 10px -6px rgba(0, 0, 0, 0.08)',
+            zIndex: 9999,
             maxHeight: '260px',
             overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
-            animation: 'fadeInDropdown 0.15s ease-out',
+            animation: isOpeningUp ? 'fadeInUpward 0.15s ease-out' : 'fadeInDropdown 0.15s ease-out',
           }}
         >
           {/* Quick Search inside dropdown if more than 7 items */}

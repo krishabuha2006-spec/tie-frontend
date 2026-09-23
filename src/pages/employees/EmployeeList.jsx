@@ -1595,7 +1595,7 @@ export const EmployeeList = () => {
       </div>
 
       {/* Multi-Parameter Search & Filter Bar */}
-      <div className="card" style={{ padding: '16px 20px' }}>
+      <div className="card" style={{ padding: '16px 20px', overflow: 'visible', position: 'relative', zIndex: 20 }}>
         <form onSubmit={handleSearchSubmit} className="filter-toolbar">
           <div className="filter-search">
             <Input
@@ -1614,8 +1614,12 @@ export const EmployeeList = () => {
                 setSelectedDept(e.target.value);
                 setPage(1);
               }}
-              options={departments.map((d) => ({ value: d._id, label: d.name }))}
+              options={[
+                { value: '', label: 'All Departments' },
+                ...departments.map((d) => ({ value: d._id, label: d.name })),
+              ]}
               style={{ marginBottom: 0 }}
+              openUpward={true}
             />
           </div>
 
@@ -1627,8 +1631,12 @@ export const EmployeeList = () => {
                 setSelectedBranch(e.target.value);
                 setPage(1);
               }}
-              options={branches.map((b) => ({ value: b._id, label: b.name }))}
+              options={[
+                { value: '', label: 'All Branches' },
+                ...branches.map((b) => ({ value: b._id, label: b.name })),
+              ]}
               style={{ marginBottom: 0 }}
+              openUpward={true}
             />
           </div>
 
@@ -1641,12 +1649,14 @@ export const EmployeeList = () => {
                 setPage(1);
               }}
               options={[
+                { value: '', label: 'All Statuses' },
                 { value: 'ACTIVE', label: 'ACTIVE' },
                 { value: 'ON_LEAVE', label: 'ON_LEAVE' },
                 { value: 'SUSPENDED', label: 'SUSPENDED' },
                 { value: 'EXITED', label: 'EXITED' },
               ]}
               style={{ marginBottom: 0 }}
+              openUpward={true}
             />
           </div>
 
@@ -1659,12 +1669,14 @@ export const EmployeeList = () => {
                 setPage(1);
               }}
               options={[
+                { value: '', label: 'All Work Types' },
                 { value: 'OFFICE', label: 'OFFICE' },
                 { value: 'FIELD', label: 'FIELD' },
                 { value: 'SITE', label: 'SITE' },
                 { value: 'HYBRID', label: 'HYBRID' },
               ]}
               style={{ marginBottom: 0 }}
+              openUpward={true}
             />
           </div>
         </form>
