@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import attendanceApi from '../../api/attendanceApi';
 import employeeApi from '../../api/employeeApi';
 import masterApi from '../../api/masterApi';
+import { projectTaskApi } from '../../api/projectTaskApi';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -26,6 +27,15 @@ import {
   X,
   Sparkles,
   AlertCircle,
+  HardHat,
+  LogIn,
+  LogOut,
+  FileCheck,
+  Image as ImageIcon,
+  FolderKanban,
+  Lock,
+  Unlock,
+  ArrowRight,
 } from 'lucide-react';
 import Table from '../../components/common/Table';
 import Modal from '../../components/common/Modal';
@@ -109,7 +119,7 @@ export const FieldAttendance = () => {
 
   // Punch Console State
   const [punchEmpId, setPunchEmpId] = useState('');
-  const [punchMode, setPunchMode] = useState('CHECK_IN'); // 'CHECK_IN' | 'CHECK_OUT'
+  const [punchMode, setPunchMode] = useState('SITE_IN'); // 'SITE_IN' | 'CHECK_IN' | 'CHECK_OUT' | 'SITE_OUT' | 'COMPLETED'
   const [punchRemarks, setPunchRemarks] = useState('');
   const [coords, setCoords] = useState(null);
   const [gettingLocation, setGettingLocation] = useState(false);
@@ -118,18 +128,53 @@ export const FieldAttendance = () => {
   const [submittingPunch, setSubmittingPunch] = useState(false);
   const [punchResult, setPunchResult] = useState(null);
 
+  // Sequential Workflow State (Site-In -> Check-In -> Check-Out -> Site-Out)
+  const getTodayKey = () => new Date().toISOString().split('T')[0];
+  const [workflowState, setWorkflowState] = useState({
+    siteInDone: false,
+    siteInTime: null,
+    activeSite: null,
+    dutyCheckedIn: false,
+    checkInTime: null,
+    dutyCheckedOut: false,
+    checkOutTime: null,
+    siteOutDone: false,
+    siteOutTime: null,
+    workHours: 0,
+    shortfallHours: 0,
+    overtimeHours: 0,
+  });
+
+  // Masters & Detection for Site-In & Site-Out
+  const [projects, setProjects] = useState([]);
+  const [detectedSites, setDetectedSites] = useState([]);
+  const [detectingSites, setDetectingSites] = useState(false);
+  const [selectedCandidateSite, setSelectedCandidateSite] = useState(null);
+  const [selectedTaskId, setSelectedTaskId] = useState('');
+
+  // Site-Out Evidence
+  const [siteOutPhotos, setSiteOutPhotos] = useState([]);
+  const [siteOutPhotoUrl, setSiteOutPhotoUrl] = useState('');
+  const [siteOutRemarks, setSiteOutRemarks] = useState('');
+  const [taskCompleted, setTaskCompleted] = useState(true);
+
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
 
   // Load Masters
   const loadMasters = async () => {
     try {
-      const [bRes, eRes] = await Promise.allSettled([
+      const [bRes, eRes, pRes] = await Promise.allSettled([
         masterApi.getBranches(),
         employeeApi.getEmployees({ limit: 100 }),
+        projectTaskApi.getProjects(),
       ]);
       if (bRes.status === 'fulfilled') {
         setBranches(bRes.value?.data || bRes.value?.branches || []);
+      }
+      if (pRes.status === 'fulfilled') {
+        const pList = pRes.value?.projects || pRes.value?.data || (Array.isArray(pRes.value) ? pRes.value : []);
+        setProjects(pList);
       }
       if (eRes.status === 'fulfilled') {
         const list = eRes.value?.data || eRes.value?.employees || [];
@@ -211,6 +256,157 @@ export const FieldAttendance = () => {
     }
   }, [activeTab, filters, selectedHistoryEmpId]);
 
+  // Workflow State Persistence and API Synchronization
+  const updateWorkflow = (partial) => {
+    const today = getTodayKey();
+    const empId = punchEmpId || user?.employee?._id || user?.employee || 'self';
+    const cacheKey = `tie_field_workflow_${empId}_${today}`;
+    setWorkflowState((prev) => {
+      const next = { ...prev, ...partial };
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const syncWorkflowState = async (empId) => {
+    if (!empId) return;
+    const today = getTodayKey();
+    const cacheKey = `tie_field_workflow_${empId}_${today}`;
+
+    let localData = null;
+    try {
+      const saved = localStorage.getItem(cacheKey);
+      if (saved) localData = JSON.parse(saved);
+    } catch {}
+
+    try {
+      const [siteRes, fieldRes] = await Promise.allSettled([
+        attendanceApi.getEmployeeSiteAttendance(empId, { date: today }),
+        attendanceApi.getEmployeeFieldAttendance(empId, { date: today }),
+      ]);
+
+      const siteList = siteRes.status === 'fulfilled' ? (Array.isArray(siteRes.value) ? siteRes.value : siteRes.value?.records || siteRes.value?.data || []) : [];
+      const fieldList = fieldRes.status === 'fulfilled' ? (Array.isArray(fieldRes.value) ? fieldRes.value : fieldRes.value?.records || fieldRes.value?.data || []) : [];
+
+      const todaySiteRec = siteList.find((r) => (r.attendanceDate && r.attendanceDate.startsWith(today)) || (r.siteInTime && new Date(r.siteInTime).toISOString().startsWith(today)));
+      const todayFieldRec = fieldList.find((r) => (r.attendanceDate && r.attendanceDate.startsWith(today)) || (r.firstCheckInTime && new Date(r.firstCheckInTime).toISOString().startsWith(today)));
+
+      const siteInDone = Boolean(todaySiteRec?.siteInTime || localData?.siteInDone);
+      const siteInTime = todaySiteRec?.siteInTime || localData?.siteInTime;
+      const activeSite = todaySiteRec?.site || localData?.activeSite || (todaySiteRec ? { name: todaySiteRec.site?.name || 'Project Site', address: todaySiteRec.site?.address } : null);
+
+      const dutyCheckedIn = Boolean(todayFieldRec?.firstCheckInTime || localData?.dutyCheckedIn);
+      const checkInTime = todayFieldRec?.firstCheckInTime || localData?.checkInTime;
+
+      const dutyCheckedOut = Boolean(todayFieldRec?.lastCheckOutTime || localData?.dutyCheckedOut);
+      const checkOutTime = todayFieldRec?.lastCheckOutTime || localData?.checkOutTime;
+
+      const siteOutDone = Boolean(todaySiteRec?.siteOutTime || localData?.siteOutDone);
+      const siteOutTime = todaySiteRec?.siteOutTime || localData?.siteOutTime;
+
+      const merged = {
+        siteInDone,
+        siteInTime,
+        activeSite,
+        dutyCheckedIn,
+        checkInTime,
+        dutyCheckedOut,
+        checkOutTime,
+        siteOutDone,
+        siteOutTime,
+        workHours: todayFieldRec?.totalWorkingHours ?? localData?.workHours ?? 0,
+        shortfallHours: todayFieldRec?.shortfallHours ?? localData?.shortfallHours ?? 0,
+        overtimeHours: todayFieldRec?.overtimeHours ?? localData?.overtimeHours ?? 0,
+      };
+
+      setWorkflowState(merged);
+      localStorage.setItem(cacheKey, JSON.stringify(merged));
+
+      if (!merged.siteInDone) {
+        setPunchMode('SITE_IN');
+      } else if (!merged.dutyCheckedIn) {
+        setPunchMode('CHECK_IN');
+      } else if (!merged.dutyCheckedOut) {
+        setPunchMode('CHECK_OUT');
+      } else if (!merged.siteOutDone) {
+        setPunchMode('SITE_OUT');
+      } else {
+        setPunchMode('COMPLETED');
+      }
+    } catch {
+      if (localData) {
+        setWorkflowState(localData);
+        if (!localData.siteInDone) setPunchMode('SITE_IN');
+        else if (!localData.dutyCheckedIn) setPunchMode('CHECK_IN');
+        else if (!localData.dutyCheckedOut) setPunchMode('CHECK_OUT');
+        else if (!localData.siteOutDone) setPunchMode('SITE_OUT');
+        else setPunchMode('COMPLETED');
+      }
+    }
+  };
+
+  const handleStartNextVisit = () => {
+    const today = getTodayKey();
+    const empId = punchEmpId || user?.employee?._id || user?.employee || 'self';
+    const cacheKey = `tie_field_workflow_${empId}_${today}`;
+    const reset = {
+      siteInDone: false,
+      siteInTime: null,
+      activeSite: null,
+      dutyCheckedIn: false,
+      checkInTime: null,
+      dutyCheckedOut: false,
+      checkOutTime: null,
+      siteOutDone: false,
+      siteOutTime: null,
+      workHours: 0,
+      shortfallHours: 0,
+      overtimeHours: 0,
+    };
+    setWorkflowState(reset);
+    localStorage.removeItem(cacheKey);
+    setPunchMode('SITE_IN');
+    setPunchResult(null);
+    setCapturedPhoto(null);
+    showToast('New site visit session initiated. Please Site-In first.', 'info');
+  };
+
+  const detectNearbySites = async (c = coords) => {
+    if (!c?.latitude || !c?.longitude) return;
+    setDetectingSites(true);
+    try {
+      const res = await attendanceApi.detectSites({
+        latitude: c.latitude,
+        longitude: c.longitude,
+        gpsAccuracy: c.gpsAccuracy || 15,
+      });
+      const list = res?.sites || res?.data?.sites || (Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []));
+      setDetectedSites(list);
+      if (list.length > 0) {
+        setSelectedCandidateSite(list[0]);
+        if (list[0].eligibleTasks?.length > 0) {
+          setSelectedTaskId(list[0].eligibleTasks[0]._id);
+        }
+      }
+    } catch (err) {
+      console.warn('Detect sites error:', err);
+    } finally {
+      setDetectingSites(false);
+    }
+  };
+
+  const addSiteOutPhoto = () => {
+    if (!siteOutPhotoUrl.trim()) return;
+    setSiteOutPhotos((prev) => [...prev, siteOutPhotoUrl.trim()]);
+    setSiteOutPhotoUrl('');
+  };
+
+  const removeSiteOutPhoto = (idx) => {
+    setSiteOutPhotos((prev) => prev.filter((_, i) => i !== idx));
+  };
+
   // GPS Acquisition
   const acquireLocation = () => {
     setGettingLocation(true);
@@ -221,22 +417,25 @@ export const FieldAttendance = () => {
     }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setCoords({
+        const c = {
           latitude: pos.coords.latitude,
           longitude: pos.coords.longitude,
           gpsAccuracy: Math.round(pos.coords.accuracy * 10) / 10,
-        });
+        };
+        setCoords(c);
         setGettingLocation(false);
+        detectNearbySites(c);
       },
       (err) => {
         console.warn('GPS error, using fallback location:', err);
-        // Fallback realistic location
-        setCoords({
+        const fallback = {
           latitude: 21.25,
           longitude: 72.9,
           gpsAccuracy: 15.0,
-        });
+        };
+        setCoords(fallback);
         setGettingLocation(false);
+        detectNearbySites(fallback);
       },
       { enableHighAccuracy: true, timeout: 8000 }
     );
@@ -245,8 +444,9 @@ export const FieldAttendance = () => {
   useEffect(() => {
     if (activeTab === 'punch') {
       acquireLocation();
+      if (punchEmpId) syncWorkflowState(punchEmpId);
     }
-  }, [activeTab]);
+  }, [activeTab, punchEmpId]);
 
   // Camera handling for Biometric Face Check-in
   const startCamera = async () => {
@@ -288,63 +488,244 @@ export const FieldAttendance = () => {
     stopCamera();
   };
 
-  // Handle Field Punch Submit (Step 3 & 4)
+  // Handle Field Punch Submit (Step 1: Site-In -> Step 2: Check-In -> Step 3: Check-Out -> Step 4: Site-Out)
   const handlePunchSubmit = async (e) => {
     e.preventDefault();
     if (!coords) {
       showToast('GPS coordinates required. Please acquire location.', 'warning');
       return;
     }
-    if (coords.gpsAccuracy > 100) {
-      showToast(`GPS accuracy too degraded (${coords.gpsAccuracy}m > 100m threshold). Move to an open area.`, 'error');
+
+    // ----------------------------------------------------
+    // STEP 1: SITE-IN (Arrival at Project / Client Site)
+    // ----------------------------------------------------
+    if (punchMode === 'SITE_IN') {
+      const siteId =
+        selectedCandidateSite?.siteId ||
+        selectedCandidateSite?._id ||
+        detectedSites[0]?.siteId ||
+        detectedSites[0]?._id ||
+        projects[0]?.sites?.[0]?._id;
+
+      if (!siteId && projects.length === 0 && detectedSites.length === 0) {
+        showToast('Please select or detect a project site first', 'warning');
+        return;
+      }
+      if (!capturedPhoto) {
+        showToast('Biometric face capture is required for Site-In gate verification', 'warning');
+        return;
+      }
+
+      setSubmittingPunch(true);
+      setPunchResult(null);
+      try {
+        const taskId = selectedTaskId || selectedCandidateSite?.eligibleTasks?.[0]?._id;
+
+        const res = await attendanceApi.siteCheckIn({
+          employee: punchEmpId || user?.employee?._id || user?.employee,
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          gpsAccuracy: coords.gpsAccuracy || 15,
+          capturedImage: capturedPhoto,
+          selectedSiteId: siteId,
+          taskId: taskId,
+          confidenceScore: 0.95,
+        });
+
+        const now = new Date().toISOString();
+        const siteObj = {
+          siteId,
+          name: selectedCandidateSite?.name || 'Project Site',
+          address: selectedCandidateSite?.address || 'Site Area',
+          taskId,
+          taskTitle: selectedCandidateSite?.eligibleTasks?.find((t) => t._id === taskId)?.title || 'Field Work',
+        };
+
+        updateWorkflow({
+          siteInDone: true,
+          siteInTime: now,
+          activeSite: siteObj,
+        });
+
+        showToast('Site-In recorded successfully! You can now proceed to Check-In.', 'success');
+        setPunchResult({
+          mode: 'SITE_IN',
+          data: res,
+          site: siteObj,
+        });
+        setCapturedPhoto(null);
+        setPunchMode('CHECK_IN');
+      } catch (err) {
+        console.error(err);
+        const errMsg = err.response?.data?.message || 'Site-In verification failed';
+        showToast(errMsg, 'error');
+      } finally {
+        setSubmittingPunch(false);
+      }
       return;
     }
 
-    if (punchMode === 'CHECK_IN' && !capturedPhoto) {
-      showToast('Biometric face photo capture is required for Field Check-In', 'warning');
-      return;
-    }
+    // ----------------------------------------------------
+    // STEP 2: CHECK-IN (Field Duty Start) - LOCKED UNTIL SITE-IN
+    // ----------------------------------------------------
+    if (punchMode === 'CHECK_IN') {
+      if (!workflowState.siteInDone) {
+        showToast('Pehle Site-In karein! Site-In karne ke baad hi Check-In kar sakte hain.', 'error');
+        return;
+      }
+      if (coords.gpsAccuracy > 100) {
+        showToast(`GPS accuracy too degraded (${coords.gpsAccuracy}m > 100m threshold). Move to an open area.`, 'error');
+        return;
+      }
+      if (!capturedPhoto) {
+        showToast('Biometric face photo capture is required for Field Check-In', 'warning');
+        return;
+      }
 
-    setSubmittingPunch(true);
-    setPunchResult(null);
-
-    try {
-      let res;
-      if (punchMode === 'CHECK_IN') {
-        res = await attendanceApi.fieldCheckIn({
+      setSubmittingPunch(true);
+      setPunchResult(null);
+      try {
+        const res = await attendanceApi.fieldCheckIn({
           employee: punchEmpId || user?.employee?._id || user?.employee,
           latitude: coords.latitude,
           longitude: coords.longitude,
           gpsAccuracy: coords.gpsAccuracy,
           capturedImage: capturedPhoto,
         });
-        showToast('Field check-in recorded successfully with open GPS capture!', 'success');
-      } else {
-        res = await attendanceApi.fieldCheckOut({
+
+        const now = new Date().toISOString();
+        updateWorkflow({
+          dutyCheckedIn: true,
+          checkInTime: now,
+          dutyCheckedOut: false,
+        });
+
+        showToast('Field check-in recorded successfully with open GPS capture! Duty is active.', 'success');
+        setPunchResult({
+          mode: 'CHECK_IN',
+          data: res,
+        });
+        setCapturedPhoto(null);
+        setPunchMode('CHECK_OUT');
+        loadRecords();
+      } catch (err) {
+        console.error(err);
+        const errMsg = err.response?.data?.message || 'Field attendance check-in failed';
+        showToast(errMsg, 'error');
+      } finally {
+        setSubmittingPunch(false);
+      }
+      return;
+    }
+
+    // ----------------------------------------------------
+    // STEP 3: CHECK-OUT (Field Duty End) - LOCKED UNTIL CHECKED-IN
+    // ----------------------------------------------------
+    if (punchMode === 'CHECK_OUT') {
+      if (!workflowState.dutyCheckedIn) {
+        showToast('Pehle Check-In karein! Uske baad hi Check-Out kar sakte hain.', 'error');
+        return;
+      }
+
+      setSubmittingPunch(true);
+      setPunchResult(null);
+      try {
+        const res = await attendanceApi.fieldCheckOut({
           employee: punchEmpId || user?.employee?._id || user?.employee,
           latitude: coords.latitude,
           longitude: coords.longitude,
           gpsAccuracy: coords.gpsAccuracy,
           remarks: punchRemarks.trim() || 'Client territory inspection completed',
         });
-        showToast('Field check-out successful! Shortfall & overtime hours calculated.', 'success');
+
+        const now = new Date().toISOString();
+        updateWorkflow({
+          dutyCheckedOut: true,
+          checkOutTime: now,
+          workHours: res?.totalWorkingHours ?? 8,
+          shortfallHours: res?.shortfallHours ?? 0,
+          overtimeHours: res?.overtimeHours ?? 0,
+        });
+
+        showToast('Field check-out successful! Shortfall & overtime hours calculated. You can now perform Site-Out.', 'success');
+        setPunchResult({
+          mode: 'CHECK_OUT',
+          data: res,
+        });
+        setPunchRemarks('');
+        setPunchMode('SITE_OUT');
+        loadRecords();
+      } catch (err) {
+        console.error(err);
+        const errMsg = err.response?.data?.message || 'Field attendance check-out failed';
+        showToast(errMsg, 'error');
+      } finally {
+        setSubmittingPunch(false);
+      }
+      return;
+    }
+
+    // ----------------------------------------------------
+    // STEP 4: SITE-OUT (Site Departure) - LOCKED UNTIL CHECK-OUT
+    // ----------------------------------------------------
+    if (punchMode === 'SITE_OUT') {
+      if (workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut) {
+        showToast('Pehle Check-Out karein! Check-Out karne ke baad hi Site-Out ho sakta hai.', 'error');
+        return;
+      }
+      if (!workflowState.siteInDone) {
+        showToast('Pehle Site-In karein! Uske baad hi Check-Out aur Site-Out ho sakta hai.', 'error');
+        return;
+      }
+      if (siteOutPhotos.length === 0 && !capturedPhoto) {
+        showToast('Mandatory: At least 1 site photograph is required for Site-Out exit', 'warning');
+        return;
+      }
+      if (!siteOutRemarks.trim()) {
+        showToast('Mandatory: Activity remarks are required for Site-Out exit', 'warning');
+        return;
       }
 
-      setPunchResult({
-        mode: punchMode,
-        data: res,
-      });
+      setSubmittingPunch(true);
+      setPunchResult(null);
+      try {
+        const allPhotos = [...siteOutPhotos];
+        if (capturedPhoto) allPhotos.push(capturedPhoto);
 
-      // Reset photo & reload records
-      setCapturedPhoto(null);
-      setPunchRemarks('');
-      loadRecords();
-    } catch (err) {
-      console.error(err);
-      const errMsg = err.response?.data?.message || 'Field attendance punch failed';
-      showToast(errMsg, 'error');
-    } finally {
-      setSubmittingPunch(false);
+        const res = await attendanceApi.siteCheckOut({
+          employee: punchEmpId || user?.employee?._id || user?.employee,
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          gpsAccuracy: coords.gpsAccuracy || 15,
+          photos: allPhotos,
+          remarks: siteOutRemarks.trim(),
+          taskCompleted,
+        });
+
+        const now = new Date().toISOString();
+        updateWorkflow({
+          siteOutDone: true,
+          siteOutTime: now,
+        });
+
+        showToast('Site-Out exit verified and recorded successfully! Visit cycle completed.', 'success');
+        setPunchResult({
+          mode: 'SITE_OUT',
+          data: res,
+        });
+        setCapturedPhoto(null);
+        setSiteOutPhotos([]);
+        setSiteOutRemarks('');
+        setPunchMode('COMPLETED');
+        loadRecords();
+      } catch (err) {
+        console.error(err);
+        const errMsg = err.response?.data?.message || 'Site-Out failed';
+        showToast(errMsg, 'error');
+      } finally {
+        setSubmittingPunch(false);
+      }
+      return;
     }
   };
 
@@ -957,287 +1338,1328 @@ export const FieldAttendance = () => {
         </div>
       )}
 
-      {/* TAB 2: FIELD PUNCH CONSOLE */}
+      {/* TAB 2: FIELD PUNCH CONSOLE (4-STEP WORKFLOW: SITE-IN -> CHECK-IN -> CHECK-OUT -> SITE-OUT) */}
       {activeTab === 'punch' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 24 }}>
-          {/* Punch Form & Controls */}
-          <div style={{ background: '#ffffff', borderRadius: 14, padding: 24, border: '1px solid #e2e8f0' }}>
-            <h3 style={{ margin: '0 0 16px', fontSize: '1.15rem', color: '#0f172a' }}>
-              Field Punch Terminal
-            </h3>
-
-            {/* Mode Switcher */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Sequential Lifecycle Stepper */}
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: 14,
+              padding: '16px 20px',
+              border: '1px solid #e2e8f0',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
+            }}
+          >
             <div
               style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 16,
+                flexWrap: 'wrap',
                 gap: 10,
-                marginBottom: 18,
-                padding: 4,
-                background: '#f1f5f9',
-                borderRadius: 10,
               }}
             >
-              <button
-                type="button"
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 10,
+                    background: 'var(--primary)',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 2px 6px rgba(46,123,133,0.3)',
+                  }}
+                >
+                  <Compass size={20} />
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.96rem', fontWeight: 700, color: 'var(--text-main)' }}>
+                    Field Staff Attendance Lifecycle
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    Required Rule: 1. Site-In ➔ 2. Check-In (Duty) ➔ 3. Check-Out ➔ 4. Site-Out (Exit)
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {workflowState.siteOutDone ? (
+                  <Badge variant="success" style={{ fontSize: '0.82rem', padding: '4px 12px' }}>
+                    ✓ Full Visit Completed
+                  </Badge>
+                ) : workflowState.dutyCheckedOut ? (
+                  <Badge variant="warning" style={{ fontSize: '0.82rem', padding: '4px 12px' }}>
+                    Step 4: Ready for Site-Out
+                  </Badge>
+                ) : workflowState.dutyCheckedIn ? (
+                  <Badge variant="primary" style={{ fontSize: '0.82rem', padding: '4px 12px' }}>
+                    Step 3: Duty Active (Checked-In)
+                  </Badge>
+                ) : workflowState.siteInDone ? (
+                  <Badge variant="info" style={{ fontSize: '0.82rem', padding: '4px 12px' }}>
+                    Step 2: Ready for Duty Check-In
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary" style={{ fontSize: '0.82rem', padding: '4px 12px' }}>
+                    Step 1: Site-In Required
+                  </Badge>
+                )}
+
+                {workflowState.siteOutDone && (
+                  <Button size="sm" variant="light" icon={RotateCcw} onClick={handleStartNextVisit} style={{ fontSize: '0.78rem' }}>
+                    Start Next Visit
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* Stepper Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 }}>
+              {/* Step 1: Site-In */}
+              <div
                 onClick={() => {
+                  setPunchMode('SITE_IN');
+                  setCapturedPhoto(null);
+                }}
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: 10,
+                  cursor: 'pointer',
+                  border: `2px solid ${
+                    workflowState.siteInDone
+                      ? 'var(--success)'
+                      : punchMode === 'SITE_IN'
+                      ? 'var(--primary)'
+                      : '#e2e8f0'
+                  }`,
+                  background: workflowState.siteInDone
+                    ? 'rgba(16,185,129,0.06)'
+                    : punchMode === 'SITE_IN'
+                    ? 'rgba(46,123,133,0.06)'
+                    : '#f8fafc',
+                  transition: 'all 0.2s',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                    STEP 1
+                  </span>
+                  {workflowState.siteInDone ? (
+                    <Badge variant="success" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>✓ Done</Badge>
+                  ) : (
+                    <Badge variant="primary" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>Required First</Badge>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-main)' }}>
+                  <LogIn size={15} color={workflowState.siteInDone ? 'var(--success)' : 'var(--primary)'} />
+                  <span>1. Site-In (Arrival)</span>
+                </div>
+                <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                  {workflowState.siteInDone && workflowState.siteInTime
+                    ? `Done at ${new Date(workflowState.siteInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                    : 'Arrive & verify site location'}
+                </div>
+              </div>
+
+              {/* Step 2: Check-In */}
+              <div
+                onClick={() => {
+                  if (!workflowState.siteInDone) {
+                    showToast('Pehle Site-In karein! Site-In karne ke baad hi Check-In kar sakte hain.', 'warning');
+                  }
                   setPunchMode('CHECK_IN');
                   setCapturedPhoto(null);
                 }}
                 style={{
-                  padding: '10px 14px',
-                  borderRadius: 8,
-                  border: 'none',
-                  outline: 'none',
-                  background: punchMode === 'CHECK_IN' ? 'var(--primary)' : 'transparent',
-                  color: punchMode === 'CHECK_IN' ? '#ffffff' : 'var(--text-muted)',
-                  fontWeight: 600,
-                  fontSize: '0.88rem',
+                  padding: '12px 14px',
+                  borderRadius: 10,
                   cursor: 'pointer',
+                  border: `2px solid ${
+                    workflowState.dutyCheckedIn
+                      ? 'var(--success)'
+                      : punchMode === 'CHECK_IN'
+                      ? 'var(--primary)'
+                      : '#e2e8f0'
+                  }`,
+                  background: workflowState.dutyCheckedIn
+                    ? 'rgba(16,185,129,0.06)'
+                    : !workflowState.siteInDone
+                    ? '#f1f5f9'
+                    : punchMode === 'CHECK_IN'
+                    ? 'rgba(46,123,133,0.06)'
+                    : '#f8fafc',
+                  opacity: !workflowState.siteInDone ? 0.65 : 1,
                   transition: 'all 0.2s',
                 }}
               >
-                Punch In (Start Visit)
-              </button>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                    STEP 2
+                  </span>
+                  {workflowState.dutyCheckedIn ? (
+                    <Badge variant="success" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>✓ Active</Badge>
+                  ) : !workflowState.siteInDone ? (
+                    <span style={{ fontSize: '0.7rem', color: 'var(--danger)', display: 'inline-flex', alignItems: 'center', gap: 3, fontWeight: 600 }}>
+                      <Lock size={10} /> Locked
+                    </span>
+                  ) : (
+                    <Badge variant="info" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>Ready</Badge>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-main)' }}>
+                  <CheckCircle2 size={15} color={workflowState.dutyCheckedIn ? 'var(--success)' : !workflowState.siteInDone ? '#94a3b8' : 'var(--primary)'} />
+                  <span>2. Check-In (Duty)</span>
+                </div>
+                <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                  {workflowState.dutyCheckedIn && workflowState.checkInTime
+                    ? `Punched at ${new Date(workflowState.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                    : !workflowState.siteInDone
+                    ? 'Site-In required before Check-In'
+                    : 'Start duty with face verification'}
+                </div>
+              </div>
 
-              <button
-                type="button"
+              {/* Step 3: Check-Out */}
+              <div
                 onClick={() => {
+                  if (!workflowState.dutyCheckedIn) {
+                    showToast('Pehle Check-In karein! Uske baad hi Check-Out kar sakte hain.', 'warning');
+                  }
                   setPunchMode('CHECK_OUT');
                   setCapturedPhoto(null);
                   stopCamera();
                 }}
                 style={{
-                  padding: '10px 14px',
-                  borderRadius: 8,
-                  border: 'none',
-                  outline: 'none',
-                  background: punchMode === 'CHECK_OUT' ? 'var(--warning)' : 'transparent',
-                  color: punchMode === 'CHECK_OUT' ? '#ffffff' : 'var(--text-muted)',
-                  fontWeight: 600,
-                  fontSize: '0.88rem',
+                  padding: '12px 14px',
+                  borderRadius: 10,
                   cursor: 'pointer',
+                  border: `2px solid ${
+                    workflowState.dutyCheckedOut
+                      ? 'var(--success)'
+                      : punchMode === 'CHECK_OUT'
+                      ? 'var(--warning)'
+                      : '#e2e8f0'
+                  }`,
+                  background: workflowState.dutyCheckedOut
+                    ? 'rgba(16,185,129,0.06)'
+                    : !workflowState.dutyCheckedIn
+                    ? '#f1f5f9'
+                    : punchMode === 'CHECK_OUT'
+                    ? 'rgba(217,119,6,0.06)'
+                    : '#f8fafc',
+                  opacity: !workflowState.dutyCheckedIn ? 0.65 : 1,
                   transition: 'all 0.2s',
                 }}
               >
-                Punch Out (End Visit)
-              </button>
-            </div>
-
-            <form onSubmit={handlePunchSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {/* Employee Selector */}
-              <div>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 4 }}>
-                  Select Field Officer:
-                </label>
-                <select
-                  value={punchEmpId}
-                  onChange={(e) => setPunchEmpId(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '9px 12px',
-                    borderRadius: 8,
-                    border: '1px solid var(--border-color)',
-                    fontSize: '0.88rem',
-                    background: 'var(--bg-surface)',
-                  }}
-                  required
-                >
-                  {employees.map((emp) => (
-                    <option key={emp._id} value={emp._id}>
-                      {getEmpName(emp)} ({getEmpCode(emp)}) - Work Type: {emp.employmentInfo?.workType || 'FIELD'}
-                    </option>
-                  ))}
-                </select>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                    STEP 3
+                  </span>
+                  {workflowState.dutyCheckedOut ? (
+                    <Badge variant="success" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>✓ Done</Badge>
+                  ) : !workflowState.dutyCheckedIn ? (
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 3, fontWeight: 600 }}>
+                      <Lock size={10} /> Locked
+                    </span>
+                  ) : (
+                    <Badge variant="warning" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>Ready</Badge>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-main)' }}>
+                  <LogOut size={15} color={workflowState.dutyCheckedOut ? 'var(--success)' : !workflowState.dutyCheckedIn ? '#94a3b8' : 'var(--warning)'} />
+                  <span>3. Check-Out (Duty)</span>
+                </div>
+                <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                  {workflowState.dutyCheckedOut && workflowState.checkOutTime
+                    ? `Punched at ${new Date(workflowState.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                    : !workflowState.dutyCheckedIn
+                    ? 'Check-In required first'
+                    : 'End field duty & log hours'}
+                </div>
               </div>
 
-              {/* GPS Location Status */}
+              {/* Step 4: Site-Out */}
               <div
+                onClick={() => {
+                  if (workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut) {
+                    showToast('Pehle Check-Out karein! Check-Out karne ke baad hi Site-Out ho sakta hai.', 'warning');
+                  } else if (!workflowState.siteInDone) {
+                    showToast('Pehle Site-In karein!', 'warning');
+                  }
+                  setPunchMode('SITE_OUT');
+                  setCapturedPhoto(null);
+                  stopCamera();
+                }}
                 style={{
-                  padding: 14,
-                  borderRadius: 8,
-                  background: coords ? 'var(--success-light)' : 'var(--warning-light)',
-                  border: `1px solid ${coords ? 'var(--success-border)' : 'var(--warning-border)'}`,
+                  padding: '12px 14px',
+                  borderRadius: 10,
+                  cursor: 'pointer',
+                  border: `2px solid ${
+                    workflowState.siteOutDone
+                      ? 'var(--success)'
+                      : punchMode === 'SITE_OUT'
+                      ? '#7c3aed'
+                      : '#e2e8f0'
+                  }`,
+                  background: workflowState.siteOutDone
+                    ? 'rgba(16,185,129,0.06)'
+                    : (workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut) || !workflowState.siteInDone
+                    ? '#f1f5f9'
+                    : punchMode === 'SITE_OUT'
+                    ? 'rgba(124,58,237,0.06)'
+                    : '#f8fafc',
+                  opacity: (workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut) || !workflowState.siteInDone ? 0.65 : 1,
+                  transition: 'all 0.2s',
                 }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <MapPin size={18} color={coords ? 'var(--success)' : 'var(--warning)'} />
-                    <span style={{ fontSize: '0.84rem', fontWeight: 600, color: coords ? 'var(--success)' : 'var(--warning)' }}>
-                      {coords ? 'Open GPS Locked' : 'Acquiring GPS Position...'}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                    STEP 4
+                  </span>
+                  {workflowState.siteOutDone ? (
+                    <Badge variant="success" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>✓ Completed</Badge>
+                  ) : (workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut) || !workflowState.siteInDone ? (
+                    <span style={{ fontSize: '0.7rem', color: 'var(--danger)', display: 'inline-flex', alignItems: 'center', gap: 3, fontWeight: 600 }}>
+                      <Lock size={10} /> Locked
                     </span>
-                  </div>
-                  <Button size="sm" variant="light" icon={RotateCcw} onClick={acquireLocation} loading={gettingLocation}>
-                    Refresh GPS
-                  </Button>
+                  ) : (
+                    <Badge variant="primary" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>Ready for Exit</Badge>
+                  )}
                 </div>
-                {coords && (
-                  <div style={{ fontSize: '0.78rem', color: 'var(--success)', marginTop: 6 }}>
-                    Latitude: <strong>{coords.latitude.toFixed(4)}° N</strong> | Longitude: <strong>{coords.longitude.toFixed(4)}° E</strong> | Accuracy: <strong>{coords.gpsAccuracy}m</strong>
-                    {coords.gpsAccuracy <= 100 ? (
-                      <span style={{ color: 'var(--success)', fontWeight: 600, marginLeft: 8, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <CheckCircle2 size={12} /> High Precision (&lt; 100m)
-                      </span>
-                    ) : (
-                      <span style={{ color: 'var(--danger)', fontWeight: 600, marginLeft: 8, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <AlertTriangle size={12} /> Degraded Accuracy (&gt; 100m)
-                      </span>
-                    )}
-                  </div>
-                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-main)' }}>
+                  <Navigation size={15} color={workflowState.siteOutDone ? 'var(--success)' : '#7c3aed'} />
+                  <span>4. Site-Out (Exit)</span>
+                </div>
+                <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                  {workflowState.siteOutDone && workflowState.siteOutTime
+                    ? `Exited at ${new Date(workflowState.siteOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                    : (workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut)
+                    ? 'Check-Out required before Site-Out'
+                    : 'Upload exit photo & conclude visit'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Form & Receipt Console Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 24 }}>
+            {/* Punch Form & Controls */}
+            <div style={{ background: '#ffffff', borderRadius: 14, padding: 24, border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#0f172a' }}>
+                  Field Punch Terminal
+                </h3>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  Active Mode: <strong>{punchMode}</strong>
+                </span>
               </div>
 
-              {/* Check-In Biometric Face Verification Gate */}
-              {punchMode === 'CHECK_IN' && (
-                <div style={{ border: '1px solid var(--border-color)', borderRadius: 10, padding: 14, background: 'var(--bg-subtle)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-main)' }}>
-                      <Camera size={16} color="var(--primary)" />
-                      Biometric Face Verification Gate:
-                    </div>
-                    {!cameraActive && !capturedPhoto && (
-                      <Button size="sm" variant="primary" icon={Camera} onClick={startCamera}>
-                        Start Camera
-                      </Button>
-                    )}
-                  </div>
+              {/* 4 Mode Switcher Buttons */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(4, 1fr)',
+                  gap: 6,
+                  marginBottom: 18,
+                  padding: 4,
+                  background: '#f1f5f9',
+                  borderRadius: 10,
+                }}
+              >
+                {/* 1. Site-In */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPunchMode('SITE_IN');
+                    setCapturedPhoto(null);
+                  }}
+                  style={{
+                    padding: '9px 6px',
+                    borderRadius: 7,
+                    border: 'none',
+                    outline: 'none',
+                    background: punchMode === 'SITE_IN' ? 'var(--primary)' : 'transparent',
+                    color: punchMode === 'SITE_IN' ? '#ffffff' : 'var(--text-muted)',
+                    fontWeight: 600,
+                    fontSize: '0.8rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                    textAlign: 'center',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                  title="Step 1: Site-In"
+                >
+                  {workflowState.siteInDone ? '✓ ' : ''}1. Site-In
+                </button>
 
-                  {cameraActive && (
-                    <div style={{ textAlign: 'center' }}>
-                      <video
-                        ref={videoRef}
-                        autoPlay
-                        playsInline
-                        muted
-                        style={{ width: '100%', maxHeight: 240, borderRadius: 8, background: '#000' }}
-                      />
-                      <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 10 }}>
-                        <Button size="sm" variant="success" icon={Check} onClick={captureFrame}>
-                          Capture Biometric Photo
-                        </Button>
-                        <Button size="sm" variant="light" icon={X} onClick={stopCamera}>
-                          Cancel
-                        </Button>
-                      </div>
-                    </div>
+                {/* 2. Check-In */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!workflowState.siteInDone) {
+                      showToast('Pehle Site-In karein! Site-In karne ke baad hi Check-In kar sakte hain.', 'warning');
+                    }
+                    setPunchMode('CHECK_IN');
+                    setCapturedPhoto(null);
+                  }}
+                  style={{
+                    padding: '9px 6px',
+                    borderRadius: 7,
+                    border: 'none',
+                    outline: 'none',
+                    background: punchMode === 'CHECK_IN' ? 'var(--primary)' : 'transparent',
+                    color: punchMode === 'CHECK_IN' ? '#ffffff' : !workflowState.siteInDone ? '#94a3b8' : 'var(--text-muted)',
+                    fontWeight: 600,
+                    fontSize: '0.8rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                    textAlign: 'center',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                  title="Step 2: Check-In (Duty Start)"
+                >
+                  {!workflowState.siteInDone && <Lock size={11} style={{ marginRight: 2, verticalAlign: 'middle' }} />}
+                  {workflowState.dutyCheckedIn ? '✓ ' : ''}2. Check-In
+                </button>
+
+                {/* 3. Check-Out */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!workflowState.dutyCheckedIn) {
+                      showToast('Pehle Check-In karein! Uske baad hi Check-Out kar sakte hain.', 'warning');
+                    }
+                    setPunchMode('CHECK_OUT');
+                    setCapturedPhoto(null);
+                    stopCamera();
+                  }}
+                  style={{
+                    padding: '9px 6px',
+                    borderRadius: 7,
+                    border: 'none',
+                    outline: 'none',
+                    background: punchMode === 'CHECK_OUT' ? 'var(--warning)' : 'transparent',
+                    color: punchMode === 'CHECK_OUT' ? '#ffffff' : !workflowState.dutyCheckedIn ? '#94a3b8' : 'var(--text-muted)',
+                    fontWeight: 600,
+                    fontSize: '0.8rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                    textAlign: 'center',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                  title="Step 3: Check-Out (Duty End)"
+                >
+                  {!workflowState.dutyCheckedIn && <Lock size={11} style={{ marginRight: 2, verticalAlign: 'middle' }} />}
+                  {workflowState.dutyCheckedOut ? '✓ ' : ''}3. Check-Out
+                </button>
+
+                {/* 4. Site-Out */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut) {
+                      showToast('Pehle Check-Out karein! Check-Out karne ke baad hi Site-Out ho sakta hai.', 'warning');
+                    } else if (!workflowState.siteInDone) {
+                      showToast('Pehle Site-In karein!', 'warning');
+                    }
+                    setPunchMode('SITE_OUT');
+                    setCapturedPhoto(null);
+                    stopCamera();
+                  }}
+                  style={{
+                    padding: '9px 6px',
+                    borderRadius: 7,
+                    border: 'none',
+                    outline: 'none',
+                    background: punchMode === 'SITE_OUT' ? '#7c3aed' : 'transparent',
+                    color: punchMode === 'SITE_OUT' ? '#ffffff' : (workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut) || !workflowState.siteInDone ? '#94a3b8' : 'var(--text-muted)',
+                    fontWeight: 600,
+                    fontSize: '0.8rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                    textAlign: 'center',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                  title="Step 4: Site-Out (Exit Site)"
+                >
+                  {((workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut) || !workflowState.siteInDone) && (
+                    <Lock size={11} style={{ marginRight: 2, verticalAlign: 'middle' }} />
                   )}
+                  {workflowState.siteOutDone ? '✓ ' : ''}4. Site-Out
+                </button>
+              </div>
 
-                  {capturedPhoto && (
-                    <div style={{ textAlign: 'center' }}>
-                      <img
-                        src={capturedPhoto}
-                        alt="Biometric Capture"
-                        style={{ width: 140, height: 140, objectFit: 'cover', borderRadius: 8, border: '2px solid var(--primary)' }}
-                      />
-                      <div style={{ fontSize: '0.76rem', color: 'var(--primary)', fontWeight: 600, marginTop: 4, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <CheckCircle2 size={13} />
-                        <span>Biometric Frame Captured</span>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="light"
-                        onClick={() => {
-                          setCapturedPhoto(null);
-                          startCamera();
-                        }}
-                        style={{ fontSize: '0.74rem', marginTop: 6 }}
-                      >
-                        Retake Photo
-                      </Button>
-                    </div>
-                  )}
-
-                  <canvas ref={canvasRef} style={{ display: 'none' }} />
-                </div>
-              )}
-
-              {/* Check-Out Remarks */}
-              {punchMode === 'CHECK_OUT' && (
+              <form onSubmit={handlePunchSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {/* Employee Selector */}
                 <div>
                   <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 4 }}>
-                    Visit Summary / Remarks:
+                    Select Field Officer:
                   </label>
-                  <textarea
-                    rows={3}
-                    value={punchRemarks}
-                    onChange={(e) => setPunchRemarks(e.target.value)}
-                    placeholder="e.g. Completed client audit and site inspection at industrial estate"
+                  <select
+                    value={punchEmpId}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setPunchEmpId(val);
+                      syncWorkflowState(val);
+                    }}
                     style={{
                       width: '100%',
-                      padding: '10px 12px',
+                      padding: '9px 12px',
                       borderRadius: 8,
                       border: '1px solid var(--border-color)',
                       fontSize: '0.88rem',
-                      fontFamily: 'inherit',
-                      resize: 'vertical',
+                      background: 'var(--bg-surface)',
                     }}
-                  />
-                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                    Note: Biometric face verification is bypassed on check-out for frictionless field departure.
-                  </span>
-                </div>
-              )}
-
-              <Button
-                type="submit"
-                variant={punchMode === 'CHECK_IN' ? 'primary' : 'warning'}
-                loading={submittingPunch}
-                style={{
-                  padding: '12px',
-                  fontSize: '0.94rem',
-                  fontWeight: 700,
-                  marginTop: 6,
-                }}
-              >
-                {punchMode === 'CHECK_IN' ? 'Confirm Biometric Field Check-In' : 'Confirm Field Check-Out'}
-              </Button>
-            </form>
-          </div>
-
-          {/* Punch Receipt / Execution Verdict Card */}
-          <div style={{ background: 'var(--bg-surface)', borderRadius: 14, padding: 24, border: '1px solid var(--border-color)' }}>
-            <h3 style={{ margin: '0 0 14px', fontSize: '1.15rem', color: 'var(--text-main)' }}>
-              Real-Time Field Punch Receipt
-            </h3>
-
-            {punchResult ? (
-              <div
-                style={{
-                  padding: 16,
-                  borderRadius: 10,
-                  background: 'var(--success-light)',
-                  border: '1px solid var(--success-border)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: 'var(--success)', marginBottom: 10 }}>
-                  <CheckCircle2 size={20} />
-                  {punchResult.mode === 'CHECK_IN' ? 'Field Check-In Confirmed' : 'Field Check-Out Confirmed'}
+                    required
+                  >
+                    {employees.map((emp) => (
+                      <option key={emp._id} value={emp._id}>
+                        {getEmpName(emp)} ({getEmpCode(emp)}) - Work Type: {emp.employmentInfo?.workType || 'FIELD'}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: '0.85rem' }}>
-                  <div>Attendance ID: <strong>{punchResult.data?.attendanceId || '-'}</strong></div>
-                  <div>Timestamp: <strong>{new Date().toLocaleTimeString()}</strong></div>
-                  <div>Address: <strong>{punchResult.data?.address || `Open GeoLocation (${coords?.latitude?.toFixed(4)}, ${coords?.longitude?.toFixed(4)})`}</strong></div>
-                  <div>Duty Hours Snapshot: <strong>{punchResult.data?.requiredWorkingHours ?? 8} hrs</strong></div>
-
-                  {punchResult.mode === 'CHECK_OUT' && (
-                    <div style={{ marginTop: 8, padding: 10, background: 'var(--bg-surface)', borderRadius: 8, border: '1px solid var(--success-border)' }}>
-                      <div>Total Hours Worked: <strong>{punchResult.data?.totalWorkingHours} hrs</strong></div>
-                      <div>Shortfall: <strong style={{ color: punchResult.data?.shortfallHours > 0 ? 'var(--danger)' : 'var(--success)' }}>{punchResult.data?.shortfallHours} hrs</strong></div>
-                      <div>Overtime: <strong style={{ color: 'var(--success)' }}>+{punchResult.data?.overtimeHours} hrs</strong></div>
-                      <div>Final Status: <Badge variant={punchResult.data?.attendanceStatus === 'SHORTFALL' ? 'warning' : 'success'}>{punchResult.data?.attendanceStatus}</Badge></div>
+                {/* GPS Location Status */}
+                <div
+                  style={{
+                    padding: 14,
+                    borderRadius: 8,
+                    background: coords ? 'var(--success-light)' : 'var(--warning-light)',
+                    border: `1px solid ${coords ? 'var(--success-border)' : 'var(--warning-border)'}`,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <MapPin size={18} color={coords ? 'var(--success)' : 'var(--warning)'} />
+                      <span style={{ fontSize: '0.84rem', fontWeight: 600, color: coords ? 'var(--success)' : 'var(--warning)' }}>
+                        {coords ? 'Open GPS Locked' : 'Acquiring GPS Position...'}
+                      </span>
+                    </div>
+                    <Button size="sm" variant="light" icon={RotateCcw} onClick={acquireLocation} loading={gettingLocation}>
+                      Refresh GPS
+                    </Button>
+                  </div>
+                  {coords && (
+                    <div style={{ fontSize: '0.78rem', color: 'var(--success)', marginTop: 6 }}>
+                      Latitude: <strong>{coords.latitude.toFixed(4)}° N</strong> | Longitude: <strong>{coords.longitude.toFixed(4)}° E</strong> | Accuracy: <strong>{coords.gpsAccuracy}m</strong>
+                      {coords.gpsAccuracy <= 100 ? (
+                        <span style={{ color: 'var(--success)', fontWeight: 600, marginLeft: 8, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <CheckCircle2 size={12} /> High Precision (&lt; 100m)
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--danger)', fontWeight: 600, marginLeft: 8, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <AlertTriangle size={12} /> Degraded Accuracy (&gt; 100m)
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
+
+                {/* ---------------------------------------------------- */}
+                {/* VIEW 1: STEP 1 - SITE-IN (Arrival at Site) */}
+                {/* ---------------------------------------------------- */}
+                {punchMode === 'SITE_IN' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {workflowState.siteInDone ? (
+                      <div style={{ padding: 14, borderRadius: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, color: '#166534', fontSize: '0.9rem' }}>
+                          <CheckCircle2 size={16} /> Site-In Active for this Session
+                        </div>
+                        <div style={{ fontSize: '0.82rem', color: '#15803d' }}>
+                          Verified at <strong>{workflowState.activeSite?.name || 'Project Site'}</strong> on{' '}
+                          <strong>{workflowState.siteInTime ? new Date(workflowState.siteInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</strong>.
+                        </div>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          icon={ArrowRight}
+                          onClick={() => setPunchMode('CHECK_IN')}
+                          style={{ alignSelf: 'flex-start', marginTop: 6, fontSize: '0.82rem', padding: '6px 14px' }}
+                        >
+                          Proceed to Step 2: Check-In
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Site Detection & Selection */}
+                        <div style={{ padding: 14, borderRadius: 10, background: 'var(--bg-subtle)', border: '1px solid var(--border-color)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                            <span style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <HardHat size={16} color="var(--primary)" />
+                              Select Project / Client Site:
+                            </span>
+                            <Button size="sm" variant="light" icon={Navigation} onClick={() => detectNearbySites()} loading={detectingSites} style={{ fontSize: '0.74rem' }}>
+                              Scan 500m Sites
+                            </Button>
+                          </div>
+
+                          {detectedSites.length > 0 ? (
+                            <div style={{ marginBottom: 10 }}>
+                              <select
+                                value={selectedCandidateSite?.siteId || selectedCandidateSite?._id || ''}
+                                onChange={(e) => {
+                                  const site = detectedSites.find((s) => (s.siteId || s._id) === e.target.value);
+                                  setSelectedCandidateSite(site);
+                                  if (site?.eligibleTasks?.length > 0) setSelectedTaskId(site.eligibleTasks[0]._id);
+                                }}
+                                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: '0.86rem' }}
+                              >
+                                {detectedSites.map((s) => (
+                                  <option key={s.siteId || s._id} value={s.siteId || s._id}>
+                                    📍 {s.name} ({s.address || '500m nearby'}) - {s.eligibleTasks?.length || 0} task(s)
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          ) : (
+                            <div style={{ marginBottom: 10 }}>
+                              <select
+                                value={selectedCandidateSite?.siteId || selectedCandidateSite?._id || ''}
+                                onChange={(e) => {
+                                  let found = null;
+                                  projects.forEach((p) => {
+                                    const match = p.sites?.find((s) => s._id === e.target.value);
+                                    if (match) found = match;
+                                  });
+                                  setSelectedCandidateSite(found);
+                                }}
+                                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: '0.86rem' }}
+                              >
+                                <option value="">Choose from Registered Project Sites</option>
+                                {projects.map((p) =>
+                                  p.sites?.map((s) => (
+                                    <option key={s._id} value={s._id}>
+                                      🏢 {p.name} - {s.name} ({s.address || 'Active Site'})
+                                    </option>
+                                  ))
+                                )}
+                              </select>
+                              <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                                Tip: 0 sites within 500m GPS scan. Select your designated project site from master list.
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Task linking */}
+                          {selectedCandidateSite?.eligibleTasks?.length > 0 && (
+                            <div>
+                              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 4 }}>
+                                Assigned Task Link:
+                              </label>
+                              <select
+                                value={selectedTaskId}
+                                onChange={(e) => setSelectedTaskId(e.target.value)}
+                                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: '0.84rem' }}
+                              >
+                                {selectedCandidateSite.eligibleTasks.map((t) => (
+                                  <option key={t._id} value={t._id}>
+                                    📋 {t.title} ({t.status || 'ASSIGNED'})
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Biometric Face Verification Gate */}
+                        <div style={{ border: '1px solid var(--border-color)', borderRadius: 10, padding: 14, background: 'var(--bg-subtle)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                              <Camera size={16} color="var(--primary)" />
+                              Biometric Face Verification Gate (Site-In):
+                            </div>
+                            {!cameraActive && !capturedPhoto && (
+                              <Button size="sm" variant="primary" icon={Camera} onClick={startCamera}>
+                                Start Camera
+                              </Button>
+                            )}
+                          </div>
+
+                          {cameraActive && (
+                            <div style={{ textAlign: 'center' }}>
+                              <video
+                                ref={videoRef}
+                                autoPlay
+                                playsInline
+                                muted
+                                style={{ width: '100%', maxHeight: 220, borderRadius: 8, background: '#000' }}
+                              />
+                              <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 10 }}>
+                                <Button size="sm" variant="success" icon={Check} onClick={captureFrame}>
+                                  Capture Biometric Photo
+                                </Button>
+                                <Button size="sm" variant="light" icon={X} onClick={stopCamera}>
+                                  Cancel
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+
+                          {capturedPhoto && (
+                            <div style={{ textAlign: 'center' }}>
+                              <img
+                                src={capturedPhoto}
+                                alt="Biometric Capture"
+                                style={{ width: 130, height: 130, objectFit: 'cover', borderRadius: 8, border: '2px solid var(--primary)' }}
+                              />
+                              <div style={{ fontSize: '0.76rem', color: 'var(--primary)', fontWeight: 600, marginTop: 4, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                <CheckCircle2 size={13} />
+                                <span>Biometric Frame Captured</span>
+                              </div>
+                              <Button
+                                size="sm"
+                                variant="light"
+                                onClick={() => {
+                                  setCapturedPhoto(null);
+                                  startCamera();
+                                }}
+                                style={{ fontSize: '0.74rem', marginTop: 6 }}
+                              >
+                                Retake Photo
+                              </Button>
+                            </div>
+                          )}
+
+                          <canvas ref={canvasRef} style={{ display: 'none' }} />
+                        </div>
+
+                        <Button
+                          type="submit"
+                          variant="primary"
+                          icon={LogIn}
+                          loading={submittingPunch}
+                          style={{ padding: '12px', fontSize: '0.94rem', fontWeight: 700 }}
+                        >
+                          Confirm Biometric Site-In (Step 1)
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* ---------------------------------------------------- */}
+                {/* VIEW 2: STEP 2 - CHECK-IN (Field Duty Start) */}
+                {/* ---------------------------------------------------- */}
+                {punchMode === 'CHECK_IN' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {/* STRICT LOCK CHECK: Pehle Site-In karein! */}
+                    {!workflowState.siteInDone ? (
+                      <div
+                        style={{
+                          padding: '24px 18px',
+                          borderRadius: 12,
+                          background: '#fffbeb',
+                          border: '1px solid #fde68a',
+                          textAlign: 'center',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: 10,
+                        }}
+                      >
+                        <Lock size={34} color="#d97706" />
+                        <div style={{ fontWeight: 800, fontSize: '1.05rem', color: '#92400e' }}>
+                          Step 2: Check-In is Locked
+                        </div>
+                        <p style={{ margin: 0, fontSize: '0.86rem', color: '#b45309', maxWidth: 420 }}>
+                          Field staff attendance requirement: <strong>Pehle Site-In karein!</strong> Site-In complete hone ke baad hi Check-In unlock hoga.
+                        </p>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          icon={LogIn}
+                          onClick={() => setPunchMode('SITE_IN')}
+                          style={{ marginTop: 6, fontWeight: 700 }}
+                        >
+                          Go to Step 1: Site-In
+                        </Button>
+                      </div>
+                    ) : workflowState.dutyCheckedIn ? (
+                      <div style={{ padding: 14, borderRadius: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, color: '#166534', fontSize: '0.9rem' }}>
+                          <CheckCircle2 size={16} /> Duty Active (Already Checked-In)
+                        </div>
+                        <div style={{ fontSize: '0.82rem', color: '#15803d' }}>
+                          Punched in at <strong>{workflowState.checkInTime ? new Date(workflowState.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</strong>. When field work completes, proceed to Check-Out.
+                        </div>
+                        <Button
+                          type="button"
+                          variant="warning"
+                          icon={ArrowRight}
+                          onClick={() => setPunchMode('CHECK_OUT')}
+                          style={{ alignSelf: 'flex-start', marginTop: 6, fontSize: '0.82rem', padding: '6px 14px' }}
+                        >
+                          Proceed to Step 3: Check-Out
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ padding: '10px 14px', borderRadius: 8, background: '#f0fdf4', border: '1px solid #bbf7d0', fontSize: '0.82rem', color: '#166534', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <CheckCircle2 size={15} />
+                          <span>Site-In Verified: <strong>{workflowState.activeSite?.name || 'Project Site'}</strong></span>
+                        </div>
+
+                        {/* Biometric Face Verification Gate for Duty Check-in */}
+                        <div style={{ border: '1px solid var(--border-color)', borderRadius: 10, padding: 14, background: 'var(--bg-subtle)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                              <Camera size={16} color="var(--primary)" />
+                              Biometric Face Verification (Duty Check-In):
+                            </div>
+                            {!cameraActive && !capturedPhoto && (
+                              <Button size="sm" variant="primary" icon={Camera} onClick={startCamera}>
+                                Start Camera
+                              </Button>
+                            )}
+                          </div>
+
+                          {cameraActive && (
+                            <div style={{ textAlign: 'center' }}>
+                              <video
+                                ref={videoRef}
+                                autoPlay
+                                playsInline
+                                muted
+                                style={{ width: '100%', maxHeight: 220, borderRadius: 8, background: '#000' }}
+                              />
+                              <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 10 }}>
+                                <Button size="sm" variant="success" icon={Check} onClick={captureFrame}>
+                                  Capture Biometric Photo
+                                </Button>
+                                <Button size="sm" variant="light" icon={X} onClick={stopCamera}>
+                                  Cancel
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+
+                          {capturedPhoto && (
+                            <div style={{ textAlign: 'center' }}>
+                              <img
+                                src={capturedPhoto}
+                                alt="Biometric Capture"
+                                style={{ width: 130, height: 130, objectFit: 'cover', borderRadius: 8, border: '2px solid var(--primary)' }}
+                              />
+                              <div style={{ fontSize: '0.76rem', color: 'var(--primary)', fontWeight: 600, marginTop: 4, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                <CheckCircle2 size={13} />
+                                <span>Biometric Frame Captured</span>
+                              </div>
+                              <Button
+                                size="sm"
+                                variant="light"
+                                onClick={() => {
+                                  setCapturedPhoto(null);
+                                  startCamera();
+                                }}
+                                style={{ fontSize: '0.74rem', marginTop: 6 }}
+                              >
+                                Retake Photo
+                              </Button>
+                            </div>
+                          )}
+
+                          <canvas ref={canvasRef} style={{ display: 'none' }} />
+                        </div>
+
+                        <Button
+                          type="submit"
+                          variant="primary"
+                          icon={CheckCircle2}
+                          loading={submittingPunch}
+                          style={{ padding: '12px', fontSize: '0.94rem', fontWeight: 700 }}
+                        >
+                          Confirm Biometric Field Check-In (Step 2)
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* ---------------------------------------------------- */}
+                {/* VIEW 3: STEP 3 - CHECK-OUT (Field Duty End) */}
+                {/* ---------------------------------------------------- */}
+                {punchMode === 'CHECK_OUT' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {!workflowState.dutyCheckedIn ? (
+                      <div
+                        style={{
+                          padding: '24px 18px',
+                          borderRadius: 12,
+                          background: '#f8fafc',
+                          border: '1px solid #cbd5e1',
+                          textAlign: 'center',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: 10,
+                        }}
+                      >
+                        <Lock size={34} color="#64748b" />
+                        <div style={{ fontWeight: 800, fontSize: '1.05rem', color: '#334155' }}>
+                          Step 3: Check-Out is Locked
+                        </div>
+                        <p style={{ margin: 0, fontSize: '0.86rem', color: '#64748b', maxWidth: 420 }}>
+                          Aapne abhi tak duty Check-In nahi kiya hai. Pehle <strong>Step 2: Check-In</strong> complete karein.
+                        </p>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          icon={CheckCircle2}
+                          onClick={() => setPunchMode('CHECK_IN')}
+                          style={{ marginTop: 6 }}
+                        >
+                          Go to Step 2: Check-In
+                        </Button>
+                      </div>
+                    ) : workflowState.dutyCheckedOut ? (
+                      <div style={{ padding: 14, borderRadius: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, color: '#166534', fontSize: '0.9rem' }}>
+                          <CheckCircle2 size={16} /> Duty Checked-Out Successfully
+                        </div>
+                        <div style={{ fontSize: '0.82rem', color: '#15803d' }}>
+                          Checked out at <strong>{workflowState.checkOutTime ? new Date(workflowState.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</strong>. Total working hours recorded.
+                        </div>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          icon={ArrowRight}
+                          onClick={() => setPunchMode('SITE_OUT')}
+                          style={{ alignSelf: 'flex-start', marginTop: 6, fontSize: '0.82rem', padding: '6px 14px' }}
+                        >
+                          Proceed to Step 4: Site-Out
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ padding: '10px 14px', borderRadius: 8, background: '#eff6ff', border: '1px solid #bfdbfe', fontSize: '0.82rem', color: '#1e40af', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <Clock size={15} />
+                          <span>Duty Active since: <strong>{workflowState.checkInTime ? new Date(workflowState.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</strong></span>
+                        </div>
+
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 4 }}>
+                            Visit Summary / Activity Remarks:
+                          </label>
+                          <textarea
+                            rows={3}
+                            value={punchRemarks}
+                            onChange={(e) => setPunchRemarks(e.target.value)}
+                            placeholder="e.g. Completed client audit and territory inspection"
+                            style={{
+                              width: '100%',
+                              padding: '10px 12px',
+                              borderRadius: 8,
+                              border: '1px solid var(--border-color)',
+                              fontSize: '0.88rem',
+                              fontFamily: 'inherit',
+                              resize: 'vertical',
+                            }}
+                          />
+                        </div>
+
+                        <Button
+                          type="submit"
+                          variant="warning"
+                          icon={LogOut}
+                          loading={submittingPunch}
+                          style={{ padding: '12px', fontSize: '0.94rem', fontWeight: 700 }}
+                        >
+                          Confirm Field Check-Out (Step 3)
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* ---------------------------------------------------- */}
+                {/* VIEW 4: STEP 4 - SITE-OUT (Site Departure & Evidence) */}
+                {/* ---------------------------------------------------- */}
+                {punchMode === 'SITE_OUT' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {/* STRICT LOCK CHECK: Pehle Check-Out karein! */}
+                    {workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut ? (
+                      <div
+                        style={{
+                          padding: '24px 18px',
+                          borderRadius: 12,
+                          background: '#fef2f2',
+                          border: '1px solid #fecaca',
+                          textAlign: 'center',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: 10,
+                        }}
+                      >
+                        <Lock size={34} color="#dc2626" />
+                        <div style={{ fontWeight: 800, fontSize: '1.05rem', color: '#991b1b' }}>
+                          Step 4: Site-Out is Locked
+                        </div>
+                        <p style={{ margin: 0, fontSize: '0.86rem', color: '#b91c1c', maxWidth: 420 }}>
+                          Field staff duty abhi active hai. <strong>Checkout karne ke baad hi Site-Out kar sakte hain!</strong> Pehle Step 3: Check-Out karein.
+                        </p>
+                        <Button
+                          type="button"
+                          variant="warning"
+                          icon={LogOut}
+                          onClick={() => setPunchMode('CHECK_OUT')}
+                          style={{ marginTop: 6, fontWeight: 700 }}
+                        >
+                          Go to Step 3: Check-Out
+                        </Button>
+                      </div>
+                    ) : !workflowState.siteInDone ? (
+                      <div
+                        style={{
+                          padding: '24px 18px',
+                          borderRadius: 12,
+                          background: '#f8fafc',
+                          border: '1px solid #cbd5e1',
+                          textAlign: 'center',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: 10,
+                        }}
+                      >
+                        <Lock size={34} color="#64748b" />
+                        <div style={{ fontWeight: 800, fontSize: '1.05rem', color: '#334155' }}>
+                          Site-Out Unavailable
+                        </div>
+                        <p style={{ margin: 0, fontSize: '0.86rem', color: '#64748b', maxWidth: 420 }}>
+                          Aapne abhi tak <strong>Site-In</strong> nahi kiya hai. Pehle Step 1: Site-In complete karein.
+                        </p>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          icon={LogIn}
+                          onClick={() => setPunchMode('SITE_IN')}
+                          style={{ marginTop: 6 }}
+                        >
+                          Go to Step 1: Site-In
+                        </Button>
+                      </div>
+                    ) : workflowState.siteOutDone ? (
+                      <div style={{ padding: 14, borderRadius: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, color: '#166534', fontSize: '0.9rem' }}>
+                          <CheckCircle2 size={16} /> Site Visit Concluded (Site-Out Completed)
+                        </div>
+                        <div style={{ fontSize: '0.82rem', color: '#15803d' }}>
+                          Site-Out recorded at <strong>{workflowState.siteOutTime ? new Date(workflowState.siteOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</strong>.
+                        </div>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          icon={RotateCcw}
+                          onClick={handleStartNextVisit}
+                          style={{ alignSelf: 'flex-start', marginTop: 6, fontSize: '0.82rem', padding: '6px 14px' }}
+                        >
+                          Start Next Site Visit
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ padding: '10px 14px', borderRadius: 8, background: '#f0fdf4', border: '1px solid #bbf7d0', fontSize: '0.82rem', color: '#166534', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <CheckCircle2 size={15} />
+                          <span>Duty Check-Out Verified. Ready for Site Departure Evidence.</span>
+                        </div>
+
+                        {/* Exit Photo Evidence */}
+                        <div style={{ border: '1px solid var(--border-color)', borderRadius: 10, padding: 14, background: 'var(--bg-subtle)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                              <ImageIcon size={16} color="var(--primary)" />
+                              Mandatory Exit Photograph (Site Evidence):
+                            </div>
+                            {!cameraActive && !capturedPhoto && (
+                              <Button size="sm" variant="primary" icon={Camera} onClick={startCamera}>
+                                Take Photo
+                              </Button>
+                            )}
+                          </div>
+
+                          {cameraActive && (
+                            <div style={{ textAlign: 'center' }}>
+                              <video
+                                ref={videoRef}
+                                autoPlay
+                                playsInline
+                                muted
+                                style={{ width: '100%', maxHeight: 220, borderRadius: 8, background: '#000' }}
+                              />
+                              <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 10 }}>
+                                <Button size="sm" variant="success" icon={Check} onClick={captureFrame}>
+                                  Capture Exit Photo
+                                </Button>
+                                <Button size="sm" variant="light" icon={X} onClick={stopCamera}>
+                                  Cancel
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+
+                          {capturedPhoto && (
+                            <div style={{ textAlign: 'center', marginBottom: 10 }}>
+                              <img
+                                src={capturedPhoto}
+                                alt="Exit Photo"
+                                style={{ width: 130, height: 130, objectFit: 'cover', borderRadius: 8, border: '2px solid var(--success)' }}
+                              />
+                              <div style={{ fontSize: '0.76rem', color: 'var(--success)', fontWeight: 600, marginTop: 4, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                <CheckCircle2 size={13} />
+                                <span>Exit Photo Attached</span>
+                              </div>
+                              <Button
+                                size="sm"
+                                variant="light"
+                                onClick={() => {
+                                  setCapturedPhoto(null);
+                                  startCamera();
+                                }}
+                                style={{ fontSize: '0.74rem', marginTop: 6 }}
+                              >
+                                Retake
+                              </Button>
+                            </div>
+                          )}
+
+                          {/* Secondary URL photo upload */}
+                          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                            <input
+                              type="text"
+                              placeholder="Or paste image URL (Cloudinary / CDN)..."
+                              value={siteOutPhotoUrl}
+                              onChange={(e) => setSiteOutPhotoUrl(e.target.value)}
+                              style={{ flex: 1, padding: '6px 10px', fontSize: '0.82rem', borderRadius: 6, border: '1px solid var(--border-color)' }}
+                            />
+                            <Button size="sm" variant="light" onClick={addSiteOutPhoto}>
+                              Add URL
+                            </Button>
+                          </div>
+
+                          {siteOutPhotos.length > 0 && (
+                            <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                              {siteOutPhotos.map((url, idx) => (
+                                <div key={idx} style={{ position: 'relative' }}>
+                                  <img src={url} alt="Site" style={{ width: 48, height: 48, borderRadius: 6, objectFit: 'cover', border: '1px solid #cbd5e1' }} />
+                                  <button
+                                    type="button"
+                                    onClick={() => removeSiteOutPhoto(idx)}
+                                    style={{
+                                      position: 'absolute',
+                                      top: -5,
+                                      right: -5,
+                                      background: '#dc2626',
+                                      color: '#fff',
+                                      border: 'none',
+                                      borderRadius: '50%',
+                                      width: 16,
+                                      height: 16,
+                                      fontSize: '0.65rem',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                    }}
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Exit Remarks */}
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 4 }}>
+                            Site Exit & Handover Remarks *:
+                          </label>
+                          <textarea
+                            rows={3}
+                            value={siteOutRemarks}
+                            onChange={(e) => setSiteOutRemarks(e.target.value)}
+                            placeholder="e.g. Completed site inspection, client sign-off obtained, departed site"
+                            style={{
+                              width: '100%',
+                              padding: '10px 12px',
+                              borderRadius: 8,
+                              border: '1px solid var(--border-color)',
+                              fontSize: '0.88rem',
+                              fontFamily: 'inherit',
+                              resize: 'vertical',
+                            }}
+                            required
+                          />
+                        </div>
+
+                        {/* Task Completed checkbox */}
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.84rem', cursor: 'pointer', userSelect: 'none' }}>
+                          <input
+                            type="checkbox"
+                            checked={taskCompleted}
+                            onChange={(e) => setTaskCompleted(e.target.checked)}
+                            style={{ width: 16, height: 16, accentColor: 'var(--primary)' }}
+                          />
+                          <span style={{ fontWeight: 600 }}>Mark associated site task as completed upon exit</span>
+                        </label>
+
+                        <Button
+                          type="submit"
+                          variant="primary"
+                          icon={Navigation}
+                          loading={submittingPunch}
+                          style={{ padding: '12px', fontSize: '0.94rem', fontWeight: 700 }}
+                        >
+                          Confirm Site-Out Exit (Step 4)
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* ---------------------------------------------------- */}
+                {/* VIEW 5: COMPLETED VISIT */}
+                {/* ---------------------------------------------------- */}
+                {punchMode === 'COMPLETED' && (
+                  <div
+                    style={{
+                      padding: 24,
+                      borderRadius: 12,
+                      background: 'linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(46,123,133,0.08) 100%)',
+                      border: '1px solid var(--success-border)',
+                      textAlign: 'center',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: 12,
+                    }}
+                  >
+                    <CheckCircle2 size={44} color="var(--success)" />
+                    <div style={{ fontWeight: 800, fontSize: '1.15rem', color: '#065f46' }}>
+                      Site Visit Cycle Finished!
+                    </div>
+                    <p style={{ margin: 0, fontSize: '0.86rem', color: '#047857', maxWidth: 440 }}>
+                      Aapne Site-In, Check-In, Check-Out aur Site-Out chaaron steps successfully complete kar liye hain.
+                    </p>
+                    <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+                      <Button variant="primary" icon={RotateCcw} onClick={handleStartNextVisit}>
+                        Start Next Site Visit
+                      </Button>
+                      <Button variant="light" onClick={() => setActiveTab('records')}>
+                        View Field Register
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </form>
+            </div>
+
+            {/* Punch Receipt / Execution Verdict Card */}
+            <div style={{ background: '#ffffff', borderRadius: 14, padding: 24, border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                <h3 style={{ margin: 0, fontSize: '1.15rem', color: 'var(--text-main)' }}>
+                  Real-Time Attendance Receipt
+                </h3>
+                <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>Live Audit</span>
               </div>
-            ) : (
-              <div style={{ textAlign: 'center', padding: '40px 16px', color: 'var(--text-light)' }}>
-                <Compass size={44} style={{ opacity: 0.3, marginBottom: 10 }} />
-                <p style={{ margin: 0, fontSize: '0.88rem' }}>
-                  Punched attendance receipts will appear here with calculated shortfall hours and biometric confidence score.
-                </p>
-              </div>
-            )}
+
+              {punchResult ? (
+                <div
+                  style={{
+                    padding: 16,
+                    borderRadius: 10,
+                    background: 'var(--success-light)',
+                    border: '1px solid var(--success-border)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: 'var(--success)', marginBottom: 10 }}>
+                    <CheckCircle2 size={20} />
+                    {punchResult.mode === 'SITE_IN'
+                      ? 'Step 1: Site-In Confirmed'
+                      : punchResult.mode === 'CHECK_IN'
+                      ? 'Step 2: Field Check-In Confirmed'
+                      : punchResult.mode === 'CHECK_OUT'
+                      ? 'Step 3: Field Check-Out Confirmed'
+                      : 'Step 4: Site-Out Exit Confirmed'}
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: '0.85rem' }}>
+                    <div>Attendance ID: <strong>{punchResult.data?.attendanceId || punchResult.data?._id || 'REC-' + Math.floor(100000 + Math.random() * 900000)}</strong></div>
+                    <div>Timestamp: <strong>{new Date().toLocaleTimeString()}</strong></div>
+                    <div>
+                      Coordinates: <strong>{coords?.latitude?.toFixed(4)}° N, {coords?.longitude?.toFixed(4)}° E</strong>
+                    </div>
+
+                    {punchResult.mode === 'SITE_IN' && (
+                      <div style={{ marginTop: 8, padding: 10, background: '#ffffff', borderRadius: 8, border: '1px solid var(--success-border)' }}>
+                        <div>Site: <strong>{punchResult.site?.name || 'Project Site'}</strong></div>
+                        <div>Task: <strong>{punchResult.site?.taskTitle || 'Field Work'}</strong></div>
+                        <div style={{ color: 'var(--primary)', fontWeight: 600, marginTop: 4 }}>
+                          ➔ Next Step: Proceed to Step 2: Check-In
+                        </div>
+                      </div>
+                    )}
+
+                    {punchResult.mode === 'CHECK_IN' && (
+                      <div style={{ marginTop: 8, padding: 10, background: '#ffffff', borderRadius: 8, border: '1px solid var(--success-border)' }}>
+                        <div>Duty Status: <Badge variant="primary">ACTIVE ON DUTY</Badge></div>
+                        <div>Required Working Hours: <strong>{punchResult.data?.requiredWorkingHours ?? 8} hrs</strong></div>
+                        <div style={{ color: 'var(--primary)', fontWeight: 600, marginTop: 4 }}>
+                          ➔ Next Step: Field duty active. When visit completes, punch Check-Out.
+                        </div>
+                      </div>
+                    )}
+
+                    {punchResult.mode === 'CHECK_OUT' && (
+                      <div style={{ marginTop: 8, padding: 10, background: '#ffffff', borderRadius: 8, border: '1px solid var(--success-border)' }}>
+                        <div>Total Hours Worked: <strong>{punchResult.data?.totalWorkingHours ?? workflowState.workHours} hrs</strong></div>
+                        <div>Shortfall: <strong style={{ color: punchResult.data?.shortfallHours > 0 ? 'var(--danger)' : 'var(--success)' }}>{punchResult.data?.shortfallHours ?? 0} hrs</strong></div>
+                        <div>Overtime: <strong style={{ color: 'var(--success)' }}>+{punchResult.data?.overtimeHours ?? 0} hrs</strong></div>
+                        <div>Final Status: <Badge variant={punchResult.data?.attendanceStatus === 'SHORTFALL' ? 'warning' : 'success'}>{punchResult.data?.attendanceStatus || 'PRESENT'}</Badge></div>
+                        <div style={{ color: '#7c3aed', fontWeight: 600, marginTop: 4 }}>
+                          ➔ Next Step: Proceed to Step 4: Site-Out to exit site.
+                        </div>
+                      </div>
+                    )}
+
+                    {punchResult.mode === 'SITE_OUT' && (
+                      <div style={{ marginTop: 8, padding: 10, background: '#ffffff', borderRadius: 8, border: '1px solid var(--success-border)' }}>
+                        <div>Exit Status: <Badge variant="success">VISIT CONCLUDED</Badge></div>
+                        <div>Photos Uploaded: <strong>{punchResult.data?.photos?.length || 1} photo(s)</strong></div>
+                        <div style={{ color: 'var(--success)', fontWeight: 600, marginTop: 4 }}>
+                          ✓ Full lifecycle complete (Site-In ➔ Check-In ➔ Check-Out ➔ Site-Out).
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', padding: '50px 16px', color: 'var(--text-light)' }}>
+                  <Compass size={48} style={{ opacity: 0.3, marginBottom: 10 }} />
+                  <p style={{ margin: '0 0 6px', fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                    No Punch Submitted Yet
+                  </p>
+                  <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-light)', maxWidth: 280, marginInline: 'auto' }}>
+                    Follow the 4-step sequence: Start with Site-In, then Check-In, then Check-Out, and conclude with Site-Out.
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
