@@ -265,7 +265,7 @@ export const masterApi = {
       const res = await apiClient.get('/roles/permission-catalog');
       return res.data;
     } catch (err) {
-      if (err.response?.status === 403) return { data: null };
+      if (err.response?.status === 403 || err.response?.status === 401) return { data: null };
       throw err;
     }
   },
