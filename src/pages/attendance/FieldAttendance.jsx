@@ -1341,72 +1341,73 @@ export const FieldAttendance = () => {
       {/* TAB 2: FIELD PUNCH CONSOLE (4-STEP WORKFLOW: SITE-IN -> CHECK-IN -> CHECK-OUT -> SITE-OUT) */}
       {activeTab === 'punch' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          {/* Sequential Lifecycle Stepper */}
+          {/* Modern Unified Lifecycle Stepper Bar */}
           <div
             style={{
               background: '#ffffff',
-              borderRadius: 14,
-              padding: '16px 20px',
+              borderRadius: 16,
+              padding: '20px 24px',
               border: '1px solid #e2e8f0',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
+              boxShadow: '0 4px 16px rgba(0,0,0,0.03)',
             }}
           >
+            {/* Top Bar: Title & Status */}
             <div
               style={{
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                marginBottom: 16,
+                marginBottom: 20,
                 flexWrap: 'wrap',
-                gap: 10,
+                gap: 12,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div
                   style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 10,
-                    background: 'var(--primary)',
+                    width: 40,
+                    height: 40,
+                    borderRadius: 12,
+                    background: 'linear-gradient(135deg, var(--primary) 0%, #1e5a62 100%)',
                     color: '#ffffff',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    boxShadow: '0 2px 6px rgba(46,123,133,0.3)',
+                    boxShadow: '0 3px 10px rgba(46,123,133,0.3)',
                   }}
                 >
-                  <Compass size={20} />
+                  <Compass size={22} />
                 </div>
                 <div>
-                  <div style={{ fontSize: '0.96rem', fontWeight: 700, color: 'var(--text-main)' }}>
-                    Field Staff Attendance Lifecycle
+                  <div style={{ fontSize: '1.02rem', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '-0.01em' }}>
+                    Field Attendance Workflow
                   </div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                    Required Rule: 1. Site-In ➔ 2. Check-In (Duty) ➔ 3. Check-Out ➔ 4. Site-Out (Exit)
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    Mandatory Sequence: <strong>1. Site-In</strong> ➔ <strong>2. Check-In</strong> ➔ <strong>3. Check-Out</strong> ➔ <strong>4. Site-Out</strong>
                   </div>
                 </div>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 {workflowState.siteOutDone ? (
-                  <Badge variant="success" style={{ fontSize: '0.82rem', padding: '4px 12px' }}>
-                    ✓ Full Visit Completed
+                  <Badge variant="success" style={{ fontSize: '0.82rem', padding: '6px 14px', borderRadius: 20 }}>
+                    ✓ Full Visit Concluded
                   </Badge>
                 ) : workflowState.dutyCheckedOut ? (
-                  <Badge variant="warning" style={{ fontSize: '0.82rem', padding: '4px 12px' }}>
-                    Step 4: Ready for Site-Out
+                  <Badge variant="warning" style={{ fontSize: '0.82rem', padding: '6px 14px', borderRadius: 20 }}>
+                    ● Step 4 Ready: Site-Out Exit
                   </Badge>
                 ) : workflowState.dutyCheckedIn ? (
-                  <Badge variant="primary" style={{ fontSize: '0.82rem', padding: '4px 12px' }}>
-                    Step 3: Duty Active (Checked-In)
+                  <Badge variant="primary" style={{ fontSize: '0.82rem', padding: '6px 14px', borderRadius: 20 }}>
+                    ● Step 3 Active: On Field Duty
                   </Badge>
                 ) : workflowState.siteInDone ? (
-                  <Badge variant="info" style={{ fontSize: '0.82rem', padding: '4px 12px' }}>
-                    Step 2: Ready for Duty Check-In
+                  <Badge variant="info" style={{ fontSize: '0.82rem', padding: '6px 14px', borderRadius: 20 }}>
+                    ● Step 2 Ready: Duty Check-In
                   </Badge>
                 ) : (
-                  <Badge variant="secondary" style={{ fontSize: '0.82rem', padding: '4px 12px' }}>
-                    Step 1: Site-In Required
+                  <Badge variant="secondary" style={{ fontSize: '0.82rem', padding: '6px 14px', borderRadius: 20 }}>
+                    ● Step 1: Site-In Required
                   </Badge>
                 )}
 
@@ -1418,388 +1419,297 @@ export const FieldAttendance = () => {
               </div>
             </div>
 
-            {/* Stepper Cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 }}>
-              {/* Step 1: Site-In */}
-              <div
-                onClick={() => {
-                  setPunchMode('SITE_IN');
-                  setCapturedPhoto(null);
-                }}
-                style={{
-                  padding: '12px 14px',
-                  borderRadius: 10,
-                  cursor: 'pointer',
-                  border: `2px solid ${
-                    workflowState.siteInDone
-                      ? 'var(--success)'
-                      : punchMode === 'SITE_IN'
-                      ? 'var(--primary)'
-                      : '#e2e8f0'
-                  }`,
-                  background: workflowState.siteInDone
-                    ? 'rgba(16,185,129,0.06)'
-                    : punchMode === 'SITE_IN'
-                    ? 'rgba(46,123,133,0.06)'
-                    : '#f8fafc',
-                  transition: 'all 0.2s',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                    STEP 1
-                  </span>
-                  {workflowState.siteInDone ? (
-                    <Badge variant="success" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>✓ Done</Badge>
-                  ) : (
-                    <Badge variant="primary" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>Required First</Badge>
-                  )}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-main)' }}>
-                  <LogIn size={15} color={workflowState.siteInDone ? 'var(--success)' : 'var(--primary)'} />
-                  <span>1. Site-In (Arrival)</span>
-                </div>
-                <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                  {workflowState.siteInDone && workflowState.siteInTime
-                    ? `Done at ${new Date(workflowState.siteInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-                    : 'Arrive & verify site location'}
-                </div>
-              </div>
+            {/* Connected Horizontal Stepper Flow */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(4, 1fr)',
+                gap: 12,
+                position: 'relative',
+              }}
+            >
+              {[
+                {
+                  id: 'SITE_IN',
+                  stepNum: 1,
+                  title: '1. Site-In',
+                  sub: 'Site Arrival & GPS',
+                  icon: LogIn,
+                  isDone: workflowState.siteInDone,
+                  doneTime: workflowState.siteInTime,
+                  isLocked: false,
+                  isActive: punchMode === 'SITE_IN',
+                  accentColor: 'var(--primary)',
+                },
+                {
+                  id: 'CHECK_IN',
+                  stepNum: 2,
+                  title: '2. Check-In',
+                  sub: 'Duty Biometrics',
+                  icon: CheckCircle2,
+                  isDone: workflowState.dutyCheckedIn,
+                  doneTime: workflowState.checkInTime,
+                  isLocked: !workflowState.siteInDone,
+                  isActive: punchMode === 'CHECK_IN',
+                  accentColor: 'var(--primary)',
+                },
+                {
+                  id: 'CHECK_OUT',
+                  stepNum: 3,
+                  title: '3. Check-Out',
+                  sub: 'Duty End & Hours',
+                  icon: LogOut,
+                  isDone: workflowState.dutyCheckedOut,
+                  doneTime: workflowState.checkOutTime,
+                  isLocked: !workflowState.dutyCheckedIn,
+                  isActive: punchMode === 'CHECK_OUT',
+                  accentColor: 'var(--warning)',
+                },
+                {
+                  id: 'SITE_OUT',
+                  stepNum: 4,
+                  title: '4. Site-Out',
+                  sub: 'Site Exit & Photo',
+                  icon: Navigation,
+                  isDone: workflowState.siteOutDone,
+                  doneTime: workflowState.siteOutTime,
+                  isLocked: (workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut) || !workflowState.siteInDone,
+                  isActive: punchMode === 'SITE_OUT',
+                  accentColor: '#7c3aed',
+                },
+              ].map((step) => {
+                const StepIcon = step.icon;
+                return (
+                  <div
+                    key={step.id}
+                    onClick={() => {
+                      if (step.isLocked) {
+                        if (step.id === 'CHECK_IN') {
+                          showToast('Pehle Step 1: Site-In karein! Tabhi Check-In unlock hoga.', 'warning');
+                        } else if (step.id === 'CHECK_OUT') {
+                          showToast('Pehle Step 2: Check-In karein! Uske baad hi Check-Out unlock hoga.', 'warning');
+                        } else if (step.id === 'SITE_OUT') {
+                          showToast('Pehle Step 3: Check-Out karein! Uske baad hi Site-Out unlock hoga.', 'warning');
+                        }
+                      }
+                      setPunchMode(step.id);
+                      setCapturedPhoto(null);
+                      stopCamera();
+                    }}
+                    style={{
+                      background: step.isActive
+                        ? step.isDone
+                          ? '#f0fdf4'
+                          : '#f0fdfa'
+                        : step.isDone
+                        ? '#fafdfb'
+                        : step.isLocked
+                        ? '#f8fafc'
+                        : '#ffffff',
+                      border: `2px solid ${
+                        step.isActive
+                          ? step.accentColor
+                          : step.isDone
+                          ? '#86efac'
+                          : step.isLocked
+                          ? '#e2e8f0'
+                          : '#cbd5e1'
+                      }`,
+                      borderRadius: 12,
+                      padding: '14px 16px',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      boxShadow: step.isActive
+                        ? `0 4px 14px ${step.id === 'SITE_OUT' ? 'rgba(124,58,237,0.15)' : 'rgba(46,123,133,0.15)'}`
+                        : 'none',
+                      opacity: step.isLocked && !step.isActive ? 0.72 : 1,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      minHeight: 90,
+                    }}
+                  >
+                    {/* Top: Icon + Status Pill */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <div
+                        style={{
+                          width: 30,
+                          height: 30,
+                          borderRadius: '50%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '0.82rem',
+                          fontWeight: 800,
+                          background: step.isDone
+                            ? '#10b981'
+                            : step.isActive
+                            ? step.accentColor
+                            : step.isLocked
+                            ? '#e2e8f0'
+                            : '#f1f5f9',
+                          color: step.isDone || step.isActive ? '#ffffff' : step.isLocked ? '#94a3b8' : 'var(--text-muted)',
+                          boxShadow: step.isActive ? `0 0 0 3px ${step.id === 'SITE_OUT' ? 'rgba(124,58,237,0.2)' : 'rgba(46,123,133,0.2)'}` : 'none',
+                        }}
+                      >
+                        {step.isDone ? <Check size={16} strokeWidth={2.6} /> : step.isLocked ? <Lock size={13} /> : step.stepNum}
+                      </div>
 
-              {/* Step 2: Check-In */}
-              <div
-                onClick={() => {
-                  if (!workflowState.siteInDone) {
-                    showToast('Pehle Site-In karein! Site-In karne ke baad hi Check-In kar sakte hain.', 'warning');
-                  }
-                  setPunchMode('CHECK_IN');
-                  setCapturedPhoto(null);
-                }}
-                style={{
-                  padding: '12px 14px',
-                  borderRadius: 10,
-                  cursor: 'pointer',
-                  border: `2px solid ${
-                    workflowState.dutyCheckedIn
-                      ? 'var(--success)'
-                      : punchMode === 'CHECK_IN'
-                      ? 'var(--primary)'
-                      : '#e2e8f0'
-                  }`,
-                  background: workflowState.dutyCheckedIn
-                    ? 'rgba(16,185,129,0.06)'
-                    : !workflowState.siteInDone
-                    ? '#f1f5f9'
-                    : punchMode === 'CHECK_IN'
-                    ? 'rgba(46,123,133,0.06)'
-                    : '#f8fafc',
-                  opacity: !workflowState.siteInDone ? 0.65 : 1,
-                  transition: 'all 0.2s',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                    STEP 2
-                  </span>
-                  {workflowState.dutyCheckedIn ? (
-                    <Badge variant="success" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>✓ Active</Badge>
-                  ) : !workflowState.siteInDone ? (
-                    <span style={{ fontSize: '0.7rem', color: 'var(--danger)', display: 'inline-flex', alignItems: 'center', gap: 3, fontWeight: 600 }}>
-                      <Lock size={10} /> Locked
-                    </span>
-                  ) : (
-                    <Badge variant="info" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>Ready</Badge>
-                  )}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-main)' }}>
-                  <CheckCircle2 size={15} color={workflowState.dutyCheckedIn ? 'var(--success)' : !workflowState.siteInDone ? '#94a3b8' : 'var(--primary)'} />
-                  <span>2. Check-In (Duty)</span>
-                </div>
-                <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                  {workflowState.dutyCheckedIn && workflowState.checkInTime
-                    ? `Punched at ${new Date(workflowState.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-                    : !workflowState.siteInDone
-                    ? 'Site-In required before Check-In'
-                    : 'Start duty with face verification'}
-                </div>
-              </div>
+                      {step.isDone ? (
+                        <span
+                          style={{
+                            fontSize: '0.7rem',
+                            fontWeight: 700,
+                            color: '#15803d',
+                            background: '#dcfce7',
+                            padding: '2px 8px',
+                            borderRadius: 12,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 3,
+                          }}
+                        >
+                          ✓ Done
+                        </span>
+                      ) : step.isLocked ? (
+                        <span
+                          style={{
+                            fontSize: '0.7rem',
+                            fontWeight: 700,
+                            color: '#dc2626',
+                            background: '#fee2e2',
+                            padding: '2px 8px',
+                            borderRadius: 12,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 3,
+                          }}
+                        >
+                          <Lock size={10} /> Locked
+                        </span>
+                      ) : step.isActive ? (
+                        <span
+                          style={{
+                            fontSize: '0.7rem',
+                            fontWeight: 700,
+                            color: step.accentColor,
+                            background: '#e6f4f6',
+                            padding: '2px 8px',
+                            borderRadius: 12,
+                          }}
+                        >
+                          Active
+                        </span>
+                      ) : (
+                        <span
+                          style={{
+                            fontSize: '0.7rem',
+                            fontWeight: 600,
+                            color: 'var(--text-muted)',
+                            background: '#f1f5f9',
+                            padding: '2px 8px',
+                            borderRadius: 12,
+                          }}
+                        >
+                          Ready
+                        </span>
+                      )}
+                    </div>
 
-              {/* Step 3: Check-Out */}
-              <div
-                onClick={() => {
-                  if (!workflowState.dutyCheckedIn) {
-                    showToast('Pehle Check-In karein! Uske baad hi Check-Out kar sakte hain.', 'warning');
-                  }
-                  setPunchMode('CHECK_OUT');
-                  setCapturedPhoto(null);
-                  stopCamera();
-                }}
-                style={{
-                  padding: '12px 14px',
-                  borderRadius: 10,
-                  cursor: 'pointer',
-                  border: `2px solid ${
-                    workflowState.dutyCheckedOut
-                      ? 'var(--success)'
-                      : punchMode === 'CHECK_OUT'
-                      ? 'var(--warning)'
-                      : '#e2e8f0'
-                  }`,
-                  background: workflowState.dutyCheckedOut
-                    ? 'rgba(16,185,129,0.06)'
-                    : !workflowState.dutyCheckedIn
-                    ? '#f1f5f9'
-                    : punchMode === 'CHECK_OUT'
-                    ? 'rgba(217,119,6,0.06)'
-                    : '#f8fafc',
-                  opacity: !workflowState.dutyCheckedIn ? 0.65 : 1,
-                  transition: 'all 0.2s',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                    STEP 3
-                  </span>
-                  {workflowState.dutyCheckedOut ? (
-                    <Badge variant="success" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>✓ Done</Badge>
-                  ) : !workflowState.dutyCheckedIn ? (
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 3, fontWeight: 600 }}>
-                      <Lock size={10} /> Locked
-                    </span>
-                  ) : (
-                    <Badge variant="warning" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>Ready</Badge>
-                  )}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-main)' }}>
-                  <LogOut size={15} color={workflowState.dutyCheckedOut ? 'var(--success)' : !workflowState.dutyCheckedIn ? '#94a3b8' : 'var(--warning)'} />
-                  <span>3. Check-Out (Duty)</span>
-                </div>
-                <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                  {workflowState.dutyCheckedOut && workflowState.checkOutTime
-                    ? `Punched at ${new Date(workflowState.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-                    : !workflowState.dutyCheckedIn
-                    ? 'Check-In required first'
-                    : 'End field duty & log hours'}
-                </div>
-              </div>
-
-              {/* Step 4: Site-Out */}
-              <div
-                onClick={() => {
-                  if (workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut) {
-                    showToast('Pehle Check-Out karein! Check-Out karne ke baad hi Site-Out ho sakta hai.', 'warning');
-                  } else if (!workflowState.siteInDone) {
-                    showToast('Pehle Site-In karein!', 'warning');
-                  }
-                  setPunchMode('SITE_OUT');
-                  setCapturedPhoto(null);
-                  stopCamera();
-                }}
-                style={{
-                  padding: '12px 14px',
-                  borderRadius: 10,
-                  cursor: 'pointer',
-                  border: `2px solid ${
-                    workflowState.siteOutDone
-                      ? 'var(--success)'
-                      : punchMode === 'SITE_OUT'
-                      ? '#7c3aed'
-                      : '#e2e8f0'
-                  }`,
-                  background: workflowState.siteOutDone
-                    ? 'rgba(16,185,129,0.06)'
-                    : (workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut) || !workflowState.siteInDone
-                    ? '#f1f5f9'
-                    : punchMode === 'SITE_OUT'
-                    ? 'rgba(124,58,237,0.06)'
-                    : '#f8fafc',
-                  opacity: (workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut) || !workflowState.siteInDone ? 0.65 : 1,
-                  transition: 'all 0.2s',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                    STEP 4
-                  </span>
-                  {workflowState.siteOutDone ? (
-                    <Badge variant="success" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>✓ Completed</Badge>
-                  ) : (workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut) || !workflowState.siteInDone ? (
-                    <span style={{ fontSize: '0.7rem', color: 'var(--danger)', display: 'inline-flex', alignItems: 'center', gap: 3, fontWeight: 600 }}>
-                      <Lock size={10} /> Locked
-                    </span>
-                  ) : (
-                    <Badge variant="primary" style={{ fontSize: '0.7rem', padding: '2px 6px' }}>Ready for Exit</Badge>
-                  )}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-main)' }}>
-                  <Navigation size={15} color={workflowState.siteOutDone ? 'var(--success)' : '#7c3aed'} />
-                  <span>4. Site-Out (Exit)</span>
-                </div>
-                <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                  {workflowState.siteOutDone && workflowState.siteOutTime
-                    ? `Exited at ${new Date(workflowState.siteOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-                    : (workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut)
-                    ? 'Check-Out required before Site-Out'
-                    : 'Upload exit photo & conclude visit'}
-                </div>
-              </div>
+                    {/* Step Title & Sub */}
+                    <div>
+                      <div
+                        style={{
+                          fontSize: '0.88rem',
+                          fontWeight: 700,
+                          color: step.isActive ? 'var(--text-main)' : step.isLocked ? '#64748b' : 'var(--text-main)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                        }}
+                      >
+                        <StepIcon
+                          size={15}
+                          color={step.isDone ? '#10b981' : step.isActive ? step.accentColor : step.isLocked ? '#94a3b8' : 'var(--text-muted)'}
+                        />
+                        <span>{step.title}</span>
+                      </div>
+                      <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                        {step.isDone && step.doneTime
+                          ? `Done at ${new Date(step.doneTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                          : step.sub}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
           {/* Form & Receipt Console Grid */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 24 }}>
             {/* Punch Form & Controls */}
-            <div style={{ background: '#ffffff', borderRadius: 14, padding: 24, border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#0f172a' }}>
-                  Field Punch Terminal
-                </h3>
-                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                  Active Mode: <strong>{punchMode}</strong>
-                </span>
-              </div>
-
-              {/* 4 Mode Switcher Buttons */}
+            <div style={{ background: '#ffffff', borderRadius: 16, padding: 24, border: '1px solid #e2e8f0', boxShadow: '0 2px 10px rgba(0,0,0,0.02)' }}>
+              {/* Step Terminal Header */}
               <div
                 style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(4, 1fr)',
-                  gap: 6,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
                   marginBottom: 18,
-                  padding: 4,
-                  background: '#f1f5f9',
-                  borderRadius: 10,
+                  paddingBottom: 14,
+                  borderBottom: '1px solid #f1f5f9',
                 }}
               >
-                {/* 1. Site-In */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPunchMode('SITE_IN');
-                    setCapturedPhoto(null);
-                  }}
-                  style={{
-                    padding: '9px 6px',
-                    borderRadius: 7,
-                    border: 'none',
-                    outline: 'none',
-                    background: punchMode === 'SITE_IN' ? 'var(--primary)' : 'transparent',
-                    color: punchMode === 'SITE_IN' ? '#ffffff' : 'var(--text-muted)',
-                    fontWeight: 600,
-                    fontSize: '0.8rem',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s',
-                    textAlign: 'center',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                  title="Step 1: Site-In"
-                >
-                  {workflowState.siteInDone ? '✓ ' : ''}1. Site-In
-                </button>
-
-                {/* 2. Check-In */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!workflowState.siteInDone) {
-                      showToast('Pehle Site-In karein! Site-In karne ke baad hi Check-In kar sakte hain.', 'warning');
-                    }
-                    setPunchMode('CHECK_IN');
-                    setCapturedPhoto(null);
-                  }}
-                  style={{
-                    padding: '9px 6px',
-                    borderRadius: 7,
-                    border: 'none',
-                    outline: 'none',
-                    background: punchMode === 'CHECK_IN' ? 'var(--primary)' : 'transparent',
-                    color: punchMode === 'CHECK_IN' ? '#ffffff' : !workflowState.siteInDone ? '#94a3b8' : 'var(--text-muted)',
-                    fontWeight: 600,
-                    fontSize: '0.8rem',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s',
-                    textAlign: 'center',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                  title="Step 2: Check-In (Duty Start)"
-                >
-                  {!workflowState.siteInDone && <Lock size={11} style={{ marginRight: 2, verticalAlign: 'middle' }} />}
-                  {workflowState.dutyCheckedIn ? '✓ ' : ''}2. Check-In
-                </button>
-
-                {/* 3. Check-Out */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!workflowState.dutyCheckedIn) {
-                      showToast('Pehle Check-In karein! Uske baad hi Check-Out kar sakte hain.', 'warning');
-                    }
-                    setPunchMode('CHECK_OUT');
-                    setCapturedPhoto(null);
-                    stopCamera();
-                  }}
-                  style={{
-                    padding: '9px 6px',
-                    borderRadius: 7,
-                    border: 'none',
-                    outline: 'none',
-                    background: punchMode === 'CHECK_OUT' ? 'var(--warning)' : 'transparent',
-                    color: punchMode === 'CHECK_OUT' ? '#ffffff' : !workflowState.dutyCheckedIn ? '#94a3b8' : 'var(--text-muted)',
-                    fontWeight: 600,
-                    fontSize: '0.8rem',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s',
-                    textAlign: 'center',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                  title="Step 3: Check-Out (Duty End)"
-                >
-                  {!workflowState.dutyCheckedIn && <Lock size={11} style={{ marginRight: 2, verticalAlign: 'middle' }} />}
-                  {workflowState.dutyCheckedOut ? '✓ ' : ''}3. Check-Out
-                </button>
-
-                {/* 4. Site-Out */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut) {
-                      showToast('Pehle Check-Out karein! Check-Out karne ke baad hi Site-Out ho sakta hai.', 'warning');
-                    } else if (!workflowState.siteInDone) {
-                      showToast('Pehle Site-In karein!', 'warning');
-                    }
-                    setPunchMode('SITE_OUT');
-                    setCapturedPhoto(null);
-                    stopCamera();
-                  }}
-                  style={{
-                    padding: '9px 6px',
-                    borderRadius: 7,
-                    border: 'none',
-                    outline: 'none',
-                    background: punchMode === 'SITE_OUT' ? '#7c3aed' : 'transparent',
-                    color: punchMode === 'SITE_OUT' ? '#ffffff' : (workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut) || !workflowState.siteInDone ? '#94a3b8' : 'var(--text-muted)',
-                    fontWeight: 600,
-                    fontSize: '0.8rem',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s',
-                    textAlign: 'center',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                  title="Step 4: Site-Out (Exit Site)"
-                >
-                  {((workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut) || !workflowState.siteInDone) && (
-                    <Lock size={11} style={{ marginRight: 2, verticalAlign: 'middle' }} />
-                  )}
-                  {workflowState.siteOutDone ? '✓ ' : ''}4. Site-Out
-                </button>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span
+                      style={{
+                        fontSize: '0.74rem',
+                        fontWeight: 800,
+                        textTransform: 'uppercase',
+                        padding: '3px 8px',
+                        borderRadius: 6,
+                        background:
+                          punchMode === 'SITE_IN'
+                            ? 'var(--primary-subtle, #e6f4f6)'
+                            : punchMode === 'CHECK_IN'
+                            ? '#dbeafe'
+                            : punchMode === 'CHECK_OUT'
+                            ? '#fef3c7'
+                            : '#ede9fe',
+                        color:
+                          punchMode === 'SITE_IN'
+                            ? 'var(--primary)'
+                            : punchMode === 'CHECK_IN'
+                            ? '#1d4ed8'
+                            : punchMode === 'CHECK_OUT'
+                            ? '#b45309'
+                            : '#6d28d9',
+                      }}
+                    >
+                      {punchMode === 'SITE_IN'
+                        ? 'Step 1 of 4'
+                        : punchMode === 'CHECK_IN'
+                        ? 'Step 2 of 4'
+                        : punchMode === 'CHECK_OUT'
+                        ? 'Step 3 of 4'
+                        : 'Step 4 of 4'}
+                    </span>
+                    <h3 style={{ margin: 0, fontSize: '1.08rem', color: '#0f172a' }}>
+                      {punchMode === 'SITE_IN' && '1. Project Site Arrival (Site-In)'}
+                      {punchMode === 'CHECK_IN' && '2. Field Duty Check-In'}
+                      {punchMode === 'CHECK_OUT' && '3. Field Duty Check-Out'}
+                      {punchMode === 'SITE_OUT' && '4. Project Site Exit (Site-Out)'}
+                    </h3>
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                    {punchMode === 'SITE_IN' && 'Select your project site and capture your entry face photo.'}
+                    {punchMode === 'CHECK_IN' && 'Verify biometric face and GPS to activate on-duty status.'}
+                    {punchMode === 'CHECK_OUT' && 'Enter visit notes and conclude duty to record work hours.'}
+                    {punchMode === 'SITE_OUT' && 'Upload site departure photo to conclude this site visit.'}
+                  </div>
+                </div>
               </div>
 
               <form onSubmit={handlePunchSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
