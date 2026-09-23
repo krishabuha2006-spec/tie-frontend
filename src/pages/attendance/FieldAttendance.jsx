@@ -147,7 +147,7 @@ export const FieldAttendance = () => {
 
   // Punch Console State
   const [punchEmpId, setPunchEmpId] = useState('');
-  const [punchMode, setPunchMode] = useState('SITE_IN'); // 'SITE_IN' | 'CHECK_IN' | 'CHECK_OUT' | 'SITE_OUT' | 'COMPLETED'
+  const [punchMode, setPunchMode] = useState('CHECK_IN'); // 'CHECK_IN' | 'CHECK_OUT' | 'COMPLETED'
   const [punchRemarks, setPunchRemarks] = useState('');
   const [coords, setCoords] = useState(null);
   const [gettingLocation, setGettingLocation] = useState(false);
@@ -156,21 +156,18 @@ export const FieldAttendance = () => {
   const [submittingPunch, setSubmittingPunch] = useState(false);
   const [punchResult, setPunchResult] = useState(null);
 
-  // Sequential Workflow State (Site-In -> Check-In -> Check-Out -> Site-Out)
+  // Sequential Workflow State (Check-In -> Check-Out)
   const getTodayKey = () => new Date().toISOString().split('T')[0];
   const [workflowState, setWorkflowState] = useState({
-    siteInDone: false,
-    siteInTime: null,
-    activeSite: null,
     dutyCheckedIn: false,
     checkInTime: null,
     dutyCheckedOut: false,
     checkOutTime: null,
-    siteOutDone: false,
-    siteOutTime: null,
     workHours: 0,
     shortfallHours: 0,
     overtimeHours: 0,
+    attendanceStatus: '',
+    site: null,
   });
 
   // Masters & Detection for Site-In & Site-Out
@@ -394,67 +391,46 @@ export const FieldAttendance = () => {
     } catch {}
 
     try {
-      const [siteRes, fieldRes] = await Promise.allSettled([
-        attendanceApi.getEmployeeSiteAttendance(empId, { date: today }),
-        attendanceApi.getEmployeeFieldAttendance(empId, { date: today }),
-      ]);
-
-      const siteList = siteRes.status === 'fulfilled' ? (Array.isArray(siteRes.value) ? siteRes.value : siteRes.value?.records || siteRes.value?.data || []) : [];
-      const fieldList = fieldRes.status === 'fulfilled' ? (Array.isArray(fieldRes.value) ? fieldRes.value : fieldRes.value?.records || fieldRes.value?.data || []) : [];
-
-      const todaySiteRec = siteList.find((r) => (r.attendanceDate && r.attendanceDate.startsWith(today)) || (r.siteInTime && new Date(r.siteInTime).toISOString().startsWith(today)));
-      const todayFieldRec = fieldList.find((r) => (r.attendanceDate && r.attendanceDate.startsWith(today)) || (r.firstCheckInTime && new Date(r.firstCheckInTime).toISOString().startsWith(today)));
-
-      const siteInDone = Boolean(todaySiteRec?.siteInTime || localData?.siteInDone);
-      const siteInTime = todaySiteRec?.siteInTime || localData?.siteInTime;
-      const activeSite = todaySiteRec?.site || localData?.activeSite || (todaySiteRec ? { name: todaySiteRec.site?.name || 'Project Site', address: todaySiteRec.site?.address } : null);
+      const fieldRes = await attendanceApi.getEmployeeFieldAttendance(empId, { date: today });
+      const fieldList = Array.isArray(fieldRes) ? fieldRes : fieldRes?.records || fieldRes?.data || [];
+      const todayFieldRec = fieldList.find(
+        (r) =>
+          (r.attendanceDate && r.attendanceDate.startsWith(today)) ||
+          (r.firstCheckInTime && new Date(r.firstCheckInTime).toISOString().startsWith(today))
+      );
 
       const dutyCheckedIn = Boolean(todayFieldRec?.firstCheckInTime || localData?.dutyCheckedIn);
       const checkInTime = todayFieldRec?.firstCheckInTime || localData?.checkInTime;
-
       const dutyCheckedOut = Boolean(todayFieldRec?.lastCheckOutTime || localData?.dutyCheckedOut);
       const checkOutTime = todayFieldRec?.lastCheckOutTime || localData?.checkOutTime;
 
-      const siteOutDone = Boolean(todaySiteRec?.siteOutTime || localData?.siteOutDone);
-      const siteOutTime = todaySiteRec?.siteOutTime || localData?.siteOutTime;
-
       const merged = {
-        siteInDone,
-        siteInTime,
-        activeSite,
         dutyCheckedIn,
         checkInTime,
         dutyCheckedOut,
         checkOutTime,
-        siteOutDone,
-        siteOutTime,
         workHours: todayFieldRec?.totalWorkingHours ?? localData?.workHours ?? 0,
         shortfallHours: todayFieldRec?.shortfallHours ?? localData?.shortfallHours ?? 0,
         overtimeHours: todayFieldRec?.overtimeHours ?? localData?.overtimeHours ?? 0,
+        attendanceStatus: todayFieldRec?.attendanceStatus || localData?.attendanceStatus || '',
       };
 
       setWorkflowState(merged);
       localStorage.setItem(cacheKey, JSON.stringify(merged));
 
-      if (!merged.siteInDone) {
-        setPunchMode('SITE_IN');
-      } else if (!merged.dutyCheckedIn) {
-        setPunchMode('CHECK_IN');
-      } else if (!merged.dutyCheckedOut) {
+      if (merged.dutyCheckedIn && !merged.dutyCheckedOut) {
         setPunchMode('CHECK_OUT');
-      } else if (!merged.siteOutDone) {
-        setPunchMode('SITE_OUT');
-      } else {
+      } else if (merged.dutyCheckedOut) {
         setPunchMode('COMPLETED');
+      } else {
+        setPunchMode('CHECK_IN');
       }
     } catch {
       if (localData) {
         setWorkflowState(localData);
-        if (!localData.siteInDone) setPunchMode('SITE_IN');
-        else if (!localData.dutyCheckedIn) setPunchMode('CHECK_IN');
-        else if (!localData.dutyCheckedOut) setPunchMode('CHECK_OUT');
-        else if (!localData.siteOutDone) setPunchMode('SITE_OUT');
-        else setPunchMode('COMPLETED');
+        if (localData.dutyCheckedIn && !localData.dutyCheckedOut) setPunchMode('CHECK_OUT');
+        else if (localData.dutyCheckedOut) setPunchMode('COMPLETED');
+        else setPunchMode('CHECK_IN');
       }
     }
   };
@@ -464,25 +440,21 @@ export const FieldAttendance = () => {
     const empId = punchEmpId || user?.employee?._id || user?.employee || 'self';
     const cacheKey = `tie_field_workflow_${empId}_${today}`;
     const reset = {
-      siteInDone: false,
-      siteInTime: null,
-      activeSite: null,
       dutyCheckedIn: false,
       checkInTime: null,
       dutyCheckedOut: false,
       checkOutTime: null,
-      siteOutDone: false,
-      siteOutTime: null,
       workHours: 0,
       shortfallHours: 0,
       overtimeHours: 0,
+      attendanceStatus: '',
     };
     setWorkflowState(reset);
     localStorage.removeItem(cacheKey);
-    setPunchMode('SITE_IN');
+    setPunchMode('CHECK_IN');
     setPunchResult(null);
     setCapturedPhoto(null);
-    showToast('New site visit session initiated. Please Site-In first.', 'info');
+    showToast('Ready for new field duty session. Please Check-In.', 'info');
   };
 
   const detectNearbySites = async (c = coords) => {
@@ -620,7 +592,7 @@ export const FieldAttendance = () => {
     stopCamera();
   };
 
-  // Handle Field Punch Submit (Step 1: Site-In -> Step 2: Check-In -> Step 3: Check-Out -> Step 4: Site-Out)
+  // Handle Field Punch Submit (Check-In & Check-Out)
   const handlePunchSubmit = async (e) => {
     e.preventDefault();
     if (!coords) {
@@ -629,88 +601,9 @@ export const FieldAttendance = () => {
     }
 
     // ----------------------------------------------------
-    // STEP 1: SITE-IN (Arrival at Project / Client Site)
-    // ----------------------------------------------------
-    if (punchMode === 'SITE_IN') {
-      const siteId =
-        selectedCandidateSite?.siteId ||
-        selectedCandidateSite?._id ||
-        detectedSites[0]?.siteId ||
-        detectedSites[0]?._id ||
-        projects[0]?.sites?.[0]?._id;
-
-      if (!siteId && projects.length === 0 && detectedSites.length === 0) {
-        showToast('Please select or detect a project site first', 'warning');
-        return;
-      }
-      if (!capturedPhoto) {
-        showToast('Biometric face capture is required for Site-In gate verification', 'warning');
-        return;
-      }
-
-      setSubmittingPunch(true);
-      setPunchResult(null);
-      try {
-        const taskId = selectedTaskId || selectedCandidateSite?.eligibleTasks?.[0]?._id;
-        const formattedAddress = getAddressStr(
-          selectedCandidateSite?.address,
-          selectedCandidateSite?.name || 'Project Site'
-        );
-
-        const res = await attendanceApi.siteCheckIn({
-          employee: punchEmpId || user?.employee?._id || user?.employee,
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-          gpsAccuracy: coords.gpsAccuracy || 15,
-          capturedImage: capturedPhoto,
-          selectedSiteId: siteId,
-          taskId: taskId,
-          confidenceScore: 0.95,
-          address: formattedAddress,
-          siteInAddress: formattedAddress,
-        });
-
-        const now = new Date().toISOString();
-        const siteObj = {
-          siteId,
-          name: selectedCandidateSite?.name || 'Project Site',
-          address: formattedAddress,
-          taskId,
-          taskTitle: selectedCandidateSite?.eligibleTasks?.find((t) => t._id === taskId)?.title || 'Field Work',
-        };
-
-        updateWorkflow({
-          siteInDone: true,
-          siteInTime: now,
-          activeSite: siteObj,
-        });
-
-        showToast('Site-In recorded successfully! You can now proceed to Check-In.', 'success');
-        setPunchResult({
-          mode: 'SITE_IN',
-          data: res,
-          site: siteObj,
-        });
-        setCapturedPhoto(null);
-        setPunchMode('CHECK_IN');
-      } catch (err) {
-        console.error(err);
-        const errMsg = err.response?.data?.message || 'Site-In verification failed';
-        showToast(errMsg, 'error');
-      } finally {
-        setSubmittingPunch(false);
-      }
-      return;
-    }
-
-    // ----------------------------------------------------
-    // STEP 2: CHECK-IN (Field Duty Start) - LOCKED UNTIL SITE-IN
+    // STEP 1: FIELD CHECK-IN (Duty Start with Biometrics & GPS)
     // ----------------------------------------------------
     if (punchMode === 'CHECK_IN') {
-      if (!workflowState.siteInDone) {
-        showToast('Please complete Site-In first! Check-In is only allowed after completing Site-In.', 'error');
-        return;
-      }
       if (coords.gpsAccuracy > 200) {
         showToast(`GPS accuracy too degraded (${coords.gpsAccuracy}m > 200m threshold). Click 'Fix Precision' or move to an open area.`, 'error');
         return;
@@ -723,32 +616,41 @@ export const FieldAttendance = () => {
       setSubmittingPunch(true);
       setPunchResult(null);
       try {
-        const res = await attendanceApi.fieldCheckIn({
+        const payload = {
           employee: punchEmpId || user?.employee?._id || user?.employee,
           latitude: coords.latitude,
           longitude: coords.longitude,
-          gpsAccuracy: coords.gpsAccuracy,
+          gpsAccuracy: coords.gpsAccuracy || 15,
           capturedImage: capturedPhoto,
-        });
+          confidenceScore: 0.95,
+        };
+
+        const res = await attendanceApi.fieldCheckIn(payload);
 
         const now = new Date().toISOString();
         updateWorkflow({
           dutyCheckedIn: true,
           checkInTime: now,
           dutyCheckedOut: false,
+          site: selectedCandidateSite ? {
+            name: selectedCandidateSite.name,
+            address: getAddressStr(selectedCandidateSite.address, 'Field Location'),
+          } : null,
         });
 
-        showToast('Field check-in recorded successfully with open GPS capture! Duty is active.', 'success');
+        showToast('Field check-in recorded successfully! Duty status is active.', 'success');
         setPunchResult({
           mode: 'CHECK_IN',
-          data: res,
+          data: res?.data || res,
+          timestamp: now,
+          site: selectedCandidateSite,
         });
         setCapturedPhoto(null);
         setPunchMode('CHECK_OUT');
         loadRecords();
       } catch (err) {
         console.error(err);
-        const errMsg = err.response?.data?.message || 'Field attendance check-in failed';
+        const errMsg = err.response?.data?.message || 'Field check-in failed';
         showToast(errMsg, 'error');
       } finally {
         setSubmittingPunch(false);
@@ -757,11 +659,11 @@ export const FieldAttendance = () => {
     }
 
     // ----------------------------------------------------
-    // STEP 3: CHECK-OUT (Field Duty End) - LOCKED UNTIL CHECKED-IN
+    // STEP 2: FIELD CHECK-OUT (Duty End & Hours Calculation)
     // ----------------------------------------------------
     if (punchMode === 'CHECK_OUT') {
       if (!workflowState.dutyCheckedIn) {
-        showToast('Please Check-In first! Check-Out is only allowed after an active Check-In.', 'error');
+        showToast('Please Check-In first before performing Check-Out.', 'error');
         return;
       }
 
@@ -772,93 +674,36 @@ export const FieldAttendance = () => {
           employee: punchEmpId || user?.employee?._id || user?.employee,
           latitude: coords.latitude,
           longitude: coords.longitude,
-          gpsAccuracy: coords.gpsAccuracy,
-          remarks: punchRemarks.trim() || 'Client territory inspection completed',
+          gpsAccuracy: coords.gpsAccuracy || 15,
+          remarks: punchRemarks.trim() || 'Field duties completed',
         });
 
         const now = new Date().toISOString();
+        const data = res?.data || res;
+        const totalHours = data?.totalWorkingHours ?? 8;
+        const shortfall = data?.shortfallHours ?? 0;
+        const overtime = data?.overtimeHours ?? 0;
+
         updateWorkflow({
           dutyCheckedOut: true,
           checkOutTime: now,
-          workHours: res?.totalWorkingHours ?? 8,
-          shortfallHours: res?.shortfallHours ?? 0,
-          overtimeHours: res?.overtimeHours ?? 0,
+          workHours: totalHours,
+          shortfallHours: shortfall,
+          overtimeHours: overtime,
         });
 
-        showToast('Field check-out successful! Shortfall & overtime hours calculated. You can now perform Site-Out.', 'success');
+        showToast('Field check-out successful! Work hours and duty status updated.', 'success');
         setPunchResult({
           mode: 'CHECK_OUT',
-          data: res,
+          data,
+          timestamp: now,
         });
         setPunchRemarks('');
-        setPunchMode('SITE_OUT');
-        loadRecords();
-      } catch (err) {
-        console.error(err);
-        const errMsg = err.response?.data?.message || 'Field attendance check-out failed';
-        showToast(errMsg, 'error');
-      } finally {
-        setSubmittingPunch(false);
-      }
-      return;
-    }
-
-    // ----------------------------------------------------
-    // STEP 4: SITE-OUT (Site Departure) - LOCKED UNTIL CHECK-OUT
-    // ----------------------------------------------------
-    if (punchMode === 'SITE_OUT') {
-      if (workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut) {
-        showToast('Please complete Check-Out first! Site-Out is only allowed after completing Check-Out.', 'error');
-        return;
-      }
-      if (!workflowState.siteInDone) {
-        showToast('Please complete Site-In first! Both Check-Out and Site-Out require a verified Site-In.', 'error');
-        return;
-      }
-      if (siteOutPhotos.length === 0 && !capturedPhoto) {
-        showToast('Mandatory: At least 1 site photograph is required for Site-Out exit', 'warning');
-        return;
-      }
-      if (!siteOutRemarks.trim()) {
-        showToast('Mandatory: Activity remarks are required for Site-Out exit', 'warning');
-        return;
-      }
-
-      setSubmittingPunch(true);
-      setPunchResult(null);
-      try {
-        const allPhotos = [...siteOutPhotos];
-        if (capturedPhoto) allPhotos.push(capturedPhoto);
-
-        const res = await attendanceApi.siteCheckOut({
-          employee: punchEmpId || user?.employee?._id || user?.employee,
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-          gpsAccuracy: coords.gpsAccuracy || 15,
-          photos: allPhotos,
-          remarks: siteOutRemarks.trim(),
-          taskCompleted,
-        });
-
-        const now = new Date().toISOString();
-        updateWorkflow({
-          siteOutDone: true,
-          siteOutTime: now,
-        });
-
-        showToast('Site-Out exit verified and recorded successfully! Visit cycle completed.', 'success');
-        setPunchResult({
-          mode: 'SITE_OUT',
-          data: res,
-        });
-        setCapturedPhoto(null);
-        setSiteOutPhotos([]);
-        setSiteOutRemarks('');
         setPunchMode('COMPLETED');
         loadRecords();
       } catch (err) {
         console.error(err);
-        const errMsg = err.response?.data?.message || 'Site-Out failed';
+        const errMsg = err.response?.data?.message || 'Field check-out failed';
         showToast(errMsg, 'error');
       } finally {
         setSubmittingPunch(false);
@@ -1489,7 +1334,7 @@ export const FieldAttendance = () => {
               boxShadow: '0 4px 16px rgba(0,0,0,0.03)',
             }}
           >
-            {/* Top Bar: Title & Status */}
+            {/* Top Bar: Title & Dynamic Status */}
             <div
               style={{
                 display: 'flex',
@@ -1503,117 +1348,83 @@ export const FieldAttendance = () => {
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div
                   style={{
-                    width: 40,
-                    height: 40,
+                    width: 42,
+                    height: 42,
                     borderRadius: 12,
                     background: 'linear-gradient(135deg, var(--primary) 0%, #1e5a62 100%)',
                     color: '#ffffff',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    boxShadow: '0 3px 10px rgba(46,123,133,0.3)',
+                    boxShadow: '0 3px 10px rgba(46,123,133,0.25)',
                   }}
                 >
                   <Compass size={22} />
                 </div>
                 <div>
-                  <div style={{ fontSize: '1.02rem', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '-0.01em' }}>
-                    Field Attendance Workflow
+                  <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-main)' }}>
+                    Field Duty Attendance
                   </div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                    Mandatory Sequence: <strong>1. Site-In</strong> ➔ <strong>2. Check-In</strong> ➔ <strong>3. Check-Out</strong> ➔ <strong>4. Site-Out</strong>
+                  <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                    Open GPS and biometric verification for field operations
                   </div>
                 </div>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                {workflowState.siteOutDone ? (
-                  <Badge variant="success" style={{ fontSize: '0.82rem', padding: '6px 14px', borderRadius: 20 }}>
-                    ✓ Full Visit Concluded
+                {workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut ? (
+                  <Badge variant="primary" style={{ fontSize: '0.82rem', padding: '6px 14px', borderRadius: 20 }}>
+                    On Duty Active
                   </Badge>
                 ) : workflowState.dutyCheckedOut ? (
-                  <Badge variant="warning" style={{ fontSize: '0.82rem', padding: '6px 14px', borderRadius: 20 }}>
-                    ● Step 4 Ready: Site-Out Exit
-                  </Badge>
-                ) : workflowState.dutyCheckedIn ? (
-                  <Badge variant="primary" style={{ fontSize: '0.82rem', padding: '6px 14px', borderRadius: 20 }}>
-                    ● Step 3 Active: On Field Duty
-                  </Badge>
-                ) : workflowState.siteInDone ? (
-                  <Badge variant="info" style={{ fontSize: '0.82rem', padding: '6px 14px', borderRadius: 20 }}>
-                    ● Step 2 Ready: Duty Check-In
+                  <Badge variant="success" style={{ fontSize: '0.82rem', padding: '6px 14px', borderRadius: 20 }}>
+                    Duty Completed Today
                   </Badge>
                 ) : (
                   <Badge variant="secondary" style={{ fontSize: '0.82rem', padding: '6px 14px', borderRadius: 20 }}>
-                    ● Step 1: Site-In Required
+                    Duty Not Started
                   </Badge>
                 )}
 
-                {workflowState.siteOutDone && (
+                {workflowState.dutyCheckedOut && (
                   <Button size="sm" variant="light" icon={RotateCcw} onClick={handleStartNextVisit} style={{ fontSize: '0.78rem' }}>
-                    Start Next Visit
+                    New Duty Session
                   </Button>
                 )}
               </div>
             </div>
 
-            {/* Connected Horizontal Stepper Flow */}
+            {/* Dynamic 2-Step Duty Workflow Switcher */}
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(4, 1fr)',
-                gap: 12,
+                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                gap: 14,
                 position: 'relative',
               }}
             >
               {[
                 {
-                  id: 'SITE_IN',
-                  stepNum: 1,
-                  title: '1. Site-In',
-                  sub: 'Site Arrival & GPS',
-                  icon: LogIn,
-                  isDone: workflowState.siteInDone,
-                  doneTime: workflowState.siteInTime,
-                  isLocked: false,
-                  isActive: punchMode === 'SITE_IN',
-                  accentColor: 'var(--primary)',
-                },
-                {
                   id: 'CHECK_IN',
-                  stepNum: 2,
-                  title: '2. Check-In',
-                  sub: 'Duty Biometrics',
+                  stepNum: 1,
+                  title: '1. Field Check-In',
+                  sub: 'Biometric Face & GPS Verification',
                   icon: CheckCircle2,
                   isDone: workflowState.dutyCheckedIn,
                   doneTime: workflowState.checkInTime,
-                  isLocked: !workflowState.siteInDone,
                   isActive: punchMode === 'CHECK_IN',
                   accentColor: 'var(--primary)',
                 },
                 {
                   id: 'CHECK_OUT',
-                  stepNum: 3,
-                  title: '3. Check-Out',
-                  sub: 'Duty End & Hours',
+                  stepNum: 2,
+                  title: '2. Field Check-Out',
+                  sub: 'Duty Conclude & Work Hours',
                   icon: LogOut,
                   isDone: workflowState.dutyCheckedOut,
                   doneTime: workflowState.checkOutTime,
-                  isLocked: !workflowState.dutyCheckedIn,
                   isActive: punchMode === 'CHECK_OUT',
                   accentColor: 'var(--warning)',
-                },
-                {
-                  id: 'SITE_OUT',
-                  stepNum: 4,
-                  title: '4. Site-Out',
-                  sub: 'Site Exit & Photo',
-                  icon: Navigation,
-                  isDone: workflowState.siteOutDone,
-                  doneTime: workflowState.siteOutTime,
-                  isLocked: (workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut) || !workflowState.siteInDone,
-                  isActive: punchMode === 'SITE_OUT',
-                  accentColor: '#7c3aed',
                 },
               ].map((step) => {
                 const StepIcon = step.icon;
@@ -1621,15 +1432,6 @@ export const FieldAttendance = () => {
                   <div
                     key={step.id}
                     onClick={() => {
-                      if (step.isLocked) {
-                        if (step.id === 'CHECK_IN') {
-                          showToast('Please complete Step 1: Site-In first to unlock Check-In.', 'warning');
-                        } else if (step.id === 'CHECK_OUT') {
-                          showToast('Please complete Step 2: Check-In first to unlock Check-Out.', 'warning');
-                        } else if (step.id === 'SITE_OUT') {
-                          showToast('Please complete Step 3: Check-Out first to unlock Site-Out.', 'warning');
-                        }
-                      }
                       setPunchMode(step.id);
                       setCapturedPhoto(null);
                       stopCamera();
@@ -1641,111 +1443,84 @@ export const FieldAttendance = () => {
                           : '#f0fdfa'
                         : step.isDone
                         ? '#fafdfb'
-                        : step.isLocked
-                        ? '#f8fafc'
                         : '#ffffff',
                       border: `2px solid ${
                         step.isActive
                           ? step.accentColor
                           : step.isDone
                           ? '#86efac'
-                          : step.isLocked
-                          ? '#e2e8f0'
                           : '#cbd5e1'
                       }`,
                       borderRadius: 12,
-                      padding: '14px 16px',
+                      padding: '16px 18px',
                       cursor: 'pointer',
                       transition: 'all 0.2s ease',
                       boxShadow: step.isActive
-                        ? `0 4px 14px ${step.id === 'SITE_OUT' ? 'rgba(124,58,237,0.15)' : 'rgba(46,123,133,0.15)'}`
+                        ? '0 4px 14px rgba(46,123,133,0.15)'
                         : 'none',
-                      opacity: step.isLocked && !step.isActive ? 0.72 : 1,
                       display: 'flex',
                       flexDirection: 'column',
                       justifyContent: 'space-between',
-                      minHeight: 90,
+                      minHeight: 88,
                     }}
                   >
-                    {/* Top: Icon + Status Pill */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                       <div
                         style={{
-                          width: 30,
-                          height: 30,
+                          width: 32,
+                          height: 32,
                           borderRadius: '50%',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          fontSize: '0.82rem',
+                          fontSize: '0.85rem',
                           fontWeight: 800,
                           background: step.isDone
                             ? '#10b981'
                             : step.isActive
                             ? step.accentColor
-                            : step.isLocked
-                            ? '#e2e8f0'
                             : '#f1f5f9',
-                          color: step.isDone || step.isActive ? '#ffffff' : step.isLocked ? '#94a3b8' : 'var(--text-muted)',
-                          boxShadow: step.isActive ? `0 0 0 3px ${step.id === 'SITE_OUT' ? 'rgba(124,58,237,0.2)' : 'rgba(46,123,133,0.2)'}` : 'none',
+                          color: step.isDone || step.isActive ? '#ffffff' : 'var(--text-muted)',
+                          boxShadow: step.isActive ? '0 0 0 3px rgba(46,123,133,0.2)' : 'none',
                         }}
                       >
-                        {step.isDone ? <Check size={16} strokeWidth={2.6} /> : step.isLocked ? <Lock size={13} /> : step.stepNum}
+                        {step.isDone ? <Check size={16} strokeWidth={2.6} /> : step.stepNum}
                       </div>
 
                       {step.isDone ? (
                         <span
                           style={{
-                            fontSize: '0.7rem',
+                            fontSize: '0.74rem',
                             fontWeight: 700,
                             color: '#15803d',
                             background: '#dcfce7',
-                            padding: '2px 8px',
+                            padding: '3px 10px',
                             borderRadius: 12,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 3,
                           }}
                         >
-                          ✓ Done
-                        </span>
-                      ) : step.isLocked ? (
-                        <span
-                          style={{
-                            fontSize: '0.7rem',
-                            fontWeight: 700,
-                            color: '#dc2626',
-                            background: '#fee2e2',
-                            padding: '2px 8px',
-                            borderRadius: 12,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 3,
-                          }}
-                        >
-                          <Lock size={10} /> Locked
+                          Completed
                         </span>
                       ) : step.isActive ? (
                         <span
                           style={{
-                            fontSize: '0.7rem',
+                            fontSize: '0.74rem',
                             fontWeight: 700,
                             color: step.accentColor,
                             background: '#e6f4f6',
-                            padding: '2px 8px',
+                            padding: '3px 10px',
                             borderRadius: 12,
                           }}
                         >
-                          Active
+                          Active Step
                         </span>
                       ) : (
                         <span
                           style={{
-                            fontSize: '0.7rem',
+                            fontSize: '0.74rem',
                             fontWeight: 600,
                             color: 'var(--text-muted)',
                             background: '#f1f5f9',
-                            padding: '2px 8px',
+                            padding: '3px 10px',
                             borderRadius: 12,
                           }}
                         >
@@ -1754,27 +1529,26 @@ export const FieldAttendance = () => {
                       )}
                     </div>
 
-                    {/* Step Title & Sub */}
                     <div>
                       <div
                         style={{
-                          fontSize: '0.88rem',
+                          fontSize: '0.94rem',
                           fontWeight: 700,
-                          color: step.isActive ? 'var(--text-main)' : step.isLocked ? '#64748b' : 'var(--text-main)',
+                          color: 'var(--text-main)',
                           display: 'flex',
                           alignItems: 'center',
                           gap: 6,
                         }}
                       >
                         <StepIcon
-                          size={15}
-                          color={step.isDone ? '#10b981' : step.isActive ? step.accentColor : step.isLocked ? '#94a3b8' : 'var(--text-muted)'}
+                          size={16}
+                          color={step.isDone ? '#10b981' : step.isActive ? step.accentColor : 'var(--text-muted)'}
                         />
                         <span>{step.title}</span>
                       </div>
-                      <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                      <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 3 }}>
                         {step.isDone && step.doneTime
-                          ? `Done at ${new Date(step.doneTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                          ? `Recorded at ${new Date(step.doneTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
                           : step.sub}
                       </div>
                     </div>
@@ -1809,43 +1583,31 @@ export const FieldAttendance = () => {
                         padding: '3px 8px',
                         borderRadius: 6,
                         background:
-                          punchMode === 'SITE_IN'
-                            ? 'var(--primary-subtle, #e6f4f6)'
-                            : punchMode === 'CHECK_IN'
-                            ? '#dbeafe'
+                          punchMode === 'CHECK_IN'
+                            ? '#e6f4f6'
                             : punchMode === 'CHECK_OUT'
                             ? '#fef3c7'
-                            : '#ede9fe',
+                            : '#dcfce7',
                         color:
-                          punchMode === 'SITE_IN'
+                          punchMode === 'CHECK_IN'
                             ? 'var(--primary)'
-                            : punchMode === 'CHECK_IN'
-                            ? '#1d4ed8'
                             : punchMode === 'CHECK_OUT'
                             ? '#b45309'
-                            : '#6d28d9',
+                            : '#15803d',
                       }}
                     >
-                      {punchMode === 'SITE_IN'
-                        ? 'Step 1 of 4'
-                        : punchMode === 'CHECK_IN'
-                        ? 'Step 2 of 4'
-                        : punchMode === 'CHECK_OUT'
-                        ? 'Step 3 of 4'
-                        : 'Step 4 of 4'}
+                      {punchMode === 'CHECK_IN' ? 'Step 1 of 2' : punchMode === 'CHECK_OUT' ? 'Step 2 of 2' : 'Duty Completed'}
                     </span>
                     <h3 style={{ margin: 0, fontSize: '1.08rem', color: '#0f172a' }}>
-                      {punchMode === 'SITE_IN' && '1. Project Site Arrival (Site-In)'}
-                      {punchMode === 'CHECK_IN' && '2. Field Duty Check-In'}
-                      {punchMode === 'CHECK_OUT' && '3. Field Duty Check-Out'}
-                      {punchMode === 'SITE_OUT' && '4. Project Site Exit (Site-Out)'}
+                      {punchMode === 'CHECK_IN' && '1. Field Duty Check-In'}
+                      {punchMode === 'CHECK_OUT' && '2. Field Duty Check-Out'}
+                      {punchMode === 'COMPLETED' && 'Field Duty Session Completed'}
                     </h3>
                   </div>
                   <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                    {punchMode === 'SITE_IN' && 'Select your project site and capture your entry face photo.'}
-                    {punchMode === 'CHECK_IN' && 'Verify biometric face and GPS to activate on-duty status.'}
+                    {punchMode === 'CHECK_IN' && 'Verify biometric face and open GPS to activate duty status.'}
                     {punchMode === 'CHECK_OUT' && 'Enter visit notes and conclude duty to record work hours.'}
-                    {punchMode === 'SITE_OUT' && 'Upload site departure photo to conclude this site visit.'}
+                    {punchMode === 'COMPLETED' && 'All duties for today are successfully recorded.'}
                   </div>
                 </div>
               </div>
@@ -1930,40 +1692,39 @@ export const FieldAttendance = () => {
                 </div>
 
                 {/* ---------------------------------------------------- */}
-                {/* VIEW 1: STEP 1 - SITE-IN (Arrival at Site) */}
+                {/* VIEW 1: FIELD CHECK-IN */}
                 {/* ---------------------------------------------------- */}
-                {punchMode === 'SITE_IN' && (
+                {punchMode === 'CHECK_IN' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                    {workflowState.siteInDone ? (
+                    {workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut ? (
                       <div style={{ padding: 14, borderRadius: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', display: 'flex', flexDirection: 'column', gap: 6 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, color: '#166534', fontSize: '0.9rem' }}>
-                          <CheckCircle2 size={16} /> Site-In Active for this Session
+                          <CheckCircle2 size={16} /> Field Duty Active (Already Checked-In)
                         </div>
                         <div style={{ fontSize: '0.82rem', color: '#15803d' }}>
-                          Verified at <strong>{workflowState.activeSite?.name || 'Project Site'}</strong> on{' '}
-                          <strong>{workflowState.siteInTime ? new Date(workflowState.siteInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</strong>.
+                          Checked in at <strong>{workflowState.checkInTime ? new Date(workflowState.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</strong>. When field work completes, proceed to Check-Out.
                         </div>
                         <Button
                           type="button"
-                          variant="primary"
+                          variant="warning"
                           icon={ArrowRight}
-                          onClick={() => setPunchMode('CHECK_IN')}
+                          onClick={() => setPunchMode('CHECK_OUT')}
                           style={{ alignSelf: 'flex-start', marginTop: 6, fontSize: '0.82rem', padding: '6px 14px' }}
                         >
-                          Proceed to Step 2: Check-In
+                          Proceed to Field Check-Out
                         </Button>
                       </div>
                     ) : (
                       <>
-                        {/* Site Detection & Selection */}
+                        {/* Optional Project / Site Selection */}
                         <div style={{ padding: 14, borderRadius: 10, background: 'var(--bg-subtle)', border: '1px solid var(--border-color)' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                             <span style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: 6 }}>
                               <HardHat size={16} color="var(--primary)" />
-                              Select Project / Client Site:
+                              Assigned Project / Client Site (Optional):
                             </span>
                             <Button size="sm" variant="light" icon={Navigation} onClick={() => detectNearbySites()} loading={detectingSites} style={{ fontSize: '0.74rem' }}>
-                              Scan 500m Sites
+                              Scan Nearby Sites
                             </Button>
                           </div>
 
@@ -2004,22 +1765,22 @@ export const FieldAttendance = () => {
                                 color: 'var(--text-main)',
                               }}
                             >
-                              <option value="">-- Choose Registered Project Site --</option>
+                              <option value="">-- Choose Registered Project Site (Or Open Field) --</option>
                               {detectedSites.length > 0 && (
-                                <optgroup label="📍 GPS Detected Nearby Sites (Within 500m)">
+                                <optgroup label="[Nearby] GPS Detected Sites (Within 500m)">
                                   {detectedSites.map((s) => (
                                     <option key={`detected-${s.siteId || s._id}`} value={s.siteId || s._id}>
-                                      📡 {s.name} ({getAddressStr(s.address, 'Nearby 500m')})
+                                      {s.name} ({getAddressStr(s.address, 'Nearby 500m')})
                                     </option>
                                   ))}
                                 </optgroup>
                               )}
                               {projects.map((p) => (
-                                <optgroup key={p._id} label={`🏢 Project: ${p.name} (${p.code || 'ACTIVE'})`}>
+                                <optgroup key={p._id} label={`Project: ${p.name} (${p.code || 'ACTIVE'})`}>
                                   {p.sites && p.sites.length > 0 ? (
                                     p.sites.map((s) => (
                                       <option key={`site-${s._id || s.siteId}`} value={s._id || s.siteId}>
-                                        📍 {s.name} - {getAddressStr(s.address, 'Project Location')}
+                                        {s.name} - {getAddressStr(s.address, 'Project Location')}
                                       </option>
                                     ))
                                   ) : (
@@ -2031,8 +1792,8 @@ export const FieldAttendance = () => {
                             <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 5, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <span>
                                 {detectedSites.length > 0
-                                  ? `✨ Found ${detectedSites.length} site(s) within 500m GPS scan.`
-                                  : 'Tip: 0 sites within 500m GPS scan. Select your designated project site from master list.'}
+                                  ? `Found ${detectedSites.length} site(s) within 500m GPS scan.`
+                                  : 'Select registered project site or proceed with open GPS.'}
                               </span>
                               {selectedCandidateSite && (
                                 <span style={{ color: 'var(--primary)', fontWeight: 600 }}>
@@ -2045,16 +1806,17 @@ export const FieldAttendance = () => {
                           {/* Task linking */}
                           <div>
                             <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 4 }}>
-                              Assigned Task Link:
+                              Assigned Task:
                             </label>
                             <select
                               value={selectedTaskId}
                               onChange={(e) => setSelectedTaskId(e.target.value)}
                               style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: '0.84rem', background: 'var(--bg-surface)', color: 'var(--text-main)' }}
                             >
+                              <option value="">-- General Field Duty --</option>
                               {((selectedCandidateSite?.eligibleTasks?.length > 0) ? selectedCandidateSite.eligibleTasks : tasks).map((t) => (
                                 <option key={t._id || t.id} value={t._id || t.id}>
-                                  📋 {t.taskName || t.title || 'Site Task'} ({t.status || 'ASSIGNED'})
+                                  {t.taskName || t.title || 'Site Task'} ({t.status || 'ASSIGNED'})
                                 </option>
                               ))}
                             </select>
@@ -2066,145 +1828,7 @@ export const FieldAttendance = () => {
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-main)' }}>
                               <Camera size={16} color="var(--primary)" />
-                              Biometric Face Verification Gate (Site-In):
-                            </div>
-                            {!cameraActive && !capturedPhoto && (
-                              <Button size="sm" variant="primary" icon={Camera} onClick={startCamera}>
-                                Start Camera
-                              </Button>
-                            )}
-                          </div>
-
-                          {cameraActive && (
-                            <div style={{ textAlign: 'center' }}>
-                              <video
-                                ref={videoRef}
-                                autoPlay
-                                playsInline
-                                muted
-                                style={{ width: '100%', maxHeight: 220, borderRadius: 8, background: '#000' }}
-                              />
-                              <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 10 }}>
-                                <Button size="sm" variant="success" icon={Check} onClick={captureFrame}>
-                                  Capture Biometric Photo
-                                </Button>
-                                <Button size="sm" variant="light" icon={X} onClick={stopCamera}>
-                                  Cancel
-                                </Button>
-                              </div>
-                            </div>
-                          )}
-
-                          {capturedPhoto && (
-                            <div style={{ textAlign: 'center' }}>
-                              <img
-                                src={capturedPhoto}
-                                alt="Biometric Capture"
-                                style={{ width: 130, height: 130, objectFit: 'cover', borderRadius: 8, border: '2px solid var(--primary)' }}
-                              />
-                              <div style={{ fontSize: '0.76rem', color: 'var(--primary)', fontWeight: 600, marginTop: 4, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                                <CheckCircle2 size={13} />
-                                <span>Biometric Frame Captured</span>
-                              </div>
-                              <Button
-                                size="sm"
-                                variant="light"
-                                onClick={() => {
-                                  setCapturedPhoto(null);
-                                  startCamera();
-                                }}
-                                style={{ fontSize: '0.74rem', marginTop: 6 }}
-                              >
-                                Retake Photo
-                              </Button>
-                            </div>
-                          )}
-
-                          <canvas ref={canvasRef} style={{ display: 'none' }} />
-                        </div>
-
-                        <Button
-                          type="submit"
-                          variant="primary"
-                          icon={LogIn}
-                          loading={submittingPunch}
-                          style={{ padding: '12px', fontSize: '0.94rem', fontWeight: 700 }}
-                        >
-                          Confirm Biometric Site-In (Step 1)
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                )}
-
-                {/* ---------------------------------------------------- */}
-                {/* VIEW 2: STEP 2 - CHECK-IN (Field Duty Start) */}
-                {/* ---------------------------------------------------- */}
-                {punchMode === 'CHECK_IN' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                    {/* STRICT LOCK CHECK: Complete Site-In First */}
-                    {!workflowState.siteInDone ? (
-                      <div
-                        style={{
-                          padding: '24px 18px',
-                          borderRadius: 12,
-                          background: '#fffbeb',
-                          border: '1px solid #fde68a',
-                          textAlign: 'center',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          gap: 10,
-                        }}
-                      >
-                        <Lock size={34} color="#d97706" />
-                        <div style={{ fontWeight: 800, fontSize: '1.05rem', color: '#92400e' }}>
-                          Step 2: Check-In is Locked
-                        </div>
-                        <p style={{ margin: 0, fontSize: '0.86rem', color: '#b45309', maxWidth: 420 }}>
-                          Field attendance requirement: <strong>Please perform Site-In first!</strong> Check-In will unlock automatically after your site arrival is verified.
-                        </p>
-                        <Button
-                          type="button"
-                          variant="primary"
-                          icon={LogIn}
-                          onClick={() => setPunchMode('SITE_IN')}
-                          style={{ marginTop: 6, fontWeight: 700 }}
-                        >
-                          Go to Step 1: Site-In
-                        </Button>
-                      </div>
-                    ) : workflowState.dutyCheckedIn ? (
-                      <div style={{ padding: 14, borderRadius: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, color: '#166534', fontSize: '0.9rem' }}>
-                          <CheckCircle2 size={16} /> Duty Active (Already Checked-In)
-                        </div>
-                        <div style={{ fontSize: '0.82rem', color: '#15803d' }}>
-                          Punched in at <strong>{workflowState.checkInTime ? new Date(workflowState.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</strong>. When field work completes, proceed to Check-Out.
-                        </div>
-                        <Button
-                          type="button"
-                          variant="warning"
-                          icon={ArrowRight}
-                          onClick={() => setPunchMode('CHECK_OUT')}
-                          style={{ alignSelf: 'flex-start', marginTop: 6, fontSize: '0.82rem', padding: '6px 14px' }}
-                        >
-                          Proceed to Step 3: Check-Out
-                        </Button>
-                      </div>
-                    ) : (
-                      <>
-                        <div style={{ padding: '10px 14px', borderRadius: 8, background: '#f0fdf4', border: '1px solid #bbf7d0', fontSize: '0.82rem', color: '#166534', display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <CheckCircle2 size={15} />
-                          <span>Site-In Verified: <strong>{workflowState.activeSite?.name || 'Project Site'}</strong></span>
-                        </div>
-
-                        {/* Biometric Face Verification Gate for Duty Check-in */}
-                        <div style={{ border: '1px solid var(--border-color)', borderRadius: 10, padding: 14, background: 'var(--bg-subtle)' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-main)' }}>
-                              <Camera size={16} color="var(--primary)" />
-                              Biometric Face Verification (Duty Check-In):
+                              Biometric Face Verification (Check-In Photo):
                             </div>
                             {!cameraActive && !capturedPhoto && (
                               <Button size="sm" variant="primary" icon={Camera} onClick={startCamera}>
@@ -2268,7 +1892,7 @@ export const FieldAttendance = () => {
                           loading={submittingPunch}
                           style={{ padding: '12px', fontSize: '0.94rem', fontWeight: 700 }}
                         >
-                          Confirm Biometric Field Check-In (Step 2)
+                          Confirm Field Check-In
                         </Button>
                       </>
                     )}
@@ -2276,7 +1900,7 @@ export const FieldAttendance = () => {
                 )}
 
                 {/* ---------------------------------------------------- */}
-                {/* VIEW 3: STEP 3 - CHECK-OUT (Field Duty End) */}
+                {/* VIEW 2: FIELD CHECK-OUT */}
                 {/* ---------------------------------------------------- */}
                 {punchMode === 'CHECK_OUT' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -2285,8 +1909,8 @@ export const FieldAttendance = () => {
                         style={{
                           padding: '24px 18px',
                           borderRadius: 12,
-                          background: '#f8fafc',
-                          border: '1px solid #cbd5e1',
+                          background: '#eff6ff',
+                          border: '1px solid #bfdbfe',
                           textAlign: 'center',
                           display: 'flex',
                           flexDirection: 'column',
@@ -2294,12 +1918,12 @@ export const FieldAttendance = () => {
                           gap: 10,
                         }}
                       >
-                        <Lock size={34} color="#64748b" />
-                        <div style={{ fontWeight: 800, fontSize: '1.05rem', color: '#334155' }}>
-                          Step 3: Check-Out is Locked
+                        <Clock size={34} color="#1d4ed8" />
+                        <div style={{ fontWeight: 800, fontSize: '1.05rem', color: '#1e40af' }}>
+                          Check-In Required First
                         </div>
-                        <p style={{ margin: 0, fontSize: '0.86rem', color: '#64748b', maxWidth: 420 }}>
-                          You have not checked in for duty yet. Please complete <strong>Step 2: Check-In</strong> first to activate duty.
+                        <p style={{ margin: 0, fontSize: '0.86rem', color: '#2563eb', maxWidth: 420 }}>
+                          You have not recorded a Check-In for duty yet. Please complete <strong>Field Check-In</strong> first to activate your duty timer.
                         </p>
                         <Button
                           type="button"
@@ -2308,7 +1932,7 @@ export const FieldAttendance = () => {
                           onClick={() => setPunchMode('CHECK_IN')}
                           style={{ marginTop: 6 }}
                         >
-                          Go to Step 2: Check-In
+                          Go to Field Check-In
                         </Button>
                       </div>
                     ) : workflowState.dutyCheckedOut ? (
@@ -2322,11 +1946,11 @@ export const FieldAttendance = () => {
                         <Button
                           type="button"
                           variant="primary"
-                          icon={ArrowRight}
-                          onClick={() => setPunchMode('SITE_OUT')}
+                          icon={RotateCcw}
+                          onClick={handleStartNextVisit}
                           style={{ alignSelf: 'flex-start', marginTop: 6, fontSize: '0.82rem', padding: '6px 14px' }}
                         >
-                          Proceed to Step 4: Site-Out
+                          Start New Duty Session
                         </Button>
                       </div>
                     ) : (
@@ -2344,7 +1968,7 @@ export const FieldAttendance = () => {
                             rows={3}
                             value={punchRemarks}
                             onChange={(e) => setPunchRemarks(e.target.value)}
-                            placeholder="e.g. Completed client audit and territory inspection"
+                            placeholder="e.g. Completed client inspection, territory audit, and project coordination"
                             style={{
                               width: '100%',
                               padding: '10px 12px',
@@ -2364,7 +1988,7 @@ export const FieldAttendance = () => {
                           loading={submittingPunch}
                           style={{ padding: '12px', fontSize: '0.94rem', fontWeight: 700 }}
                         >
-                          Confirm Field Check-Out (Step 3)
+                          Confirm Field Check-Out
                         </Button>
                       </>
                     )}
@@ -2372,254 +1996,7 @@ export const FieldAttendance = () => {
                 )}
 
                 {/* ---------------------------------------------------- */}
-                {/* VIEW 4: STEP 4 - SITE-OUT (Site Departure & Evidence) */}
-                {/* ---------------------------------------------------- */}
-                {punchMode === 'SITE_OUT' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                    {/* STRICT LOCK CHECK: Complete Check-Out First */}
-                    {workflowState.dutyCheckedIn && !workflowState.dutyCheckedOut ? (
-                      <div
-                        style={{
-                          padding: '24px 18px',
-                          borderRadius: 12,
-                          background: '#fef2f2',
-                          border: '1px solid #fecaca',
-                          textAlign: 'center',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          gap: 10,
-                        }}
-                      >
-                        <Lock size={34} color="#dc2626" />
-                        <div style={{ fontWeight: 800, fontSize: '1.05rem', color: '#991b1b' }}>
-                          Step 4: Site-Out is Locked
-                        </div>
-                        <p style={{ margin: 0, fontSize: '0.86rem', color: '#b91c1c', maxWidth: 420 }}>
-                          Field duty is currently active. <strong>Site-Out is only permitted after duty Check-Out!</strong> Please complete Step 3: Check-Out first.
-                        </p>
-                        <Button
-                          type="button"
-                          variant="warning"
-                          icon={LogOut}
-                          onClick={() => setPunchMode('CHECK_OUT')}
-                          style={{ marginTop: 6, fontWeight: 700 }}
-                        >
-                          Go to Step 3: Check-Out
-                        </Button>
-                      </div>
-                    ) : !workflowState.siteInDone ? (
-                      <div
-                        style={{
-                          padding: '24px 18px',
-                          borderRadius: 12,
-                          background: '#f8fafc',
-                          border: '1px solid #cbd5e1',
-                          textAlign: 'center',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          gap: 10,
-                        }}
-                      >
-                        <Lock size={34} color="#64748b" />
-                        <div style={{ fontWeight: 800, fontSize: '1.05rem', color: '#334155' }}>
-                          Site-Out Unavailable
-                        </div>
-                        <p style={{ margin: 0, fontSize: '0.86rem', color: '#64748b', maxWidth: 420 }}>
-                          You have not performed <strong>Site-In</strong> yet. Please complete Step 1: Site-In first.
-                        </p>
-                        <Button
-                          type="button"
-                          variant="primary"
-                          icon={LogIn}
-                          onClick={() => setPunchMode('SITE_IN')}
-                          style={{ marginTop: 6 }}
-                        >
-                          Go to Step 1: Site-In
-                        </Button>
-                      </div>
-                    ) : workflowState.siteOutDone ? (
-                      <div style={{ padding: 14, borderRadius: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, color: '#166534', fontSize: '0.9rem' }}>
-                          <CheckCircle2 size={16} /> Site Visit Concluded (Site-Out Completed)
-                        </div>
-                        <div style={{ fontSize: '0.82rem', color: '#15803d' }}>
-                          Site-Out recorded at <strong>{workflowState.siteOutTime ? new Date(workflowState.siteOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</strong>.
-                        </div>
-                        <Button
-                          type="button"
-                          variant="primary"
-                          icon={RotateCcw}
-                          onClick={handleStartNextVisit}
-                          style={{ alignSelf: 'flex-start', marginTop: 6, fontSize: '0.82rem', padding: '6px 14px' }}
-                        >
-                          Start Next Site Visit
-                        </Button>
-                      </div>
-                    ) : (
-                      <>
-                        <div style={{ padding: '10px 14px', borderRadius: 8, background: '#f0fdf4', border: '1px solid #bbf7d0', fontSize: '0.82rem', color: '#166534', display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <CheckCircle2 size={15} />
-                          <span>Duty Check-Out Verified. Ready for Site Departure Evidence.</span>
-                        </div>
-
-                        {/* Exit Photo Evidence */}
-                        <div style={{ border: '1px solid var(--border-color)', borderRadius: 10, padding: 14, background: 'var(--bg-subtle)' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-main)' }}>
-                              <ImageIcon size={16} color="var(--primary)" />
-                              Mandatory Exit Photograph (Site Evidence):
-                            </div>
-                            {!cameraActive && !capturedPhoto && (
-                              <Button size="sm" variant="primary" icon={Camera} onClick={startCamera}>
-                                Take Photo
-                              </Button>
-                            )}
-                          </div>
-
-                          {cameraActive && (
-                            <div style={{ textAlign: 'center' }}>
-                              <video
-                                ref={videoRef}
-                                autoPlay
-                                playsInline
-                                muted
-                                style={{ width: '100%', maxHeight: 220, borderRadius: 8, background: '#000' }}
-                              />
-                              <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 10 }}>
-                                <Button size="sm" variant="success" icon={Check} onClick={captureFrame}>
-                                  Capture Exit Photo
-                                </Button>
-                                <Button size="sm" variant="light" icon={X} onClick={stopCamera}>
-                                  Cancel
-                                </Button>
-                              </div>
-                            </div>
-                          )}
-
-                          {capturedPhoto && (
-                            <div style={{ textAlign: 'center', marginBottom: 10 }}>
-                              <img
-                                src={capturedPhoto}
-                                alt="Exit Photo"
-                                style={{ width: 130, height: 130, objectFit: 'cover', borderRadius: 8, border: '2px solid var(--success)' }}
-                              />
-                              <div style={{ fontSize: '0.76rem', color: 'var(--success)', fontWeight: 600, marginTop: 4, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                                <CheckCircle2 size={13} />
-                                <span>Exit Photo Attached</span>
-                              </div>
-                              <Button
-                                size="sm"
-                                variant="light"
-                                onClick={() => {
-                                  setCapturedPhoto(null);
-                                  startCamera();
-                                }}
-                                style={{ fontSize: '0.74rem', marginTop: 6 }}
-                              >
-                                Retake
-                              </Button>
-                            </div>
-                          )}
-
-                          {/* Secondary URL photo upload */}
-                          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                            <input
-                              type="text"
-                              placeholder="Or paste image URL (Cloudinary / CDN)..."
-                              value={siteOutPhotoUrl}
-                              onChange={(e) => setSiteOutPhotoUrl(e.target.value)}
-                              style={{ flex: 1, padding: '6px 10px', fontSize: '0.82rem', borderRadius: 6, border: '1px solid var(--border-color)' }}
-                            />
-                            <Button size="sm" variant="light" onClick={addSiteOutPhoto}>
-                              Add URL
-                            </Button>
-                          </div>
-
-                          {siteOutPhotos.length > 0 && (
-                            <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-                              {siteOutPhotos.map((url, idx) => (
-                                <div key={idx} style={{ position: 'relative' }}>
-                                  <img src={url} alt="Site" style={{ width: 48, height: 48, borderRadius: 6, objectFit: 'cover', border: '1px solid #cbd5e1' }} />
-                                  <button
-                                    type="button"
-                                    onClick={() => removeSiteOutPhoto(idx)}
-                                    style={{
-                                      position: 'absolute',
-                                      top: -5,
-                                      right: -5,
-                                      background: '#dc2626',
-                                      color: '#fff',
-                                      border: 'none',
-                                      borderRadius: '50%',
-                                      width: 16,
-                                      height: 16,
-                                      fontSize: '0.65rem',
-                                      cursor: 'pointer',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                    }}
-                                  >
-                                    ×
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Exit Remarks */}
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 4 }}>
-                            Site Exit & Handover Remarks *:
-                          </label>
-                          <textarea
-                            rows={3}
-                            value={siteOutRemarks}
-                            onChange={(e) => setSiteOutRemarks(e.target.value)}
-                            placeholder="e.g. Completed site inspection, client sign-off obtained, departed site"
-                            style={{
-                              width: '100%',
-                              padding: '10px 12px',
-                              borderRadius: 8,
-                              border: '1px solid var(--border-color)',
-                              fontSize: '0.88rem',
-                              fontFamily: 'inherit',
-                              resize: 'vertical',
-                            }}
-                            required
-                          />
-                        </div>
-
-                        {/* Task Completed checkbox */}
-                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.84rem', cursor: 'pointer', userSelect: 'none' }}>
-                          <input
-                            type="checkbox"
-                            checked={taskCompleted}
-                            onChange={(e) => setTaskCompleted(e.target.checked)}
-                            style={{ width: 16, height: 16, accentColor: 'var(--primary)' }}
-                          />
-                          <span style={{ fontWeight: 600 }}>Mark associated site task as completed upon exit</span>
-                        </label>
-
-                        <Button
-                          type="submit"
-                          variant="primary"
-                          icon={Navigation}
-                          loading={submittingPunch}
-                          style={{ padding: '12px', fontSize: '0.94rem', fontWeight: 700 }}
-                        >
-                          Confirm Site-Out Exit (Step 4)
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                )}
-
-                {/* ---------------------------------------------------- */}
-                {/* VIEW 5: COMPLETED VISIT */}
+                {/* VIEW 3: COMPLETED DUTY */}
                 {/* ---------------------------------------------------- */}
                 {punchMode === 'COMPLETED' && (
                   <div
@@ -2637,14 +2014,14 @@ export const FieldAttendance = () => {
                   >
                     <CheckCircle2 size={44} color="var(--success)" />
                     <div style={{ fontWeight: 800, fontSize: '1.15rem', color: '#065f46' }}>
-                      Site Visit Cycle Finished!
+                      Field Duty Completed Today!
                     </div>
                     <p style={{ margin: 0, fontSize: '0.86rem', color: '#047857', maxWidth: 440 }}>
-                      You have successfully completed all 4 steps: Site-In, Check-In, Check-Out, and Site-Out.
+                      Your duty check-in and check-out have been recorded with GPS and working hours.
                     </p>
                     <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
                       <Button variant="primary" icon={RotateCcw} onClick={handleStartNextVisit}>
-                        Start Next Site Visit
+                        Start New Duty Session
                       </Button>
                       <Button variant="light" onClick={() => setActiveTab('records')}>
                         View Field Register
@@ -2675,13 +2052,9 @@ export const FieldAttendance = () => {
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: 'var(--success)', marginBottom: 10 }}>
                     <CheckCircle2 size={20} />
-                    {punchResult.mode === 'SITE_IN'
-                      ? 'Step 1: Site-In Confirmed'
-                      : punchResult.mode === 'CHECK_IN'
-                      ? 'Step 2: Field Check-In Confirmed'
-                      : punchResult.mode === 'CHECK_OUT'
-                      ? 'Step 3: Field Check-Out Confirmed'
-                      : 'Step 4: Site-Out Exit Confirmed'}
+                    {punchResult.mode === 'CHECK_IN'
+                      ? 'Field Check-In Confirmed'
+                      : 'Field Check-Out Confirmed'}
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: '0.85rem' }}>
@@ -2691,22 +2064,15 @@ export const FieldAttendance = () => {
                       Coordinates: <strong>{coords?.latitude?.toFixed(4)}° N, {coords?.longitude?.toFixed(4)}° E</strong>
                     </div>
 
-                    {punchResult.mode === 'SITE_IN' && (
-                      <div style={{ marginTop: 8, padding: 10, background: '#ffffff', borderRadius: 8, border: '1px solid var(--success-border)' }}>
-                        <div>Site: <strong>{punchResult.site?.name || 'Project Site'}</strong></div>
-                        <div>Task: <strong>{punchResult.site?.taskTitle || 'Field Work'}</strong></div>
-                        <div style={{ color: 'var(--primary)', fontWeight: 600, marginTop: 4 }}>
-                          ➔ Next Step: Proceed to Step 2: Check-In
-                        </div>
-                      </div>
-                    )}
-
                     {punchResult.mode === 'CHECK_IN' && (
                       <div style={{ marginTop: 8, padding: 10, background: '#ffffff', borderRadius: 8, border: '1px solid var(--success-border)' }}>
                         <div>Duty Status: <Badge variant="primary">ACTIVE ON DUTY</Badge></div>
                         <div>Required Working Hours: <strong>{punchResult.data?.requiredWorkingHours ?? 8} hrs</strong></div>
+                        {punchResult.site && (
+                          <div style={{ marginTop: 4 }}>Site / Project: <strong>{punchResult.site.name}</strong></div>
+                        )}
                         <div style={{ color: 'var(--primary)', fontWeight: 600, marginTop: 4 }}>
-                          ➔ Next Step: Field duty active. When visit completes, punch Check-Out.
+                          Next Step: Field duty is active. When work completes, punch Check-Out.
                         </div>
                       </div>
                     )}
@@ -2717,18 +2083,8 @@ export const FieldAttendance = () => {
                         <div>Shortfall: <strong style={{ color: punchResult.data?.shortfallHours > 0 ? 'var(--danger)' : 'var(--success)' }}>{punchResult.data?.shortfallHours ?? 0} hrs</strong></div>
                         <div>Overtime: <strong style={{ color: 'var(--success)' }}>+{punchResult.data?.overtimeHours ?? 0} hrs</strong></div>
                         <div>Final Status: <Badge variant={punchResult.data?.attendanceStatus === 'SHORTFALL' ? 'warning' : 'success'}>{punchResult.data?.attendanceStatus || 'PRESENT'}</Badge></div>
-                        <div style={{ color: '#7c3aed', fontWeight: 600, marginTop: 4 }}>
-                          ➔ Next Step: Proceed to Step 4: Site-Out to exit site.
-                        </div>
-                      </div>
-                    )}
-
-                    {punchResult.mode === 'SITE_OUT' && (
-                      <div style={{ marginTop: 8, padding: 10, background: '#ffffff', borderRadius: 8, border: '1px solid var(--success-border)' }}>
-                        <div>Exit Status: <Badge variant="success">VISIT CONCLUDED</Badge></div>
-                        <div>Photos Uploaded: <strong>{punchResult.data?.photos?.length || 1} photo(s)</strong></div>
                         <div style={{ color: 'var(--success)', fontWeight: 600, marginTop: 4 }}>
-                          ✓ Full lifecycle complete (Site-In ➔ Check-In ➔ Check-Out ➔ Site-Out).
+                          Duty session successfully concluded.
                         </div>
                       </div>
                     )}
@@ -2741,7 +2097,7 @@ export const FieldAttendance = () => {
                     No Punch Submitted Yet
                   </p>
                   <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-light)', maxWidth: 280, marginInline: 'auto' }}>
-                    Follow the 4-step sequence: Start with Site-In, then Check-In, then Check-Out, and conclude with Site-Out.
+                    Punch Check-In to start duty, and Check-Out upon completion.
                   </p>
                 </div>
               )}
