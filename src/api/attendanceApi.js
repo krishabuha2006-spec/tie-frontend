@@ -10,6 +10,8 @@ export const attendanceApi = {
       gpsAccuracy: Number(data.gpsAccuracy) || 15,
       capturedImage: data.capturedImage || data.photoUrl,
       ...(data.confidenceScore != null ? { confidenceScore: Number(data.confidenceScore) } : {}),
+      ...(data.faceVerificationLogId ? { faceVerificationLogId: data.faceVerificationLogId } : {}),
+      ...(data.address || data.checkInAddress ? { address: data.address || data.checkInAddress, checkInAddress: data.address || data.checkInAddress } : {}),
     };
 
     try {
@@ -99,6 +101,7 @@ export const attendanceApi = {
       longitude: Number(data.longitude),
       gpsAccuracy: Number(data.gpsAccuracy) || 15,
       ...(data.remarks ? { remarks: String(data.remarks) } : {}),
+      ...(data.address || data.checkOutAddress ? { address: data.address || data.checkOutAddress, checkOutAddress: data.address || data.checkOutAddress } : {}),
     };
 
     try {

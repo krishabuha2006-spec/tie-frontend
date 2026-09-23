@@ -450,7 +450,7 @@ export const PayrollPayslips = () => {
       {/* 3. Simple Tab Switcher */}
       <div style={{
         display: 'flex', gap: 6, background: '#fff', padding: '6px',
-        borderRadius: 10, border: '1px solid #e2e8f0', width: 'fit-content'
+        borderRadius: 10, border: '1px solid var(--border-color, #e2e8f0)', width: 'fit-content'
       }}>
         <button
           onClick={() => setActiveTab('runs')}
@@ -458,8 +458,8 @@ export const PayrollPayslips = () => {
             display: 'flex', alignItems: 'center', gap: 6, padding: '7px 16px',
             borderRadius: 7, border: 'none', fontSize: '0.84rem', fontWeight: 600,
             cursor: 'pointer', transition: 'all 0.15s',
-            background: activeTab === 'runs' ? '#0f766e' : 'transparent',
-            color: activeTab === 'runs' ? '#fff' : '#64748b',
+            background: activeTab === 'runs' ? 'var(--primary)' : 'transparent',
+            color: activeTab === 'runs' ? '#fff' : 'var(--text-muted, #64748b)',
           }}
         >
           <DollarSign size={15} /> Payroll Runs ({runs.length})
@@ -471,8 +471,8 @@ export const PayrollPayslips = () => {
             display: 'flex', alignItems: 'center', gap: 6, padding: '7px 16px',
             borderRadius: 7, border: 'none', fontSize: '0.84rem', fontWeight: 600,
             cursor: 'pointer', transition: 'all 0.15s',
-            background: activeTab === 'payslips' ? '#0f766e' : 'transparent',
-            color: activeTab === 'payslips' ? '#fff' : '#64748b',
+            background: activeTab === 'payslips' ? 'var(--primary)' : 'transparent',
+            color: activeTab === 'payslips' ? '#fff' : 'var(--text-muted, #64748b)',
           }}
         >
           <FileText size={15} /> Payslips ({payslipsList.length})
@@ -484,8 +484,8 @@ export const PayrollPayslips = () => {
             display: 'flex', alignItems: 'center', gap: 6, padding: '7px 16px',
             borderRadius: 7, border: 'none', fontSize: '0.84rem', fontWeight: 600,
             cursor: 'pointer', transition: 'all 0.15s',
-            background: activeTab === 'structures' ? '#0f766e' : 'transparent',
-            color: activeTab === 'structures' ? '#fff' : '#64748b',
+            background: activeTab === 'structures' ? 'var(--primary)' : 'transparent',
+            color: activeTab === 'structures' ? '#fff' : 'var(--text-muted, #64748b)',
           }}
         >
           <Building2 size={15} /> Salary Structures ({structures.length})
@@ -735,7 +735,7 @@ export const PayrollPayslips = () => {
                 Generated from verified backend payroll runs. View or print high-resolution copies.
               </p>
             </div>
-            <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#0f766e', background: '#f0fdf4', padding: '4px 10px', borderRadius: 20 }}>
+            <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--primary)', background: 'var(--primary-light)', padding: '4px 10px', borderRadius: 20 }}>
               {payslipsList.length} Payslips Available
             </span>
           </div>
@@ -923,9 +923,9 @@ export const PayrollPayslips = () => {
               padding: 24, display: 'flex', flexDirection: 'column', gap: 16
             }}>
               {/* Company Header */}
-              <div style={{ borderBottom: '2px solid #0f766e', paddingBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div style={{ borderBottom: '2px solid var(--primary)', paddingBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
-                  <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0f766e' }}>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--primary)' }}>
                     TIE TECHNOLOGIES PVT LTD
                   </div>
                   <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
@@ -1008,14 +1008,14 @@ export const PayrollPayslips = () => {
 
               {/* Net Pay Callout */}
               <div style={{
-                background: '#f0fdfa', border: '1.5px solid #0f766e', borderRadius: 6,
+                background: 'var(--primary-light)', border: '1.5px solid var(--primary)', borderRadius: 6,
                 padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'
               }}>
                 <div>
-                  <div style={{ fontSize: '0.78rem', fontWeight: 600, color: '#0f766e' }}>NET PAYABLE SALARY</div>
+                  <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--primary)' }}>NET PAYABLE SALARY</div>
                   <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Credited to registered corporate salary account</div>
                 </div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0f766e' }}>
+                <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--primary)' }}>
                   ₹{(viewingPayslip.payrollLineItem?.netPay || 2425).toLocaleString('en-IN')}
                 </div>
               </div>

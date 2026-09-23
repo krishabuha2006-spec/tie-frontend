@@ -45,15 +45,18 @@ export const authApi = {
     return response.data;
   },
 
-  // Step 6: Reset Password (POST /api/auth/reset-password/:token)
+  // Step 6: Reset Password (POST /api/auth/reset-password)
   resetPassword: async (token, newPassword) => {
     try {
-      const response = await apiClient.post(`/auth/reset-password/${token}`, { newPassword });
+      const response = await apiClient.post('/auth/reset-password', { token, newPassword });
       return response.data;
-    } catch {
-      // Fallback for body-based reset token payload
-      const fallbackResponse = await apiClient.post('/auth/reset-password', { token, newPassword });
-      return fallbackResponse.data;
+    } catch (err) {
+      if (err.response?.status === 404 || err.response?.status === 405) {
+        // Fallback for route-param based reset endpoint
+        const fallbackResponse = await apiClient.post(`/auth/reset-password/${token}`, { newPassword });
+        return fallbackResponse.data;
+      }
+      throw err;
     }
   },
 };

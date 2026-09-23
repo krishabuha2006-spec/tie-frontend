@@ -27,7 +27,9 @@ export const Login = () => {
   // Reset Password state
   const [resetToken, setResetToken] = useState(urlToken || '');
   const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
 
   useEffect(() => {
@@ -73,7 +75,7 @@ export const Login = () => {
     e.preventDefault();
     const cleanEmail = forgotEmail.trim();
     if (!cleanEmail) {
-      showToast('Please enter your email address', 'warning');
+      showToast('Please enter your registered email address', 'warning');
       return;
     }
     const emailErr = validateEmail(cleanEmail, { fieldName: 'Email' });
@@ -89,10 +91,12 @@ export const Login = () => {
       if (token) {
         setReceivedResetToken(token);
         setResetToken(token);
-        showToast('Password reset token generated! You can now set your new password.', 'success');
+        showToast('Password reset token generated! Please enter your new password.', 'success');
       } else {
-        showToast(res?.message || 'Password reset instructions sent to your email', 'success');
+        showToast(res?.message || 'Password reset token sent to your email! Please enter the token and your new password.', 'success');
       }
+      // Immediately proceed to the Reset Token & New Password page
+      setMode('reset');
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to send reset link';
       showToast(msg, 'error');
@@ -105,28 +109,36 @@ export const Login = () => {
   const handleResetSubmit = async (e) => {
     e.preventDefault();
     const cleanToken = resetToken.trim();
-    if (!cleanToken || !newPassword) {
-      showToast('Please enter both the reset token and your new password', 'warning');
+    if (!cleanToken) {
+      showToast('Please enter your reset security token', 'warning');
       return;
     }
-
+    if (!newPassword) {
+      showToast('Please enter your new password', 'warning');
+      return;
+    }
     if (newPassword.length < 6) {
-      showToast('Password must be at least 6 characters long', 'warning');
+      showToast('New password must be at least 6 characters long', 'warning');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      showToast('Passwords do not match. Please verify your new password.', 'warning');
       return;
     }
 
     setResetLoading(true);
     try {
       const res = await authApi.resetPassword(cleanToken, newPassword);
-      showToast(res?.message || 'Password reset successful! Please sign in with your new password.', 'success');
+      showToast(res?.message || 'Password set successfully! Please sign in with your new password.', 'success');
       setEmail(forgotEmail || email);
       setPassword('');
       setResetToken('');
       setNewPassword('');
+      setConfirmPassword('');
       setReceivedResetToken('');
       setMode('login');
     } catch (err) {
-      const msg = err.response?.data?.message || err.message || 'Failed to reset password';
+      const msg = err.response?.data?.message || err.message || 'Failed to reset password. Please check your token.';
       showToast(msg, 'error');
     } finally {
       setResetLoading(false);
@@ -227,7 +239,7 @@ export const Login = () => {
                     boxSizing: 'border-box',
                     transition: 'border-color 0.2s',
                   }}
-                  onFocus={(e) => (e.target.style.borderColor = '#2aaba0')}
+                  onFocus={(e) => (e.target.style.borderColor = 'var(--primary, #2e7b85)')}
                   onBlur={(e) => (e.target.style.borderColor = '#cbd5e1')}
                 />
               </div>
@@ -260,7 +272,7 @@ export const Login = () => {
                     border: 'none',
                     padding: 0,
                     fontSize: '0.8rem',
-                    color: '#2aaba0',
+                    color: 'var(--primary, #2e7b85)',
                     cursor: 'pointer',
                     fontWeight: 500,
                   }}
@@ -294,7 +306,7 @@ export const Login = () => {
                     boxSizing: 'border-box',
                     transition: 'border-color 0.2s',
                   }}
-                  onFocus={(e) => (e.target.style.borderColor = '#2aaba0')}
+                  onFocus={(e) => (e.target.style.borderColor = 'var(--primary, #2e7b85)')}
                   onBlur={(e) => (e.target.style.borderColor = '#cbd5e1')}
                 />
                 <button
@@ -328,7 +340,7 @@ export const Login = () => {
                 fontSize: '0.925rem',
                 fontWeight: 600,
                 color: '#ffffff',
-                backgroundColor: '#2aaba0',
+                backgroundColor: 'var(--primary, #2e7b85)',
                 border: 'none',
                 borderRadius: 8,
                 cursor: loading ? 'not-allowed' : 'pointer',
@@ -340,10 +352,10 @@ export const Login = () => {
                 transition: 'background-color 0.2s',
               }}
               onMouseEnter={(e) => {
-                if (!loading) e.target.style.backgroundColor = '#24978d';
+                if (!loading) e.target.style.backgroundColor = 'var(--primary-hover, #256770)';
               }}
               onMouseLeave={(e) => {
-                if (!loading) e.target.style.backgroundColor = '#2aaba0';
+                if (!loading) e.target.style.backgroundColor = 'var(--primary, #2e7b85)';
               }}
             >
               <ShieldCheck size={18} />
@@ -393,124 +405,124 @@ export const Login = () => {
                     outline: 'none',
                     boxSizing: 'border-box',
                   }}
-                  onFocus={(e) => (e.target.style.borderColor = '#2aaba0')}
+                  onFocus={(e) => (e.target.style.borderColor = 'var(--primary, #2e7b85)')}
                   onBlur={(e) => (e.target.style.borderColor = '#cbd5e1')}
                 />
               </div>
             </div>
 
-            {receivedResetToken && (
-              <div
-                style={{
-                  marginBottom: 16,
-                  padding: 12,
-                  borderRadius: 8,
-                  backgroundColor: 'rgba(42, 171, 160, 0.08)',
-                  border: '1px solid #2aaba0',
-                  fontSize: '0.82rem',
-                  color: '#0f172a',
-                }}
-              >
-                <div style={{ fontWeight: 600, color: '#2aaba0', marginBottom: 4 }}>
-                  Reset Token Received:
-                </div>
-                <div
-                  style={{
-                    wordBreak: 'break-all',
-                    fontFamily: 'monospace',
-                    fontSize: '0.78rem',
-                    color: '#0f172a',
-                    background: '#f8fafc',
-                    border: '1px solid #e2e8f0',
-                    padding: 8,
-                    borderRadius: 4,
-                  }}
-                >
-                  {receivedResetToken}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setMode('reset')}
-                  style={{
-                    marginTop: 10,
-                    width: '100%',
-                    padding: '8px',
-                    backgroundColor: '#2aaba0',
-                    border: 'none',
-                    borderRadius: 6,
-                    color: '#fff',
-                    fontWeight: 600,
-                    fontSize: '0.82rem',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Proceed to Reset Password
-                </button>
-              </div>
-            )}
-
-            {!receivedResetToken && (
-              <button
-                type="submit"
-                disabled={forgotLoading}
-                style={{
-                  width: '100%',
-                  padding: '11px 16px',
-                  fontSize: '0.925rem',
-                  fontWeight: 600,
-                  color: '#ffffff',
-                  backgroundColor: '#2aaba0',
-                  border: 'none',
-                  borderRadius: 8,
-                  cursor: forgotLoading ? 'not-allowed' : 'pointer',
-                  opacity: forgotLoading ? 0.75 : 1,
-                  marginBottom: 14,
-                }}
-              >
-                {forgotLoading ? 'Sending Request...' : 'Send Reset Link / Token'}
-              </button>
-            )}
-
             <button
-              type="button"
-              onClick={() => setMode('login')}
+              type="submit"
+              disabled={forgotLoading}
               style={{
                 width: '100%',
-                padding: '9px 16px',
-                fontSize: '0.85rem',
-                fontWeight: 500,
-                color: '#64748b',
-                background: 'none',
+                padding: '11px 16px',
+                fontSize: '0.925rem',
+                fontWeight: 600,
+                color: '#ffffff',
+                backgroundColor: 'var(--primary, #2e7b85)',
                 border: 'none',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 6,
+                borderRadius: 8,
+                cursor: forgotLoading ? 'not-allowed' : 'pointer',
+                opacity: forgotLoading ? 0.75 : 1,
+                marginBottom: 14,
+                transition: 'background-color 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                if (!forgotLoading) e.target.style.backgroundColor = 'var(--primary-hover, #256770)';
+              }}
+              onMouseLeave={(e) => {
+                if (!forgotLoading) e.target.style.backgroundColor = 'var(--primary, #2e7b85)';
               }}
             >
-              <ArrowLeft size={16} />
-              <span>Back to login</span>
+              {forgotLoading ? 'Sending Request...' : 'Send Reset Link / Token'}
             </button>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setMode('reset')}
+                style={{
+                  fontSize: '0.84rem',
+                  fontWeight: 600,
+                  color: 'var(--primary, #2e7b85)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  textAlign: 'center',
+                  padding: '4px',
+                }}
+              >
+                Already have a reset token? Enter token &amp; reset password &rarr;
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setMode('login')}
+                style={{
+                  width: '100%',
+                  padding: '9px 16px',
+                  fontSize: '0.85rem',
+                  fontWeight: 500,
+                  color: '#64748b',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                }}
+              >
+                <ArrowLeft size={16} />
+                <span>Back to login</span>
+              </button>
+            </div>
           </form>
         )}
 
         {/* MODE 3: RESET PASSWORD */}
         {mode === 'reset' && (
           <form onSubmit={handleResetSubmit}>
-            <div style={{ marginBottom: 16 }}>
-              <label
-                htmlFor="reset-token"
+            {forgotEmail && (
+              <div
                 style={{
-                  display: 'block',
-                  fontSize: '0.85rem',
-                  fontWeight: 500,
-                  color: '#334155',
-                  marginBottom: 6,
+                  marginBottom: 16,
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  backgroundColor: 'var(--primary-light, #f0f7f8)',
+                  border: '1px solid var(--primary-border, #bce1e6)',
+                  fontSize: '0.82rem',
+                  color: '#0f172a',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
                 }}
               >
-                Reset Token
-              </label>
+                <Mail size={16} color="var(--primary, #2e7b85)" style={{ flexShrink: 0 }} />
+                <span>Reset token sent for <strong>{forgotEmail}</strong></span>
+              </div>
+            )}
+
+            {/* 1. RESET TOKEN */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <label
+                  htmlFor="reset-token"
+                  style={{
+                    fontSize: '0.85rem',
+                    fontWeight: 500,
+                    color: '#334155',
+                  }}
+                >
+                  Security Reset Token *
+                </label>
+                {resetToken && (
+                  <span style={{ fontSize: '0.72rem', color: 'var(--primary, #2e7b85)', fontWeight: 600 }}>
+                    Token Ready
+                  </span>
+                )}
+              </div>
               <div style={{ position: 'relative' }}>
                 <KeyRound
                   size={16}
@@ -522,7 +534,7 @@ export const Login = () => {
                   type="text"
                   value={resetToken}
                   onChange={(e) => setResetToken(e.target.value)}
-                  placeholder="Enter reset token"
+                  placeholder="Paste or enter your reset token"
                   required
                   style={{
                     width: '100%',
@@ -536,13 +548,14 @@ export const Login = () => {
                     boxSizing: 'border-box',
                     fontFamily: 'monospace',
                   }}
-                  onFocus={(e) => (e.target.style.borderColor = '#2aaba0')}
+                  onFocus={(e) => (e.target.style.borderColor = 'var(--primary, #2e7b85)')}
                   onBlur={(e) => (e.target.style.borderColor = '#cbd5e1')}
                 />
               </div>
             </div>
 
-            <div style={{ marginBottom: 22 }}>
+            {/* 2. NEW PASSWORD */}
+            <div style={{ marginBottom: 16 }}>
               <label
                 htmlFor="reset-new-password"
                 style={{
@@ -553,7 +566,7 @@ export const Login = () => {
                   marginBottom: 6,
                 }}
               >
-                New Password (minimum 6 characters)
+                New Password * (minimum 6 characters)
               </label>
               <div style={{ position: 'relative' }}>
                 <Lock
@@ -579,7 +592,7 @@ export const Login = () => {
                     outline: 'none',
                     boxSizing: 'border-box',
                   }}
-                  onFocus={(e) => (e.target.style.borderColor = '#2aaba0')}
+                  onFocus={(e) => (e.target.style.borderColor = 'var(--primary, #2e7b85)')}
                   onBlur={(e) => (e.target.style.borderColor = '#cbd5e1')}
                 />
                 <button
@@ -604,6 +617,74 @@ export const Login = () => {
               </div>
             </div>
 
+            {/* 3. CONFIRM NEW PASSWORD */}
+            <div style={{ marginBottom: 22 }}>
+              <label
+                htmlFor="reset-confirm-password"
+                style={{
+                  display: 'block',
+                  fontSize: '0.85rem',
+                  fontWeight: 500,
+                  color: '#334155',
+                  marginBottom: 6,
+                }}
+              >
+                Confirm New Password *
+              </label>
+              <div style={{ position: 'relative' }}>
+                <Lock
+                  size={16}
+                  color="#94a3b8"
+                  style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }}
+                />
+                <input
+                  id="reset-confirm-password"
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Re-enter new password"
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '10px 42px 10px 38px',
+                    fontSize: '0.9rem',
+                    borderRadius: 8,
+                    border: `1px solid ${confirmPassword && confirmPassword !== newPassword ? '#dc2626' : '#cbd5e1'}`,
+                    backgroundColor: '#ffffff',
+                    color: '#0f172a',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                  onFocus={(e) => (e.target.style.borderColor = 'var(--primary, #2e7b85)')}
+                  onBlur={(e) => (e.target.style.borderColor = confirmPassword && confirmPassword !== newPassword ? '#dc2626' : '#cbd5e1')}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  style={{
+                    position: 'absolute',
+                    right: 12,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    color: '#94a3b8',
+                    cursor: 'pointer',
+                    padding: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                  }}
+                >
+                  {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+              {confirmPassword && confirmPassword !== newPassword && (
+                <div style={{ fontSize: '0.75rem', color: '#dc2626', marginTop: 4 }}>
+                  Passwords do not match
+                </div>
+              )}
+            </div>
+
             <button
               type="submit"
               disabled={resetLoading}
@@ -613,38 +694,64 @@ export const Login = () => {
                 fontSize: '0.925rem',
                 fontWeight: 600,
                 color: '#ffffff',
-                backgroundColor: '#2aaba0',
+                backgroundColor: 'var(--primary, #2e7b85)',
                 border: 'none',
                 borderRadius: 8,
                 cursor: resetLoading ? 'not-allowed' : 'pointer',
                 opacity: resetLoading ? 0.75 : 1,
                 marginBottom: 14,
+                transition: 'background-color 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                if (!resetLoading) e.target.style.backgroundColor = 'var(--primary-hover, #256770)';
+              }}
+              onMouseLeave={(e) => {
+                if (!resetLoading) e.target.style.backgroundColor = 'var(--primary, #2e7b85)';
               }}
             >
-              {resetLoading ? 'Updating Password...' : 'Set New Password'}
+              {resetLoading ? 'Updating Password...' : 'Set New Password & Sign In'}
             </button>
 
-            <button
-              type="button"
-              onClick={() => setMode('login')}
-              style={{
-                width: '100%',
-                padding: '9px 16px',
-                fontSize: '0.85rem',
-                fontWeight: 500,
-                color: '#64748b',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 6,
-              }}
-            >
-              <ArrowLeft size={16} />
-              <span>Back to login</span>
-            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setMode('forgot')}
+                style={{
+                  fontSize: '0.84rem',
+                  fontWeight: 500,
+                  color: 'var(--primary, #2e7b85)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  textAlign: 'center',
+                  padding: '4px',
+                }}
+              >
+                Didn&apos;t receive token? Request another token
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setMode('login')}
+                style={{
+                  width: '100%',
+                  padding: '9px 16px',
+                  fontSize: '0.85rem',
+                  fontWeight: 500,
+                  color: '#64748b',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                }}
+              >
+                <ArrowLeft size={16} />
+                <span>Back to login</span>
+              </button>
+            </div>
           </form>
         )}
       </div>

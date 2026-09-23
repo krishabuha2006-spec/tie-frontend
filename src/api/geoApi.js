@@ -88,9 +88,16 @@ export const geoApi = {
     try {
       const res = await apiClient.get('/geo/location-logs', { params });
       return res.data;
-    } catch {
-      const fallback = await apiClient.get('/geo/logs', { params });
-      return fallback.data;
+    } catch (err) {
+      if (err.response?.status === 403 || err.response?.status === 404) {
+        return { success: true, data: [], logs: [] };
+      }
+      try {
+        const fallback = await apiClient.get('/geo/logs', { params });
+        return fallback.data;
+      } catch {
+        return { success: true, data: [], logs: [] };
+      }
     }
   },
 

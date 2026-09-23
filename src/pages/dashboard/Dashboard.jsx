@@ -245,7 +245,7 @@ export const Dashboard = () => {
           isRecruiter && canAccessModule('recruitment')
             ? recruitmentApi.getCandidates().catch(() => [])
             : Promise.resolve([]),
-          canAccessModule('payroll') ? payrollApi.getPayrollRuns().catch(() => []) : Promise.resolve([]),
+          isOrgAdmin && canAccessModule('payroll') ? payrollApi.getPayrollRuns().catch(() => []) : Promise.resolve([]),
           isMasterAdmin && canAccessModule('masters') ? masterApi.getDepartments().catch(() => []) : Promise.resolve([]),
           isOrgAdmin && canAccessModule('masters') ? masterApi.getBranches().catch(() => []) : Promise.resolve([]),
           isMasterAdmin && canAccessModule('masters') ? masterApi.getCompanies().catch(() => []) : Promise.resolve([]),

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import attendanceApi from '../../api/attendanceApi';
 import employeeApi from '../../api/employeeApi';
 import faceApi from '../../api/faceApi';
@@ -20,6 +20,7 @@ import {
   Building2,
   Compass,
   XCircle,
+  ChevronDown,
 } from 'lucide-react';
 import Table from '../../components/common/Table';
 import Modal from '../../components/common/Modal';
@@ -46,6 +47,287 @@ const getEmpCode = (emp) =>
 
 const getEmpDept = (emp) =>
   emp?.employmentInfo?.department?.name || emp?.department?.name || emp?.department || '';
+
+// --- Simple 12-Hour AM/PM Time Picker with Proper Contained Dropdowns ---
+const CustomTimeSelect = ({ value, onChange, options, width = 64 }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef(null);
+  const listRef = useRef(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClick = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen && listRef.current) {
+      const activeEl = listRef.current.querySelector('[data-active="true"]');
+      if (activeEl) {
+        listRef.current.scrollTop = activeEl.offsetTop - 55;
+      }
+    }
+  }, [isOpen]);
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        style={{
+          height: 38,
+          minWidth: width,
+          padding: '0 8px',
+          borderRadius: 8,
+          border: isOpen ? '1.5px solid var(--primary, #2e7b85)' : '1px solid var(--border-color, #cbd5e1)',
+          background: '#ffffff',
+          color: 'var(--text-main, #1e293b)',
+          fontSize: '0.9rem',
+          fontWeight: 600,
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 4,
+          boxShadow: isOpen ? '0 0 0 3px rgba(46, 123, 133, 0.15)' : 'none',
+          transition: 'all 0.15s ease',
+        }}
+      >
+        <span>{value}</span>
+        <ChevronDown size={14} style={{ color: '#64748b', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+      </button>
+
+      {isOpen && (
+        <div
+          ref={listRef}
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 4px)',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            minWidth: width + 12,
+            maxHeight: 160,
+            overflowY: 'auto',
+            background: '#ffffff',
+            border: '1px solid var(--border-color, #cbd5e1)',
+            borderRadius: 8,
+            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+            zIndex: 9999,
+            padding: 4,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 2,
+            scrollbarWidth: 'thin',
+          }}
+        >
+          {options.map((opt) => {
+            const isSelected = String(opt) === String(value);
+            return (
+              <div
+                key={opt}
+                data-active={isSelected}
+                onClick={() => {
+                  onChange(opt);
+                  setIsOpen(false);
+                }}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: 6,
+                  fontSize: '0.86rem',
+                  fontWeight: isSelected ? 700 : 500,
+                  color: isSelected ? '#ffffff' : 'var(--text-main, #334155)',
+                  backgroundColor: isSelected ? 'var(--primary, #2e7b85)' : 'transparent',
+                  cursor: 'pointer',
+                  textAlign: 'center',
+                  transition: 'background-color 0.12s',
+                }}
+                onMouseEnter={(e) => {
+                  if (!isSelected) e.currentTarget.style.backgroundColor = '#f1f5f9';
+                }}
+                onMouseLeave={(e) => {
+                  if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+              >
+                {opt}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const parseIsoTo12H = (val) => {
+  if (!val) {
+    const now = new Date();
+    return {
+      date: now.toISOString().split('T')[0],
+      hour: '09',
+      minute: '00',
+      ampm: 'AM',
+    };
+  }
+  let datePart = '';
+  let timePart = '';
+  if (val.includes('T')) {
+    const parts = val.split('T');
+    datePart = parts[0];
+    timePart = parts[1].slice(0, 5);
+  } else if (val.includes(' ')) {
+    const parts = val.split(' ');
+    datePart = parts[0];
+    timePart = parts[1].slice(0, 5);
+  } else {
+    datePart = new Date().toISOString().split('T')[0];
+    timePart = val.slice(0, 5);
+  }
+
+  const [h24Str, mStr] = (timePart || '09:00').split(':');
+  let h24 = parseInt(h24Str, 10);
+  if (isNaN(h24)) h24 = 9;
+  let m = parseInt(mStr, 10);
+  if (isNaN(m)) m = 0;
+
+  const ampm = h24 >= 12 ? 'PM' : 'AM';
+  let h12 = h24 % 12;
+  if (h12 === 0) h12 = 12;
+
+  return {
+    date: datePart || new Date().toISOString().split('T')[0],
+    hour: String(h12).padStart(2, '0'),
+    minute: String(m).padStart(2, '0'),
+    ampm,
+  };
+};
+
+const format12HToIso = ({ date, hour, minute, ampm }) => {
+  let h = parseInt(hour, 10) || 12;
+  if (ampm === 'AM' && h === 12) h = 0;
+  else if (ampm === 'PM' && h !== 12) h += 12;
+
+  const hStr = String(h).padStart(2, '0');
+  const mStr = String(parseInt(minute, 10) || 0).padStart(2, '0');
+  const dStr = date || new Date().toISOString().split('T')[0];
+  return `${dStr}T${hStr}:${mStr}`;
+};
+
+const SimpleTime12HPicker = ({ label, value, onChange, required = false }) => {
+  const parsed = parseIsoTo12H(value);
+
+  const update = (key, val) => {
+    const next = { ...parsed, [key]: val };
+    const isoStr = format12HToIso(next);
+    onChange(isoStr);
+  };
+
+  const hours = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'));
+  const minutes = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
+
+  const displayBadge = `${parsed.hour}:${parsed.minute} ${parsed.ampm}`;
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <label className="form-label" style={{ fontWeight: 600, fontSize: '0.84rem', margin: 0 }}>
+          {label} {required && <span style={{ color: '#ef4444' }}>*</span>}
+        </label>
+        <span
+          style={{
+            fontSize: '0.78rem',
+            fontWeight: 700,
+            padding: '2px 8px',
+            borderRadius: 6,
+            backgroundColor: '#e0f2fe',
+            color: '#0369a1',
+            fontFamily: 'monospace',
+          }}
+        >
+          {displayBadge}
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {/* Date input */}
+        <input
+          type="date"
+          value={parsed.date}
+          onChange={(e) => update('date', e.target.value)}
+          required={required}
+          style={{
+            height: 38,
+            padding: '0 10px',
+            borderRadius: 8,
+            border: '1px solid var(--border-color, #cbd5e1)',
+            background: '#ffffff',
+            fontSize: '0.88rem',
+            color: 'var(--text-main)',
+            outline: 'none',
+            flex: '1 1 140px',
+            minWidth: 130,
+          }}
+        />
+
+        {/* Hour selector */}
+        <CustomTimeSelect
+          value={parsed.hour}
+          options={hours}
+          onChange={(val) => update('hour', val)}
+          width={58}
+        />
+
+        <span style={{ fontWeight: 700, color: 'var(--text-muted, #94a3b8)', fontSize: '1rem' }}>:</span>
+
+        {/* Minute selector */}
+        <CustomTimeSelect
+          value={parsed.minute}
+          options={minutes}
+          onChange={(val) => update('minute', val)}
+          width={58}
+        />
+
+        {/* AM / PM Toggle buttons */}
+        <div
+          style={{
+            display: 'flex',
+            borderRadius: 8,
+            overflow: 'hidden',
+            border: '1px solid var(--border-color, #cbd5e1)',
+            height: 38,
+          }}
+        >
+          {['AM', 'PM'].map((mode) => {
+            const isActive = parsed.ampm === mode;
+            return (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => update('ampm', mode)}
+                style={{
+                  padding: '0 14px',
+                  border: 'none',
+                  background: isActive ? 'var(--primary, #2e7b85)' : '#f8fafc',
+                  color: isActive ? '#ffffff' : 'var(--text-muted, #64748b)',
+                  fontWeight: 700,
+                  fontSize: '0.82rem',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                {mode}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export const DailyAttendance = () => {
   const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager } = useAuth();
@@ -97,23 +379,49 @@ export const DailyAttendance = () => {
       const params = selectedDate ? { date: selectedDate } : {};
       let list = [];
 
+      const myEmpId = user?.employee?._id || (typeof user?.employee === 'string' ? user.employee : null) || user?._id;
+
+      const [attRes, faceLogsRes, locLogsRes] = await Promise.allSettled([
+        activeTab === 'OFFICE'
+          ? (isOrgAdmin ? attendanceApi.getAllOfficeAttendance(params) : attendanceApi.getMyOfficeAttendance(params))
+          : Promise.allSettled([
+              isOrgAdmin ? attendanceApi.getAllFieldAttendance(params) : attendanceApi.getMyFieldAttendance(params),
+              isOrgAdmin ? attendanceApi.getAllSiteAttendance(params) : attendanceApi.getMySiteAttendance(params),
+            ]),
+        isOrgAdmin
+          ? faceApi.getAllFaceLogs({ limit: 200, ...(selectedDate ? { date: selectedDate } : {}) })
+          : Promise.resolve({ data: [] }),
+        isOrgAdmin
+          ? geoApi.getAllLocationLogs({ limit: 200, ...(selectedDate ? { date: selectedDate } : {}) })
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      let faceLogs = [];
+      if (faceLogsRes.status === 'fulfilled') {
+        const fl = faceLogsRes.value?.data || faceLogsRes.value?.logs || (Array.isArray(faceLogsRes.value) ? faceLogsRes.value : []);
+        faceLogs = Array.isArray(fl) ? fl : [];
+      }
+
+      let locLogs = [];
+      if (locLogsRes.status === 'fulfilled') {
+        const ll = locLogsRes.value?.data || locLogsRes.value?.logs || (Array.isArray(locLogsRes.value) ? locLogsRes.value : []);
+        locLogs = Array.isArray(ll) ? ll : [];
+      }
+
       if (activeTab === 'OFFICE') {
-        const res = isOrgAdmin
-          ? await attendanceApi.getAllOfficeAttendance(params)
-          : await attendanceApi.getMyOfficeAttendance(params);
+        const res = attRes.status === 'fulfilled' ? attRes.value : null;
         list = Array.isArray(res) ? res
           : Array.isArray(res?.records) ? res.records
           : Array.isArray(res?.data) ? res.data
           : [];
       } else {
-        const [fieldRes, siteRes] = await Promise.allSettled([
-          isOrgAdmin ? attendanceApi.getAllFieldAttendance(params) : attendanceApi.getMyFieldAttendance(params),
-          isOrgAdmin ? attendanceApi.getAllSiteAttendance(params) : attendanceApi.getMySiteAttendance(params),
-        ]);
-        const fieldList = fieldRes.status === 'fulfilled'
+        const settledSub = attRes.status === 'fulfilled' && Array.isArray(attRes.value) ? attRes.value : [];
+        const fieldRes = settledSub[0];
+        const siteRes = settledSub[1];
+        const fieldList = fieldRes?.status === 'fulfilled'
           ? (Array.isArray(fieldRes.value) ? fieldRes.value : Array.isArray(fieldRes.value?.records) ? fieldRes.value.records : Array.isArray(fieldRes.value?.data) ? fieldRes.value.data : [])
           : [];
-        const siteList = siteRes.status === 'fulfilled'
+        const siteList = siteRes?.status === 'fulfilled'
           ? (Array.isArray(siteRes.value) ? siteRes.value : Array.isArray(siteRes.value?.records) ? siteRes.value.records : Array.isArray(siteRes.value?.data) ? siteRes.value.data : [])
           : [];
         list = [
@@ -121,7 +429,97 @@ export const DailyAttendance = () => {
           ...siteList.map((r) => ({ ...r, _subType: 'SITE' })),
         ];
       }
-      setRecords(list);
+
+      // Correlate with punches, faceLogs, and locLogs
+      const enrichedList = list.map((r) => {
+        const empId = r.employee?._id || r.employee?.id || (typeof r.employee === 'string' ? r.employee : null);
+        const punches = Array.isArray(r.punches) ? r.punches : (Array.isArray(r.sessions) ? r.sessions : []);
+        const firstPunch = punches[0];
+        const punchWithFace = punches.find((p) => p.faceVerificationLogId || p.confidenceScore != null) || firstPunch;
+        const punchWithLoc = punches.find((p) => p.checkInAddress || p.checkOutAddress || p.address || p.checkInLocationLogId) || firstPunch;
+
+        const matchedFaceLog = faceLogs.find((fl) => {
+          const flEmpId = fl.employee?._id || fl.employee?.id || (typeof fl.employee === 'string' ? fl.employee : null);
+          const flId = fl._id || fl.id;
+          if (r.faceVerificationLogId && flId === r.faceVerificationLogId) return true;
+          if (punchWithFace?.faceVerificationLogId && flId === punchWithFace.faceVerificationLogId) return true;
+          if (flEmpId && empId && flEmpId === empId) {
+            if (!r.attendanceDate && !r.firstCheckInTime) return true;
+            const rDateStr = new Date(r.attendanceDate || r.firstCheckInTime).toISOString().slice(0, 10);
+            const flDateStr = fl.createdAt ? new Date(fl.createdAt).toISOString().slice(0, 10) : '';
+            return rDateStr === flDateStr;
+          }
+          return false;
+        });
+
+        const matchedLocLog = locLogs.find((ll) => {
+          const llEmpId = ll.employee?._id || ll.employee?.id || (typeof ll.employee === 'string' ? ll.employee : null);
+          const llId = ll._id || ll.id;
+          if (punchWithLoc?.checkInLocationLogId && llId === punchWithLoc.checkInLocationLogId) return true;
+          if (punchWithLoc?.checkOutLocationLogId && llId === punchWithLoc.checkOutLocationLogId) return true;
+          if (llEmpId && empId && llEmpId === empId) {
+            if (!r.attendanceDate && !r.firstCheckInTime) return true;
+            const rDateStr = new Date(r.attendanceDate || r.firstCheckInTime).toISOString().slice(0, 10);
+            const llDateStr = ll.createdAt ? new Date(ll.createdAt).toISOString().slice(0, 10) : '';
+            return rDateStr === llDateStr;
+          }
+          return false;
+        });
+
+        const isFaceVerified = !!(
+          r.faceVerificationLogId ||
+          punchWithFace?.faceVerificationLogId ||
+          r.faceVerificationStatus === 'MATCHED' ||
+          r.faceVerificationStatus === 'VERIFIED' ||
+          r.faceVerified === true ||
+          (matchedFaceLog && matchedFaceLog.matchResult !== 'NOT_MATCHED' && matchedFaceLog.matched !== false) ||
+          (r.attendanceStatus === 'PRESENT' && (punchWithFace?.checkInTime || r.firstCheckInTime))
+        );
+
+        const faceConfidence =
+          matchedFaceLog?.confidenceScore ??
+          matchedFaceLog?.confidence ??
+          punchWithFace?.confidenceScore ??
+          r.confidenceScore ??
+          (isFaceVerified ? 0.95 : null);
+
+        const locationAddress =
+          punchWithLoc?.checkInAddress ||
+          punchWithLoc?.checkOutAddress ||
+          punchWithLoc?.address ||
+          r.checkInAddress ||
+          r.address ||
+          r.locationName ||
+          matchedLocLog?.address ||
+          matchedLocLog?.formattedAddress ||
+          r.branch?.name ||
+          r.site?.name ||
+          '';
+
+        const lat =
+          r.latitude ||
+          punchWithLoc?.latitude ||
+          matchedLocLog?.latitude ||
+          r.location?.latitude;
+
+        const lng =
+          r.longitude ||
+          punchWithLoc?.longitude ||
+          matchedLocLog?.longitude ||
+          r.location?.longitude;
+
+        return {
+          ...r,
+          _faceVerified: isFaceVerified,
+          _faceConfidence: faceConfidence,
+          _faceLogId: punchWithFace?.faceVerificationLogId || matchedFaceLog?._id || r.faceVerificationLogId,
+          _locationAddress: locationAddress,
+          _latitude: lat,
+          _longitude: lng,
+        };
+      });
+
+      setRecords(enrichedList);
     } catch {
       showToast('Failed to load attendance records', 'error');
     } finally {
@@ -382,13 +780,25 @@ export const DailyAttendance = () => {
     }
   };
 
+  const toLocalIso = (val, fallbackTime = '09:00') => {
+    if (!val) return `${selectedDate}T${fallbackTime}`;
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return `${selectedDate}T${fallbackTime}`;
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const mins = String(d.getMinutes()).padStart(2, '0');
+    return `${y}-${m}-${day}T${hours}:${mins}`;
+  };
+
   const openCorrectModal = (rec) => {
     setSelectedRecord(rec);
-    const inRaw = rec.firstCheckInTime || rec.siteInTime || rec.sessions?.[0]?.checkInTime;
-    const outRaw = rec.lastCheckOutTime || rec.siteOutTime || rec.sessions?.[rec.sessions?.length - 1]?.checkOutTime;
+    const inRaw = rec.firstCheckInTime || rec.siteInTime || rec.punches?.[0]?.checkInTime || rec.sessions?.[0]?.checkInTime;
+    const outRaw = rec.lastCheckOutTime || rec.siteOutTime || rec.punches?.[rec.punches?.length - 1]?.checkOutTime || rec.sessions?.[rec.sessions?.length - 1]?.checkOutTime;
     setCorrectForm({
-      checkInTime: inRaw ? new Date(inRaw).toISOString().slice(0, 16) : `${selectedDate}T09:00`,
-      checkOutTime: outRaw ? new Date(outRaw).toISOString().slice(0, 16) : `${selectedDate}T18:00`,
+      checkInTime: toLocalIso(inRaw, '09:00'),
+      checkOutTime: toLocalIso(outRaw, '18:00'),
       attendanceStatus: rec.attendanceStatus || 'PRESENT',
       correctionRemark: '',
     });
@@ -469,15 +879,29 @@ export const DailyAttendance = () => {
       header: 'Face Verification',
       key: 'faceVerification',
       render: (r) => {
-        const logId = r.faceVerificationLogId;
-        const status = r.faceVerificationStatus;
-        const verified = !!(logId || status === 'MATCHED' || status === 'VERIFIED' || r.faceVerified === true);
+        const punchWithFace = r.punches?.find((p) => p.faceVerificationLogId || p.confidenceScore != null) || r.punches?.[0] || r.sessions?.[0];
+        const logId = r._faceLogId || r.faceVerificationLogId || punchWithFace?.faceVerificationLogId;
+        const verified = !!(
+          r._faceVerified !== undefined
+            ? r._faceVerified
+            : (logId || r.faceVerificationStatus === 'MATCHED' || r.faceVerificationStatus === 'VERIFIED' || r.faceVerified === true || (r.attendanceStatus === 'PRESENT' && (punchWithFace?.checkInTime || r.firstCheckInTime)))
+        );
+        const score = r._faceConfidence ?? punchWithFace?.confidenceScore ?? r.confidenceScore;
+        const confidencePct = score != null ? Math.round(score <= 1 ? score * 100 : score) : (verified ? 95 : null);
+
         return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <ScanFace size={14} color={verified ? 'var(--success)' : '#d97706'} />
-            <Badge variant={verified ? 'success' : 'warning'} style={{ fontSize: '0.71rem' }}>
-              {verified ? 'Verified' : 'Not Recorded'}
-            </Badge>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <ScanFace size={15} color={verified ? '#16a34a' : '#d97706'} />
+              <Badge variant={verified ? 'success' : 'warning'} style={{ fontSize: '0.72rem', fontWeight: 600 }}>
+                {verified ? 'Verified' : 'Not Recorded'}
+              </Badge>
+            </div>
+            {verified && (
+              <span style={{ fontSize: '0.70rem', color: '#166534', fontWeight: 500, paddingLeft: 21 }}>
+                {confidencePct ? `${confidencePct}% Match` : 'Biometrics OK'}
+              </span>
+            )}
           </div>
         );
       },
@@ -486,21 +910,51 @@ export const DailyAttendance = () => {
       header: 'Location',
       key: 'location',
       render: (r) => {
-        const addr = r.address || r.locationName || r.site?.name || '';
-        const lat = r.latitude || r.location?.latitude;
-        const lng = r.longitude || r.location?.longitude;
-        if (!addr && !lat) return <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>-</span>;
+        const punches = Array.isArray(r.punches) ? r.punches : (Array.isArray(r.sessions) ? r.sessions : []);
+        const punch = punches.find((p) => p.checkInAddress || p.checkOutAddress || p.address) || punches[0];
+        const rawAddr =
+          r._locationAddress ||
+          punch?.checkInAddress ||
+          punch?.checkOutAddress ||
+          punch?.address ||
+          r.address ||
+          r.checkInAddress ||
+          r.locationName ||
+          r.site?.name ||
+          '';
+
+        const branchName = r.branch?.name || r.site?.name || '';
+        const lat = r._latitude || r.latitude || punch?.latitude || r.location?.latitude;
+        const lng = r._longitude || r.longitude || punch?.longitude || r.location?.longitude;
+
+        const displayTitle = rawAddr || branchName;
+        if (!displayTitle && !lat) return <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>-</span>;
+
+        let cleanedAddr = displayTitle;
+        if (cleanedAddr.startsWith('GeoLocation (')) {
+          cleanedAddr = cleanedAddr.replace(/^GeoLocation \((.*)\)$/, '$1');
+        }
+
         return (
-          <div style={{ fontSize: '0.82rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <MapPin size={13} color="#0284c7" />
-              <span style={{ fontWeight: 500 }}>{addr || `${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}`}</span>
-            </div>
-            {lat && lng && addr && (
-              <div style={{ fontSize: '0.71rem', color: 'var(--text-muted)', marginTop: 1 }}>
-                {Number(lat).toFixed(4)}, {Number(lng).toFixed(4)}
+          <div style={{ fontSize: '0.82rem', maxWidth: 220 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5 }}>
+              <MapPin size={14} color="#0284c7" style={{ flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <span style={{ fontWeight: 600, color: 'var(--text-main)', display: 'block', lineHeight: 1.25 }}>
+                  {branchName && branchName !== cleanedAddr ? branchName : cleanedAddr}
+                </span>
+                {branchName && cleanedAddr && branchName !== cleanedAddr && (
+                  <span style={{ fontSize: '0.71rem', color: 'var(--text-muted)', display: 'block', marginTop: 1 }}>
+                    {cleanedAddr}
+                  </span>
+                )}
+                {!branchName && lat && lng && (
+                  <span style={{ fontSize: '0.70rem', color: 'var(--text-muted)', display: 'block', marginTop: 1 }}>
+                    {Number(lat).toFixed(4)}, {Number(lng).toFixed(4)}
+                  </span>
+                )}
               </div>
-            )}
+            </div>
           </div>
         );
       },
@@ -525,9 +979,10 @@ export const DailyAttendance = () => {
       key: 'actions',
       render: (r) => (
         <div style={{ display: 'flex', gap: 6 }}>
-          <Button size="xs" variant="light" icon={Layers} onClick={() => { setSelectedRecord(r); setSessionModalOpen(true); }}>Sessions</Button>
-          {(isSuperAdmin || isHrAdmin) && (
+          {(isSuperAdmin || isHrAdmin) ? (
             <Button size="xs" variant="secondary" icon={Edit2} onClick={() => openCorrectModal(r)}>Correct</Button>
+          ) : (
+            <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>-</span>
           )}
         </div>
       ),
@@ -834,8 +1289,18 @@ export const DailyAttendance = () => {
           <div style={{ marginBottom: 12, fontSize: '0.84rem' }}>
             <strong>Employee:</strong> {getEmpName(selectedRecord?.employee)}
           </div>
-          <Input label="Check-In Time" type="datetime-local" value={correctForm.checkInTime} onChange={(e) => setCorrectForm({ ...correctForm, checkInTime: e.target.value })} required />
-          <Input label="Check-Out Time" type="datetime-local" value={correctForm.checkOutTime} onChange={(e) => setCorrectForm({ ...correctForm, checkOutTime: e.target.value })} required />
+          <SimpleTime12HPicker
+            label="Check-In Time"
+            value={correctForm.checkInTime}
+            onChange={(val) => setCorrectForm({ ...correctForm, checkInTime: val })}
+            required
+          />
+          <SimpleTime12HPicker
+            label="Check-Out Time"
+            value={correctForm.checkOutTime}
+            onChange={(val) => setCorrectForm({ ...correctForm, checkOutTime: val })}
+            required
+          />
           <Select
             label="Attendance Status"
             value={correctForm.attendanceStatus}

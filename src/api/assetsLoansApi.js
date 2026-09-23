@@ -35,6 +35,16 @@ export const assetsLoansApi = {
     return res.data;
   },
 
+  // PUT /assets/:id (Reactivate retired asset)
+  reactivateAsset: async (id, data = {}) => {
+    const res = await apiClient.put(`/assets/${id}`, {
+      currentStatus: 'UNASSIGNED',
+      condition: data.condition || 'GOOD',
+      ...data,
+    });
+    return res.data;
+  },
+
   // POST /assets/:assetId/assign
   assignAsset: async (assetId, data) => {
     const payload = {

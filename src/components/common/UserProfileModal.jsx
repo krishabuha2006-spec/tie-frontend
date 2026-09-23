@@ -16,6 +16,7 @@ export const UserProfileModal = ({ isOpen, onClose }) => {
 
   // Profile Form state
   const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
 
@@ -28,6 +29,7 @@ export const UserProfileModal = ({ isOpen, onClose }) => {
   useEffect(() => {
     if (isOpen && user) {
       setName(user.name || '');
+      setEmail(user.email || '');
       setPhone(user.phone || '');
     }
   }, [isOpen, user]);
@@ -36,6 +38,10 @@ export const UserProfileModal = ({ isOpen, onClose }) => {
     e.preventDefault();
     if (!name.trim()) {
       showToast('Name cannot be empty', 'warning');
+      return;
+    }
+    if (!email.trim()) {
+      showToast('Email cannot be empty', 'warning');
       return;
     }
     if (phone?.trim()) {
@@ -48,7 +54,7 @@ export const UserProfileModal = ({ isOpen, onClose }) => {
 
     setSavingProfile(true);
     try {
-      await updateProfile({ name: name.trim(), phone: phone.trim() });
+      await updateProfile({ name: name.trim(), email: email.trim(), phone: phone.trim() });
       showToast('Profile updated successfully!', 'success');
       onClose();
     } catch (err) {
@@ -179,9 +185,11 @@ export const UserProfileModal = ({ isOpen, onClose }) => {
             />
             <Input
               label="Email Address (Login ID)"
-              value={user?.email || ''}
-              disabled
-              style={{ backgroundColor: 'var(--bg-subtle)', cursor: 'not-allowed' }}
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Your Email"
+              required
             />
             <Input
               label="Phone Number"

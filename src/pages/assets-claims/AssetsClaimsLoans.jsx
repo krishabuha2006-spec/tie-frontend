@@ -241,6 +241,11 @@ export const AssetsClaimsLoans = () => {
     }
   };
 
+  const getAssetStatus = (asset) => {
+    if (!asset) return 'UNASSIGNED';
+    return asset.currentStatus || asset.status || (asset.currentAssignment ? 'ASSIGNED' : 'UNASSIGNED');
+  };
+
   const openAssetModal = (asset = null) => {
     if (asset) {
       setEditingAssetId(asset._id);
@@ -252,6 +257,8 @@ export const AssetsClaimsLoans = () => {
         model: asset.model || '',
         purchaseValue: asset.purchaseValue || '',
         company: asset.company?._id || asset.company || companies[0]?._id || '',
+        currentStatus: getAssetStatus(asset),
+        condition: asset.condition || 'GOOD',
       });
     } else {
       setEditingAssetId(null);
@@ -263,6 +270,8 @@ export const AssetsClaimsLoans = () => {
         model: '',
         purchaseValue: '',
         company: companies[0]?._id || '',
+        currentStatus: 'UNASSIGNED',
+        condition: 'NEW',
       });
     }
     setAssetModalOpen(true);
@@ -299,7 +308,23 @@ export const AssetsClaimsLoans = () => {
     }
   };
 
+  const handleReactivateAsset = async (id) => {
+    if (!window.confirm('Reactivate this retired asset and return it to available inventory stock?')) return;
+    try {
+      await assetsLoansApi.reactivateAsset(id);
+      showToast('Asset reactivated successfully and available for assignment!', 'success');
+      loadAssets();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to reactivate asset', 'error');
+    }
+  };
+
   const openAssignModal = (asset) => {
+    const status = getAssetStatus(asset);
+    if (status === 'RETIRED') {
+      showToast("This asset is RETIRED. Please reactivate it first before assignment.", 'warning');
+      return;
+    }
     setTargetAsset(asset);
     setAssignForm({
       employeeId: assignForm.employeeId || employees[0]?._id || employees[0]?.id || '',
@@ -311,6 +336,12 @@ export const AssetsClaimsLoans = () => {
 
   const handleAssignAsset = async (e) => {
     e.preventDefault();
+    if (!targetAsset) return;
+    const status = getAssetStatus(targetAsset);
+    if (status === 'RETIRED') {
+      showToast("Asset is marked as RETIRED. Please reactivate it before issuing.", 'error');
+      return;
+    }
     if (!assignForm.employeeId) {
       showToast('Please select an employee', 'warning');
       return;
@@ -724,27 +755,39 @@ export const AssetsClaimsLoans = () => {
       header: 'Status',
       key: 'status',
       render: (r) => {
-        const s = r.status || 'AVAILABLE';
+        const s = getAssetStatus(r);
         const colors = {
           AVAILABLE: 'success',
+          UNASSIGNED: 'success',
           ASSIGNED: 'primary',
+          IN_REPAIR: 'warning',
           DAMAGED: 'warning',
           LOST: 'danger',
-          RETIRED: 'secondary',
+          RETIRED: 'danger',
         };
-        return <Badge variant={colors[s] || 'secondary'}>{s}</Badge>;
+        const label = s === 'UNASSIGNED' ? 'AVAILABLE' : s;
+        return <Badge variant={colors[s] || 'secondary'}>{label}</Badge>;
       },
     },
     {
       header: 'Actions',
       key: 'actions',
       render: (r) => {
-        const isAssigned = r.status === 'ASSIGNED' || r.currentAssignment;
+        const s = getAssetStatus(r);
+        const isAssigned = s === 'ASSIGNED' || Boolean(r.currentAssignment);
+        const isRetired = s === 'RETIRED';
+        const isAvailable = (s === 'UNASSIGNED' || s === 'AVAILABLE') && !isAssigned;
+
         return (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {!isAssigned && r.status !== 'RETIRED' && (
+            {isAvailable && (
               <Button size="sm" variant="primary" icon={UserCheck} onClick={() => openAssignModal(r)}>
                 Assign
+              </Button>
+            )}
+            {isRetired && (
+              <Button size="sm" variant="light" icon={RotateCcw} title="Reactivate asset to make available for assignment" onClick={() => handleReactivateAsset(r._id)}>
+                Reactivate
               </Button>
             )}
             {isAssigned && (
@@ -758,7 +801,7 @@ export const AssetsClaimsLoans = () => {
             )}
             <Button size="sm" variant="outline" icon={History} title="Custody History" onClick={() => openHistoryModal(r)} />
             <Button size="sm" variant="outline" icon={Edit2} onClick={() => openAssetModal(r)} />
-            {r.status !== 'RETIRED' && (
+            {!isRetired && !isAssigned && (
               <Button size="sm" variant="danger" icon={Ban} title="Retire Asset" onClick={() => handleRetireAsset(r._id)} />
             )}
           </div>
@@ -1033,90 +1076,49 @@ export const AssetsClaimsLoans = () => {
       <div
         style={{
           display: 'flex',
-          gap: 4,
-          borderBottom: '1px solid var(--border-color)',
-          overflowX: 'auto',
+          gap: 6,
+          background: '#fff',
+          padding: '6px',
+          borderRadius: 10,
+          border: '1px solid var(--border-color)',
+          width: 'fit-content',
+          marginBottom: 16,
+          flexWrap: 'wrap',
         }}
       >
-        <button
-          type="button"
-          onClick={() => setActiveTab('assets')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '10px 16px',
-            border: 'none',
-            background: 'none',
-            borderBottom: activeTab === 'assets' ? '3px solid var(--primary)' : '3px solid transparent',
-            color: activeTab === 'assets' ? 'var(--primary)' : 'var(--text-muted)',
-            fontWeight: activeTab === 'assets' ? 700 : 500,
-            cursor: 'pointer',
-          }}
-        >
-          <Laptop size={16} />
-          <span>Physical Assets ({assets.length})</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('claims')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '10px 16px',
-            border: 'none',
-            background: 'none',
-            borderBottom: activeTab === 'claims' ? '3px solid var(--primary)' : '3px solid transparent',
-            color: activeTab === 'claims' ? 'var(--primary)' : 'var(--text-muted)',
-            fontWeight: activeTab === 'claims' ? 700 : 500,
-            cursor: 'pointer',
-          }}
-        >
-          <Receipt size={16} />
-          <span>Reimbursements & Claims ({claims.length})</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('categories')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '10px 16px',
-            border: 'none',
-            background: 'none',
-            borderBottom: activeTab === 'categories' ? '3px solid var(--primary)' : '3px solid transparent',
-            color: activeTab === 'categories' ? 'var(--primary)' : 'var(--text-muted)',
-            fontWeight: activeTab === 'categories' ? 700 : 500,
-            cursor: 'pointer',
-          }}
-        >
-          <Settings size={16} />
-          <span>Expense Categories ({categories.length})</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('loans')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '10px 16px',
-            border: 'none',
-            background: 'none',
-            borderBottom: activeTab === 'loans' ? '3px solid var(--primary)' : '3px solid transparent',
-            color: activeTab === 'loans' ? 'var(--primary)' : 'var(--text-muted)',
-            fontWeight: activeTab === 'loans' ? 700 : 500,
-            cursor: 'pointer',
-          }}
-        >
-          <HandCoins size={16} />
-          <span>Loans & Advances ({loans.length})</span>
-        </button>
+        {[
+          { key: 'assets', label: `Physical Assets (${assets.length})`, icon: Laptop },
+          { key: 'claims', label: `Reimbursements & Claims (${claims.length})`, icon: Receipt },
+          { key: 'categories', label: `Expense Categories (${categories.length})`, icon: Settings },
+          { key: 'loans', label: `Loans & Advances (${loans.length})`, icon: HandCoins },
+        ].map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveTab(tab.key)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '8px 16px',
+                borderRadius: 7,
+                border: 'none',
+                fontSize: '0.84rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease-in-out',
+                background: isActive ? 'var(--primary)' : 'transparent',
+                color: isActive ? '#fff' : 'var(--text-muted)',
+              }}
+            >
+              <Icon size={16} />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* TAB 1: ASSETS CONTENT */}
@@ -1324,6 +1326,34 @@ export const AssetsClaimsLoans = () => {
             />
           </div>
 
+          {editingAssetId && (
+            <div className="grid-2" style={{ marginTop: 12 }}>
+              <Select
+                label="Asset Status"
+                value={assetForm.currentStatus || 'UNASSIGNED'}
+                onChange={(e) => setAssetForm({ ...assetForm, currentStatus: e.target.value })}
+                options={[
+                  { value: 'UNASSIGNED', label: 'UNASSIGNED (Available for Assignment)' },
+                  { value: 'ASSIGNED', label: 'ASSIGNED (Under Employee Custody)' },
+                  { value: 'IN_REPAIR', label: 'IN_REPAIR (Under Maintenance)' },
+                  { value: 'RETIRED', label: 'RETIRED (Decommissioned)' },
+                ]}
+              />
+              <Select
+                label="Physical Condition"
+                value={assetForm.condition || 'GOOD'}
+                onChange={(e) => setAssetForm({ ...assetForm, condition: e.target.value })}
+                options={[
+                  { value: 'NEW', label: 'Brand New / Pristine' },
+                  { value: 'GOOD', label: 'Good Working Condition' },
+                  { value: 'FAIR', label: 'Fair / Normal Wear & Tear' },
+                  { value: 'DAMAGED', label: 'Damaged' },
+                  { value: 'RETIRED', label: 'Retired' },
+                ]}
+              />
+            </div>
+          )}
+
           <div className="modal-footer" style={{ margin: '20px -20px -20px' }}>
             <Button variant="secondary" onClick={() => setAssetModalOpen(false)}>
               Cancel
@@ -1345,6 +1375,41 @@ export const AssetsClaimsLoans = () => {
           <div style={{ marginBottom: 12, padding: 10, backgroundColor: 'var(--bg-subtle)', borderRadius: 6 }}>
             Tag: <strong>{targetAsset?.assetTag}</strong> • Category: {targetAsset?.category}
           </div>
+
+          {getAssetStatus(targetAsset) === 'RETIRED' && (
+            <div style={{
+              marginBottom: 14,
+              padding: '12px 14px',
+              backgroundColor: '#fef2f2',
+              border: '1px solid #fecaca',
+              borderRadius: 8,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10
+            }}>
+              <div>
+                <div style={{ fontWeight: 700, color: '#dc2626', fontSize: '0.84rem' }}>
+                  Asset is not available for assignment
+                </div>
+                <div style={{ fontSize: '0.78rem', color: '#991b1b', marginTop: 2 }}>
+                  Current status: &apos;RETIRED&apos;. Reactivate it to return to available stock.
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="light"
+                icon={RotateCcw}
+                onClick={async () => {
+                  await handleReactivateAsset(targetAsset._id);
+                  setAssignModalOpen(false);
+                }}
+              >
+                Reactivate Asset
+              </Button>
+            </div>
+          )}
+
           <Select
             label="Select Employee"
             placeholder="Select Employee..."
@@ -1377,7 +1442,12 @@ export const AssetsClaimsLoans = () => {
             <Button variant="secondary" onClick={() => setAssignModalOpen(false)}>
               Cancel
             </Button>
-            <Button variant="primary" type="submit" loading={submittingAssign}>
+            <Button
+              variant="primary"
+              type="submit"
+              loading={submittingAssign}
+              disabled={getAssetStatus(targetAsset) === 'RETIRED'}
+            >
               Issue Asset
             </Button>
           </div>

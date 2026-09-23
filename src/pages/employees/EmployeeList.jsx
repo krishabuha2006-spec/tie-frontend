@@ -146,7 +146,7 @@ const DetailCard = ({ title, subtitle, icon: Icon, action, children }) => (
   </div>
 );
 
-const DetailField = ({ label, value, isMono, isBadge, badgeVariant, emptyText = 'Not Provided', icon: Icon, copyable }) => {
+const DetailField = ({ label, value, isMono, isBadge, badgeVariant, emptyText = 'Not Provided', icon: Icon, copyable, onEdit }) => {
   const [copied, setCopied] = useState(false);
   const isEmpty = value === undefined || value === null || value === '' || value === '-';
 
@@ -237,6 +237,43 @@ const DetailField = ({ label, value, isMono, isBadge, badgeVariant, emptyText = 
             }}
           >
             {copied ? <Check size={13} color="var(--success)" /> : <Copy size={13} />}
+          </button>
+        </div>
+      ) : onEdit ? (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginTop: 1 }}>
+          <span
+            style={{
+              fontSize: '0.84rem',
+              fontWeight: 600,
+              color: 'var(--text-main)',
+              fontFamily: isMono ? 'monospace' : 'inherit',
+              letterSpacing: isMono ? '0.3px' : 'normal',
+              wordBreak: 'break-word',
+              lineHeight: 1.25,
+            }}
+          >
+            {value}
+          </span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit();
+            }}
+            title={`Edit ${label}`}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '2px 4px',
+              borderRadius: 4,
+              color: 'var(--primary)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <Edit2 size={13} />
           </button>
         </div>
       ) : (
@@ -937,7 +974,9 @@ export const EmployeeList = () => {
     if (section === 'basic') {
       const b = currentEmployeeDetail.basicInfo || {};
       setEditFormData({
+        employeeCode: b.employeeCode || currentEmployeeDetail.employeeCode || '',
         fullName: b.fullName || `${currentEmployeeDetail.firstName || ''} ${currentEmployeeDetail.lastName || ''}`.trim(),
+        email: b.email || currentEmployeeDetail.email || '',
         mobileNumber: b.mobileNumber || currentEmployeeDetail.phone || currentEmployeeDetail.mobile || '',
         alternateNumber: b.alternateNumber || '',
         gender: b.gender || currentEmployeeDetail.gender || 'MALE',
@@ -1002,6 +1041,17 @@ export const EmployeeList = () => {
     try {
       const empId = currentEmployeeDetail._id;
       if (editSection === 'basic') {
+        if (!editFormData.email?.trim()) {
+          showToast('Primary email address is required', 'warning');
+          setSavingSection(false);
+          return;
+        }
+        const emailErr = validateEmail(editFormData.email.trim(), { fieldName: 'Primary email' });
+        if (emailErr) {
+          showToast(emailErr, 'warning');
+          setSavingSection(false);
+          return;
+        }
         const phoneErr = validatePhone(editFormData.mobileNumber, { fieldName: 'Mobile number' });
         if (phoneErr) {
           showToast(phoneErr, 'warning');
@@ -2610,6 +2660,14 @@ export const EmployeeList = () => {
                           required
                         />
                         <Input
+                          label="Primary Email *"
+                          type="email"
+                          value={editFormData.email}
+                          onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
+                          placeholder="employee@tietechnologies.com"
+                          required
+                        />
+                        <Input
                           label="Mobile Number *"
                           type="tel"
                           isPhone={true}
@@ -2733,12 +2791,23 @@ export const EmployeeList = () => {
                     <DetailCard
                       title="Contact Information"
                       icon={Phone}
+                      action={
+                        <Button
+                          variant="secondary"
+                          icon={Edit2}
+                          onClick={() => startEditSection('basic')}
+                          style={{ fontSize: '0.78rem', padding: '4px 10px' }}
+                        >
+                          Edit Contact
+                        </Button>
+                      }
                     >
                       <div className="grid-3">
                         <DetailField
                           label="Primary Email"
                           value={currentEmployeeDetail.basicInfo?.email || currentEmployeeDetail.email}
                           icon={Mail}
+                          onEdit={() => startEditSection('basic')}
                         />
                         <DetailField
                           label="Mobile Phone"
@@ -2748,10 +2817,12 @@ export const EmployeeList = () => {
                             currentEmployeeDetail.mobile
                           }
                           icon={Phone}
+                          onEdit={() => startEditSection('basic')}
                         />
                         <DetailField
                           label="Alternate Contact"
                           value={currentEmployeeDetail.basicInfo?.alternateNumber}
+                          onEdit={() => startEditSection('basic')}
                         />
                       </div>
                     </DetailCard>
