@@ -63,6 +63,11 @@ export const employeeApi = {
         maritalStatus: data.maritalStatus || undefined,
       };
 
+      // Compute multi-role array before building employmentInfo
+      const rolesArr = Array.isArray(data.employeeRoles) && data.employeeRoles.length > 0
+        ? data.employeeRoles.map((r) => getObjectId(r)).filter(Boolean)
+        : (data.employeeRole ? [getObjectId(data.employeeRole || data.role)].filter(Boolean) : []);
+
       const employmentInfo = {
         department: getObjectId(data.department),
         designation: getObjectId(data.designation),
@@ -70,7 +75,9 @@ export const employeeApi = {
         dateOfJoining: data.dateOfJoining ? String(data.dateOfJoining).split('T')[0] : new Date().toISOString().split('T')[0],
         employmentType: data.employmentType || 'FULL_TIME',
         shift: data.shift || 'GENERAL',
-        employeeRole: getObjectId(data.employeeRole || data.role),
+        employeeRole: rolesArr[0] || undefined,
+        employeeRoles: rolesArr.length > 0 ? rolesArr : undefined,
+        roles: rolesArr.length > 0 ? rolesArr : undefined,
         employeeStatus: data.employeeStatus || data.status || 'ACTIVE',
         workType: data.workType || 'OFFICE',
         dutyHours: data.dutyHours ? Number(data.dutyHours) : 8,
@@ -220,9 +227,16 @@ export const employeeApi = {
     // Resolve Role safely
     let roleVal = getValidId(data.employeeRole) || getValidId(curEm.employeeRole);
 
-    // Resolve Department & Designation
-    const deptVal = typeof data.department === 'object' ? data.department?._id || data.department?.name : String(data.department || curEm.department || '');
-    const desigVal = typeof data.designation === 'object' ? data.designation?._id || data.designation?.title || data.designation?.name : String(data.designation || curEm.designation || '');
+    // Resolve Department & Designation to ObjectId (backend needs _id, not name strings)
+    const rawDeptStr = typeof data.department === 'object' ? data.department?._id : data.department;
+    const deptId = /^[0-9a-fA-F]{24}$/.test(String(rawDeptStr || ''))
+      ? String(rawDeptStr)
+      : (typeof curEm.department === 'object' ? curEm.department?._id : (/^[0-9a-fA-F]{24}$/.test(String(curEm.department || '')) ? curEm.department : undefined));
+
+    const rawDesigStr = typeof data.designation === 'object' ? data.designation?._id : data.designation;
+    const desigId = /^[0-9a-fA-F]{24}$/.test(String(rawDesigStr || ''))
+      ? String(rawDesigStr)
+      : (typeof curEm.designation === 'object' ? curEm.designation?._id : (/^[0-9a-fA-F]{24}$/.test(String(curEm.designation || '')) ? curEm.designation : undefined));
 
     // Employment type & work type enum normalization
     const empType = String(data.employmentType || curEm.employmentType || 'FULL_TIME').toUpperCase().replace(/\s+/g, '_');
@@ -233,13 +247,19 @@ export const employeeApi = {
     const validWorkTypes = ['OFFICE', 'FIELD', 'SITE', 'HYBRID'];
     const safeWorkType = validWorkTypes.includes(workType) ? workType : 'OFFICE';
 
+    // Roles array support
+    const rolesArrUp = Array.isArray(data.employeeRoles) && data.employeeRoles.length > 0
+      ? data.employeeRoles.filter((r) => /^[0-9a-fA-F]{24}$/.test(String(r)))
+      : (getValidId(data.employeeRole) ? [getValidId(data.employeeRole)] : []);
+
     const clean = {
-      department: deptVal || (typeof curEm.department === 'string' ? curEm.department : curEm.department?.name || 'General'),
-      designation: desigVal || (typeof curEm.designation === 'string' ? curEm.designation : curEm.designation?.title || 'Staff'),
+      ...(deptId ? { department: deptId } : {}),
+      ...(desigId ? { designation: desigId } : {}),
       branch: branchVal || (typeof curEm.branch === 'string' ? curEm.branch : curEm.branch?._id),
       dateOfJoining: getCleanDate(data.dateOfJoining || curEm.dateOfJoining),
       employmentType: safeEmpType,
-      employeeRole: roleVal || (typeof curEm.employeeRole === 'string' ? curEm.employeeRole : curEm.employeeRole?._id),
+      employeeRole: rolesArrUp[0] || roleVal || (typeof curEm.employeeRole === 'string' ? curEm.employeeRole : curEm.employeeRole?._id),
+      ...(rolesArrUp.length > 0 ? { employeeRoles: rolesArrUp, roles: rolesArrUp } : {}),
       workType: safeWorkType,
       shift: data.shift || curEm.shift || 'GENERAL',
       dutyHours: Number(data.dutyHours || curEm.dutyHours) || 8,

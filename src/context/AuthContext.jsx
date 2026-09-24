@@ -1,4 +1,4 @@
-﻿import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import authApi from '../api/authApi';
 import userApi from '../api/userApi';
 import masterApi from '../api/masterApi';
@@ -20,6 +20,7 @@ const defaultAuthValue = {
   isProjectExecutive: false,
   isAccountant: false,
   isEmployee: false,
+  isFieldStaff: false,
   allRoles: [],
   backendMenu: [],
   dashboardWidgets: [],
@@ -450,6 +451,11 @@ export const AuthProvider = ({ children }) => {
 
   const isEmployee = !isSuperAdmin && !isDirector && !isHrAdmin && !isBranchManager && !isProjectExecutive && !isAccountant;
 
+  const isFieldStaff =
+    String(user?.employee?.employmentInfo?.workType || user?.employee?.workType || user?.workType || '').toUpperCase().includes('FIELD') ||
+    String(user?.employee?.employmentInfo?.workType || user?.employee?.workType || user?.workType || '').toUpperCase().includes('SITE') ||
+    roleIds.some((rid) => rid.includes('field') || rid.includes('site'));
+
   const hasRole = useCallback(
     (roles) => {
       if (isSuperAdmin) return true;
@@ -483,29 +489,29 @@ export const AuthProvider = ({ children }) => {
   };
 
   const MODULE_PERMISSIONS_MAP = {
-    employees: { subKeys: ['hrms.employeeMaster', 'hrms.employees', 'employeeMaster', 'employees', 'hrmEmployees'], parentKeys: ['hrms'] },
-    attendance: { subKeys: ['hrms.attendance', 'project.attendance', 'attendance', 'attendanceManagement'], parentKeys: ['hrms', 'project'] },
-    leaves: { subKeys: ['hrms.leaveManagement', 'hrms.leaves', 'leaveManagement', 'leaves'], parentKeys: ['hrms', 'leaves'] },
-    payroll: { subKeys: ['hrms.payrollManagement', 'hrms.payroll', 'payrollManagement', 'payroll', 'accounting.invoices', 'accounting.ledger', 'accounting.payments'], parentKeys: ['hrms', 'accounting', 'accountingFinance', 'payroll'] },
-    recruitment: { subKeys: ['crm.leadManagement', 'crm.leads', 'crm.quotations', 'recruitment', 'recruitmentMaster'], parentKeys: ['crm', 'hrms'] },
-    'assets-claims': { subKeys: ['hrms.assetCustody', 'hrms.assets', 'assetCustody', 'assets-claims', 'assetsClaims', 'claims', 'reimbursements'], parentKeys: ['hrms', 'accounting', 'accountingFinance', 'inventory', 'reimbursements'] },
-    assets: { subKeys: ['hrms.assetCustody', 'hrms.assets', 'assetCustody', 'assets', 'assetsClaims'], parentKeys: ['hrms', 'accounting', 'accountingFinance', 'inventory'] },
-    claims: { subKeys: ['hrms.assetCustody', 'hrms.assets', 'assetCustody', 'claims', 'assetsClaims', 'reimbursements'], parentKeys: ['hrms', 'accounting', 'accountingFinance', 'reimbursements'] },
-    performance: { subKeys: ['hrms.kraManagement', 'hrms.kra', 'kraManagement', 'performance'], parentKeys: ['hrms'] },
-    lifecycle: { subKeys: ['hrms.employeeMaster', 'hrms.employees', 'lifecycle', 'employees'], parentKeys: ['hrms'] },
-    reports: { subKeys: ['hrms.hrmsReports', 'hrmsReports', 'administration.reportCenter', 'reportCenter', 'reports'], parentKeys: ['reports', 'hrms', 'admin', 'administration'] },
-    projects: { subKeys: ['projectManagement.projectCreation', 'projectCreation', 'projects', 'projectManagement.projectSite', 'project.tasks', 'project.drawings', 'installation-qc.checklists'], parentKeys: ['project', 'projectManagement', 'installation-qc', 'installationQC', 'noc-amc', 'operations'] },
-    'site-logs': { subKeys: ['projectManagement.issueManagement', 'issueManagement', 'siteLogs', 'site-logs', 'projectManagement.siteLog', 'installationQC.installationWorkflow', 'installation-qc.checklists'], parentKeys: ['project', 'projectManagement', 'installation-qc', 'installationQC', 'operations'] },
-    tasks: { subKeys: ['projectManagement.taskManagement', 'taskManagement', 'tasks', 'projectManagement.taskMilestone', 'project.tasks', 'project.design-tasks'], parentKeys: ['project', 'projectManagement', 'operations'] },
-    companies: { subKeys: ['administration.multiBranchCompany', 'multiBranchCompany', 'companies', 'admin.settings'], parentKeys: ['admin', 'administration'] },
-    branches: { subKeys: ['administration.multiBranchCompany', 'multiBranchCompany', 'branches', 'admin.settings'], parentKeys: ['admin', 'administration'] },
-    departments: { subKeys: ['administration.systemSettings', 'systemSettings', 'departments', 'admin.settings'], parentKeys: ['admin', 'administration'] },
-    designations: { subKeys: ['administration.systemSettings', 'systemSettings', 'designations', 'admin.settings'], parentKeys: ['admin', 'administration'] },
-    roles: { subKeys: ['administration.rolePermissionManagement', 'rolePermissionManagement', 'roles', 'admin.roles'], parentKeys: ['admin', 'administration'] },
-    users: { subKeys: ['administration.rolePermissionManagement', 'rolePermissionManagement', 'users', 'admin.users'], parentKeys: ['admin', 'administration'] },
-    masters: { subKeys: ['administration.multiBranchCompany', 'administration.systemSettings', 'administration.rolePermissionManagement', 'admin.roles', 'admin.users', 'admin.settings', 'masters'], parentKeys: ['admin', 'administration'] },
-    hrm: { isGroup: true, groupChildren: ['recruitment', 'employees', 'attendance', 'leaves', 'payroll', 'assets-claims', 'performance', 'reports'], parentKeys: ['hrms', 'hrm'] },
-    operations: { isGroup: true, groupChildren: ['projects', 'site-logs', 'tasks'], parentKeys: ['project', 'projectManagement', 'installation-qc', 'operations'] },
+    employees: { subKeys: ['hrms.employeeMaster', 'hrms.employees', 'employeeMaster', 'employees', 'hrmEmployees'], parentKey: 'hrms' },
+    attendance: { subKeys: ['hrms.attendance', 'project.attendance', 'attendance', 'attendanceManagement'], parentKey: 'hrms' },
+    leaves: { subKeys: ['hrms.leaveManagement', 'hrms.leaves', 'leaveManagement', 'leaves'], parentKey: 'hrms' },
+    payroll: { subKeys: ['hrms.payrollManagement', 'hrms.payroll', 'payrollManagement', 'payroll', 'accountingFinance.pakkaAccounting', 'accountingFinance.kachhaAccounting'], parentKey: 'hrms' },
+    recruitment: { subKeys: ['crm.leadManagement', 'crm.leads', 'crm.quotations', 'recruitment', 'recruitmentMaster'], parentKey: 'crm' },
+    'assets-claims': { subKeys: ['hrms.assetCustody', 'hrms.assets', 'assetCustody', 'assets-claims', 'assetsClaims', 'accountingFinance.expenseManagement', 'accountingFinance.profitLossAssets'], parentKey: 'hrms' },
+    assets: { subKeys: ['hrms.assetCustody', 'hrms.assets', 'assetCustody', 'assets', 'accountingFinance.profitLossAssets'], parentKey: 'hrms' },
+    claims: { subKeys: ['hrms.assetCustody', 'hrms.assets', 'accountingFinance.expenseManagement', 'claims', 'assetsClaims'], parentKey: 'hrms' },
+    performance: { subKeys: ['hrms.kraManagement', 'hrms.kra', 'kraManagement', 'performance'], parentKey: 'hrms' },
+    lifecycle: { subKeys: ['hrms.employeeMaster', 'hrms.employees', 'lifecycle', 'employees'], parentKey: 'hrms' },
+    reports: { subKeys: ['hrms.hrmsReports', 'hrmsReports', 'administration.reportCenter', 'reportCenter', 'reports'], parentKey: 'hrms' },
+    projects: { subKeys: ['projectManagement.projectCreation', 'projectCreation', 'projects', 'projectManagement.projectSite', 'project.tasks', 'project.drawings'], parentKey: 'projectManagement' },
+    'site-logs': { subKeys: ['projectManagement.issueManagement', 'issueManagement', 'siteLogs', 'site-logs', 'projectManagement.siteLog', 'installationQC.installationWorkflow', 'installation-qc.checklists'], parentKey: 'projectManagement' },
+    tasks: { subKeys: ['projectManagement.taskManagement', 'taskManagement', 'tasks', 'projectManagement.taskMilestone'], parentKey: 'projectManagement' },
+    companies: { subKeys: ['administration.multiBranchCompany', 'multiBranchCompany', 'companies', 'admin.settings'], parentKey: 'administration' },
+    branches: { subKeys: ['administration.multiBranchCompany', 'multiBranchCompany', 'branches', 'admin.settings'], parentKey: 'administration' },
+    departments: { subKeys: ['administration.systemSettings', 'systemSettings', 'departments', 'admin.settings'], parentKey: 'administration' },
+    designations: { subKeys: ['administration.systemSettings', 'systemSettings', 'designations', 'admin.settings'], parentKey: 'administration' },
+    roles: { subKeys: ['administration.rolePermissionManagement', 'rolePermissionManagement', 'roles', 'admin.roles'], parentKey: 'administration' },
+    users: { subKeys: ['administration.rolePermissionManagement', 'rolePermissionManagement', 'users', 'admin.users'], parentKey: 'administration' },
+    masters: { subKeys: ['administration.multiBranchCompany', 'administration.systemSettings', 'administration.rolePermissionManagement', 'admin.roles', 'admin.users', 'admin.settings', 'masters'], parentKey: 'administration' },
+    hrm: { isGroup: true, groupChildren: ['recruitment', 'employees', 'attendance', 'leaves', 'payroll', 'assets-claims', 'performance', 'reports'] },
+    operations: { isGroup: true, groupChildren: ['projects', 'site-logs', 'tasks'] },
   };
 
   const hasPermission = useCallback(
@@ -540,7 +546,7 @@ export const AuthProvider = ({ children }) => {
         if (parts.length === 2) {
           const [mod, act] = parts;
           const config = MODULE_PERMISSIONS_MAP[mod];
-          const candidateKeys = [...(config?.subKeys || []), mod, ...(config?.parentKeys || [])];
+          const candidateKeys = [...(config?.subKeys || []), mod];
           for (const ck of candidateKeys) {
             if (perms[ck] !== undefined && isActionGranted(perms[ck], act)) return true;
           }
@@ -548,7 +554,6 @@ export const AuthProvider = ({ children }) => {
           const [group, mod, act] = parts;
           const dotKey = `${group}.${mod}`;
           if (perms[dotKey] !== undefined && isActionGranted(perms[dotKey], act)) return true;
-          if (perms[group] !== undefined && isActionGranted(perms[group], act)) return true;
         }
       }
       return false;
@@ -561,45 +566,64 @@ export const AuthProvider = ({ children }) => {
       if (isSuperAdmin) return true;
       if (!user) return false;
       if (moduleKey === 'dashboard') return true;
+
       const config = MODULE_PERMISSIONS_MAP[moduleKey];
       if (config?.isGroup && Array.isArray(config.groupChildren)) {
         return config.groupChildren.some((child) => canAccessModule(child));
       }
+
       const bMenu = getMergedMenu(user);
       const perms = getMergedPermissions(user, allRoles);
       const hasBackendMenuConfig = Array.isArray(bMenu) && bMenu.length > 0;
       const hasConfiguredPerms = perms && typeof perms === 'object' && !Array.isArray(perms) && Object.keys(perms).length > 0;
+
+      // 1. Check custom backend menu configuration if explicitly assigned to role
       if (hasBackendMenuConfig && checkBackendMenuAccess(bMenu, moduleKey)) return true;
+
+      // 2. Check Granular RBAC Permissions saved in Role
       if (hasConfiguredPerms) {
+        if (perms['*'] === true || perms.all === true) return true;
+
+        // Check specific subkeys
         if (config?.subKeys) {
           for (const sk of config.subKeys) {
             if (perms[sk] !== undefined && isActionGranted(perms[sk], 'view')) return true;
           }
         }
+
+        // Check exact module key
         if (perms[moduleKey] !== undefined && isActionGranted(perms[moduleKey], 'view')) return true;
-        if (config?.parentKeys) {
-          for (const pk of config.parentKeys) {
-            if (perms[pk] !== undefined && isActionGranted(perms[pk], 'view')) return true;
-          }
-        }
+
+        // Check parent module key only if it is boolean true or has non-empty view access
+        if (config?.parentKey && perms[config.parentKey] === true) return true;
+
         const mLower = moduleKey.toLowerCase();
         for (const [pk, pval] of Object.entries(perms)) {
           const pkLower = pk.toLowerCase();
-          if (pkLower === mLower || pkLower.endsWith(`.${mLower}`) || (mLower.length > 4 && pkLower.includes(mLower))) {
+          if (pkLower === mLower || pkLower.endsWith(`.${mLower}`)) {
             if (isActionGranted(pval, 'view')) return true;
           }
         }
+
+        // If user has configured role permissions, strictly abide by them (do not leak unauthorized menus)
+        return false;
       }
-      if (hasBackendMenuConfig || hasConfiguredPerms) return false;
+
+      // 3. Fallback for unconfigured/legacy roles without explicit permissions matrix
       if (isDirector) return true;
       if (isHrAdmin) return ['hrm', 'employees', 'attendance', 'leaves', 'payroll', 'recruitment', 'performance', 'reports', 'assets-claims'].includes(moduleKey);
       if (isBranchManager) return ['hrm', 'attendance', 'leaves', 'operations', 'projects', 'tasks', 'employees'].includes(moduleKey);
       if (isProjectExecutive) return ['operations', 'projects', 'site-logs', 'tasks', 'attendance', 'leaves'].includes(moduleKey);
       if (isAccountant) return ['payroll', 'assets-claims', 'assets', 'claims', 'reports', 'attendance', 'leaves', 'hrm'].includes(moduleKey);
-      if (isEmployee) return ['attendance', 'leaves'].includes(moduleKey);
+      if (isEmployee) {
+        if (isFieldStaff) {
+          return ['attendance', 'leaves', 'operations', 'site-logs', 'tasks'].includes(moduleKey);
+        }
+        return ['attendance', 'leaves'].includes(moduleKey);
+      }
       return false;
     },
-    [isSuperAdmin, user, allRoles, isDirector, isHrAdmin, isBranchManager, isProjectExecutive, isAccountant, isEmployee]
+    [isSuperAdmin, user, allRoles, isDirector, isHrAdmin, isBranchManager, isProjectExecutive, isAccountant, isEmployee, isFieldStaff]
   );
 
   // ─── Derived State ─────────────────────────────────────────────────────────
@@ -613,8 +637,8 @@ export const AuthProvider = ({ children }) => {
       const names = user.roles.map((r) => (typeof r === 'object' ? r.displayName || r.name : r)).filter(Boolean);
       return names.join(', ');
     }
-    return user?.role?.displayName || user?.role?.name || (isAccountant ? 'Accountant' : 'Employee');
-  }, [isSuperAdmin, user, isAccountant]);
+    return user?.role?.displayName || user?.role?.name || (isAccountant ? 'Accountant' : (isFieldStaff ? 'Field Staff' : 'Employee'));
+  }, [isSuperAdmin, user, isAccountant, isFieldStaff]);
 
   const backendMenu = useMemo(() => getMergedMenu(user), [user]);
   const dashboardWidgets = useMemo(() => getMergedWidgets(user), [user]);
@@ -640,13 +664,13 @@ export const AuthProvider = ({ children }) => {
     () => ({
       user, loading, isAuthenticated: !!user, roleId, userRole,
       company: user?.company, branch: user?.branch || user?.branchId,
-      isSuperAdmin, isDirector, isHrAdmin, isBranchManager, isProjectExecutive, isAccountant, isEmployee,
+      isSuperAdmin, isDirector, isHrAdmin, isBranchManager, isProjectExecutive, isAccountant, isEmployee, isFieldStaff,
       allRoles, backendMenu, dashboardWidgets,
       hasRole, hasPermission, canAccessModule, hasBackendMenu, hasWidget,
       login, logout, refreshSession, fetchUserProfile, refreshRoles, updateProfile, changePassword,
     }),
     [user, loading, roleId, userRole, isSuperAdmin, isDirector, isHrAdmin, isBranchManager, isProjectExecutive,
-     isAccountant, isEmployee, allRoles, backendMenu, dashboardWidgets, hasRole, hasPermission, canAccessModule,
+     isAccountant, isEmployee, isFieldStaff, allRoles, backendMenu, dashboardWidgets, hasRole, hasPermission, canAccessModule,
      hasBackendMenu, hasWidget, login, logout, refreshSession, fetchUserProfile, refreshRoles, updateProfile, changePassword]
   );
 

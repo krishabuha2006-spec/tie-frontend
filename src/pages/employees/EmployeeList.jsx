@@ -39,6 +39,7 @@ import {
   UserX,
   Copy,
   Check,
+  ChevronDown,
 } from 'lucide-react';
 import Table from '../../components/common/Table';
 import Pagination from '../../components/common/Pagination';
@@ -284,6 +285,185 @@ const DetailField = ({ label, value, isMono, isBadge, badgeVariant, emptyText = 
   );
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// MultiRolePicker — Premium multi-select role assignment widget
+// ─────────────────────────────────────────────────────────────────────────────
+const MultiRolePicker = ({ roles = [], selectedIds = [], onChange }) => {
+  const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState('');
+  const ref = React.useRef(null);
+
+  // Close on outside click
+  React.useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const toggle = (id) => {
+    if (selectedIds.includes(id)) {
+      onChange(selectedIds.filter((x) => x !== id));
+    } else {
+      onChange([...selectedIds, id]);
+    }
+  };
+
+  const filtered = roles.filter((r) => {
+    const label = (r.displayName || r.name || '').toLowerCase();
+    return label.includes(search.toLowerCase());
+  });
+
+  const selectedRoles = roles.filter((r) => selectedIds.includes(r._id));
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      {/* Label */}
+      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: 5 }}>
+        Assigned System Role(s) <span style={{ color: '#ef4444' }}>*</span>
+      </label>
+
+      {/* Trigger button */}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 8, padding: '9px 12px', borderRadius: 9,
+          border: open ? '1.5px solid var(--primary)' : '1.5px solid #cbd5e1',
+          background: '#fff', cursor: 'pointer', boxShadow: open ? '0 0 0 3px rgba(13,148,136,0.12)' : 'none',
+          transition: 'border 0.15s, box-shadow 0.15s',
+        }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', flex: 1 }}>
+          {selectedRoles.length === 0 ? (
+            <span style={{ fontSize: '0.83rem', color: '#94a3b8' }}>— Click to assign roles —</span>
+          ) : (
+            selectedRoles.map((r) => (
+              <span key={r._id} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                background: 'linear-gradient(135deg, var(--primary), #0f766e)',
+                color: '#fff', padding: '2px 9px 2px 7px', borderRadius: 20,
+                fontSize: '0.75rem', fontWeight: 700, lineHeight: 1.5,
+              }}>
+                <ShieldCheck size={11} />
+                {r.displayName || r.name}
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => { e.stopPropagation(); toggle(r._id); }}
+                  onKeyDown={(e) => e.key === 'Enter' && toggle(r._id)}
+                  style={{ cursor: 'pointer', marginLeft: 2, opacity: 0.8, display: 'flex', alignItems: 'center' }}
+                >
+                  <X size={10} />
+                </span>
+              </span>
+            ))
+          )}
+        </span>
+        <ChevronDown size={15} color="#64748b" style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+      </button>
+
+      {/* Error hint */}
+      {selectedIds.length === 0 && (
+        <p style={{ margin: '3px 0 0', fontSize: '0.72rem', color: '#ef4444', fontWeight: 500 }}>
+          Please select at least one role
+        </p>
+      )}
+
+      {/* Dropdown panel */}
+      {open && (
+        <div style={{
+          position: 'absolute', zIndex: 1000, top: 'calc(100% + 4px)', left: 0, right: 0,
+          background: '#fff', border: '1.5px solid #e2e8f0', borderRadius: 10,
+          boxShadow: '0 8px 28px rgba(0,0,0,0.12)', overflow: 'hidden',
+        }}>
+          {/* Search bar */}
+          <div style={{ padding: '8px 10px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Search size={13} color="#94a3b8" />
+            <input
+              autoFocus
+              type="text"
+              placeholder="Search roles..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{
+                border: 'none', outline: 'none', fontSize: '0.81rem', background: 'transparent',
+                flex: 1, color: '#374151',
+              }}
+            />
+            {search && (
+              <button type="button" onClick={() => setSearch('')} style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}>
+                <X size={12} color="#94a3b8" />
+              </button>
+            )}
+          </div>
+
+          {/* Role list */}
+          <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+            {filtered.length === 0 ? (
+              <div style={{ padding: '14px 14px', fontSize: '0.8rem', color: '#94a3b8', textAlign: 'center' }}>
+                No roles found
+              </div>
+            ) : (
+              filtered.map((r) => {
+                const selected = selectedIds.includes(r._id);
+                return (
+                  <div
+                    key={r._id}
+                    onClick={() => toggle(r._id)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px',
+                      cursor: 'pointer', background: selected ? '#f0fdfa' : 'transparent',
+                      borderBottom: '1px solid #f8fafc',
+                      transition: 'background 0.1s',
+                    }}
+                    onMouseEnter={(e) => { if (!selected) e.currentTarget.style.background = '#f8fafc'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = selected ? '#f0fdfa' : 'transparent'; }}
+                  >
+                    {/* Custom checkbox */}
+                    <div style={{
+                      width: 17, height: 17, borderRadius: 5, flexShrink: 0,
+                      border: selected ? '2px solid var(--primary)' : '2px solid #cbd5e1',
+                      background: selected ? 'var(--primary)' : '#fff',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      transition: 'all 0.15s',
+                    }}>
+                      {selected && <Check size={10} color="#fff" strokeWidth={3} />}
+                    </div>
+                    <ShieldCheck size={13} color={selected ? 'var(--primary)' : '#94a3b8'} />
+                    <span style={{ fontSize: '0.83rem', fontWeight: selected ? 700 : 500, color: selected ? '#0d9488' : '#374151', flex: 1 }}>
+                      {r.displayName || r.name}
+                    </span>
+                    {selected && (
+                      <span style={{ fontSize: '0.68rem', color: 'var(--primary)', fontWeight: 700, background: '#f0fdfa', padding: '1px 7px', borderRadius: 20 }}>
+                        ✓ Selected
+                      </span>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Footer */}
+          <div style={{ padding: '7px 14px', borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fafafa' }}>
+            <span style={{ fontSize: '0.72rem', color: '#64748b' }}>
+              {selectedIds.length} role{selectedIds.length !== 1 ? 's' : ''} selected
+            </span>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              style={{ fontSize: '0.73rem', fontWeight: 600, color: 'var(--primary)', background: 'none', border: 'none', cursor: 'pointer' }}
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const EmployeeList = () => {
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -328,7 +508,7 @@ export const EmployeeList = () => {
     branch: '',
     department: '',
     designation: '',
-    employeeRole: '',
+    employeeRoles: [],
     reportingManager: '',
     employmentType: 'FULL_TIME',
     workType: 'OFFICE',
@@ -684,12 +864,15 @@ export const EmployeeList = () => {
       department: departments[0]?._id || '',
       designation: defaultDesig,
       // Auto-assign lowest-privilege role ('employee') — user doesn't need to pick it
-      employeeRole: (
-        roles.find((r) => /^employee$/i.test(r.name || r.slug || r.displayName || '')) ||
-        roles.find((r) => /(employee|staff|default)/i.test(r.name || r.slug || r.displayName || '')) ||
-        roles[roles.length - 1] || // last role is usually lowest privilege
-        roles[0]
-      )?._id || '',
+      employeeRoles: (() => {
+        const defaultRole = (
+          roles.find((r) => /^employee$/i.test(r.name || r.slug || r.displayName || '')) ||
+          roles.find((r) => /(employee|staff|default)/i.test(r.name || r.slug || r.displayName || '')) ||
+          roles[roles.length - 1] ||
+          roles[0]
+        );
+        return defaultRole ? [defaultRole._id] : [];
+      })(),
     });
     setDocFiles({
       JOINING_LETTER: null,
@@ -780,8 +963,8 @@ export const EmployeeList = () => {
         showToast('Designation selection is required', 'warning');
         return false;
       }
-      if (!newEmp.employeeRole) {
-        showToast('Assigned System Role is required', 'warning');
+      if (!newEmp.employeeRoles || newEmp.employeeRoles.length === 0) {
+        showToast('At least one Assigned System Role is required', 'warning');
         return false;
       }
       if (!newEmp.employmentType) {
@@ -1016,20 +1199,20 @@ export const EmployeeList = () => {
       const em = currentEmployeeDetail.employmentInfo || {};
       const doj = em.dateOfJoining || currentEmployeeDetail.dateOfJoining;
 
-      // Ensure department is resolved safely
+      // Ensure department is resolved to ObjectId (_id)
       const rawDept = em.department?._id || em.department || currentEmployeeDetail.department?._id || currentEmployeeDetail.department;
-      const matchedDept = departments.find((d) => d._id === rawDept || d.name === rawDept);
-      const deptVal = matchedDept?.name || matchedDept?._id || (typeof rawDept === 'string' ? rawDept : departments[0]?.name || departments[0]?._id || '');
+      const matchedDept = departments.find((d) => d._id === rawDept || d.name === rawDept || d.name?.toLowerCase() === String(rawDept).toLowerCase());
+      const deptVal = matchedDept?._id || (/^[0-9a-fA-F]{24}$/.test(String(rawDept)) ? String(rawDept) : departments[0]?._id || '');
 
       // Ensure branch is preserved from employee's actual valid record
       const rawBranch = em.branch?._id || em.branch || currentEmployeeDetail.branch?._id || currentEmployeeDetail.branch;
       let matchedBranch = branches.find((b) => b._id === rawBranch || b.name === rawBranch);
       const branchId = /^[0-9a-fA-F]{24}$/.test(String(rawBranch)) ? String(rawBranch) : (matchedBranch?._id || String(rawBranch || ''));
 
-      // Ensure designation is resolved safely
+      // Ensure designation is resolved to ObjectId (_id)
       const rawDesig = em.designation?._id || em.designation || currentEmployeeDetail.designation?._id || currentEmployeeDetail.designation;
-      const matchedDesig = designations.find((d) => d._id === rawDesig || d.name === rawDesig || d.title === rawDesig);
-      const desigVal = matchedDesig?.title || matchedDesig?.name || matchedDesig?._id || (typeof rawDesig === 'string' ? rawDesig : designations[0]?.title || designations[0]?._id || '');
+      const matchedDesig = designations.find((d) => d._id === rawDesig || d.name === rawDesig || d.title === rawDesig || d.title?.toLowerCase() === String(rawDesig).toLowerCase() || d.name?.toLowerCase() === String(rawDesig).toLowerCase());
+      const desigVal = matchedDesig?._id || (/^[0-9a-fA-F]{24}$/.test(String(rawDesig)) ? String(rawDesig) : designations[0]?._id || '');
 
       const rawMgr = em.reportingManager?._id || em.reportingManager || currentEmployeeDetail.reportingManager?._id || currentEmployeeDetail.reportingManager || '';
       const mgrId = /^[0-9a-fA-F]{24}$/.test(rawMgr) ? rawMgr : '';
@@ -1044,7 +1227,14 @@ export const EmployeeList = () => {
         shift: em.shift || 'GENERAL',
         dutyHours: em.dutyHours || 8,
         dateOfJoining: doj ? new Date(doj).toISOString().split('T')[0] : '2024-01-01',
-        employeeRole: em.employeeRole?._id || em.employeeRole || currentEmployeeDetail.employeeRole?._id || currentEmployeeDetail.employeeRole || roles[0]?._id || '',
+        employeeRoles: (() => {
+          const existing = em.employeeRoles || currentEmployeeDetail.employeeRoles || [];
+          if (Array.isArray(existing) && existing.length > 0) {
+            return existing.map((r) => (typeof r === 'object' ? r._id : r)).filter(Boolean);
+          }
+          const single = em.employeeRole?._id || em.employeeRole || currentEmployeeDetail.employeeRole?._id || currentEmployeeDetail.employeeRole;
+          return single ? [single] : (roles[0]?._id ? [roles[0]._id] : []);
+        })(),
       });
     } else if (section === 'government') {
       const g = currentEmployeeDetail.governmentDetails || {};
@@ -1119,43 +1309,49 @@ export const EmployeeList = () => {
       } else if (editSection === 'employment') {
         const em = currentEmployeeDetail.employmentInfo || {};
         const defaultRole = roles.find((r) => r.name === 'employee')?._id || roles[0]?._id || 'employee';
-        const roleId =
-          editFormData.employeeRole ||
-          em.employeeRole?._id ||
-          em.employeeRole ||
-          currentEmployeeDetail.employeeRole?._id ||
-          currentEmployeeDetail.employeeRole ||
-          defaultRole;
+        // Build roles array from editFormData.employeeRoles
+        const rolesArr = Array.isArray(editFormData.employeeRoles) && editFormData.employeeRoles.length > 0
+          ? editFormData.employeeRoles
+          : [defaultRole];
+        const roleId = rolesArr[0]; // primary role for legacy employeeRole field
 
-        const doj = editFormData.dateOfJoining || em.dateOfJoining || currentEmployeeDetail.dateOfJoining;
+        // Resolve department to ObjectId
+        const rawDept2 = editFormData.department || em.department?._id || em.department;
+        const matchedDept2 = departments.find((d) => d._id === rawDept2 || d.name === rawDept2 || d.name?.toLowerCase() === String(rawDept2).toLowerCase());
+        const deptId = matchedDept2?._id || (/^[0-9a-fA-F]{24}$/.test(String(rawDept2)) ? String(rawDept2) : departments[0]?._id || rawDept2);
 
-        // Resolve department: prefer name per Swagger Module 2 schema, fallback to ID
-        const rawDept = editFormData.department || em.department?._id || em.department;
-        const matchedDept = departments.find((d) => d._id === rawDept || d.name === rawDept);
-        const deptVal = matchedDept?.name || (typeof rawDept === 'string' && !/^[0-9a-fA-F]{24}$/.test(rawDept) ? rawDept : (matchedDept?._id || departments[0]?.name || 'General'));
+        // Resolve designation to ObjectId
+        const rawDesig2 = editFormData.designation || em.designation?._id || em.designation;
+        const matchedDesig2 = designations.find((d) => d._id === rawDesig2 || d.name === rawDesig2 || d.title === rawDesig2 || d.title?.toLowerCase() === String(rawDesig2).toLowerCase() || d.name?.toLowerCase() === String(rawDesig2).toLowerCase());
+        const desigId = matchedDesig2?._id || (/^[0-9a-fA-F]{24}$/.test(String(rawDesig2)) ? String(rawDesig2) : designations[0]?._id || rawDesig2);
 
-        // Resolve designation: prefer title/name per Swagger Module 2 schema, fallback to ID
-        const rawDesig = editFormData.designation || em.designation?._id || em.designation;
-        const matchedDesig = designations.find((d) => d._id === rawDesig || d.name === rawDesig || d.title === rawDesig);
-        const desigVal = matchedDesig?.title || matchedDesig?.name || (typeof rawDesig === 'string' && !/^[0-9a-fA-F]{24}$/.test(rawDesig) ? rawDesig : (matchedDesig?._id || 'Staff'));
+        // Resolve branch to ObjectId
+        const rawBranch2 = editFormData.branch || em.branch?._id || em.branch || currentEmployeeDetail.branch?._id || currentEmployeeDetail.branch;
+        const matchedBranch2 = branches.find((b) => b._id === rawBranch2 || b.name === rawBranch2);
+        const branchId2 = /^[0-9a-fA-F]{24}$/.test(String(rawBranch2)) ? String(rawBranch2) : (matchedBranch2?._id || rawBranch2);
 
-        // Resolve branch: ensure we use the employee's company branch, never an arbitrary other company's branch
-        const rawBranch = editFormData.branch || em.branch?._id || em.branch || currentEmployeeDetail.branch?._id || currentEmployeeDetail.branch;
-        let matchedBranch = branches.find((b) => b._id === rawBranch || b.name === rawBranch);
-        const branchId = /^[0-9a-fA-F]{24}$/.test(String(rawBranch))
-          ? String(rawBranch)
-          : (matchedBranch?._id || (typeof em.branch === 'object' ? em.branch?._id : em.branch) || branches[0]?._id);
+        const safeDoj = editFormData.dateOfJoining || em.dateOfJoining || currentEmployeeDetail.dateOfJoining;
+        let formattedDoj = '2024-01-01';
+        try {
+          if (safeDoj) {
+            formattedDoj = new Date(safeDoj).toISOString().split('T')[0];
+          }
+        } catch {
+          formattedDoj = String(safeDoj || '2024-01-01').split('T')[0];
+        }
 
         const payload = {
-          department: deptVal,
-          designation: desigVal,
-          branch: branchId,
+          department: deptId,
+          designation: desigId,
+          branch: branchId2,
           employmentType: editFormData.employmentType || em.employmentType || 'FULL_TIME',
           workType: editFormData.workType || em.workType || 'OFFICE',
           shift: editFormData.shift || em.shift || 'GENERAL',
           dutyHours: Number(editFormData.dutyHours) || 8,
-          dateOfJoining: doj ? new Date(doj).toISOString().split('T')[0] : '2024-01-01',
+          dateOfJoining: formattedDoj,
           employeeRole: roleId,
+          employeeRoles: rolesArr,
+          roles: rolesArr,
         };
 
         if (editFormData.reportingManager && /^[0-9a-fA-F]{24}$/.test(editFormData.reportingManager) && String(editFormData.reportingManager) !== String(empId)) {
@@ -1385,7 +1581,13 @@ export const EmployeeList = () => {
         showToast('✓ Face registered successfully! Employee can now punch attendance.', 'success');
       }
 
-      // Update local state immediately to reflect enrollment
+      // Save registered selfie persistently for client-side biometric matching
+      const empCode = employeeToEnroll?.basicInfo?.employeeCode || employeeToEnroll?.employeeCode;
+      saveRegisteredSelfie(empId, empCode, img);
+      try {
+        localStorage.setItem(`tie_face_enrolled_${empId}`, 'true');
+        if (empCode) localStorage.setItem(`tie_face_enrolled_${empCode}`, 'true');
+      } catch {}
       setEmployees((prev) =>
         prev.map((e) =>
           (e._id === empId || e.id === empId)
@@ -2166,12 +2368,11 @@ export const EmployeeList = () => {
                   })),
                 ]}
               />
-              <Select
-                label="Assigned System Role *"
-                value={newEmp.employeeRole}
-                onChange={(e) => setNewEmp({ ...newEmp, employeeRole: e.target.value })}
-                options={roles.map((r) => ({ value: r._id, label: r.displayName || r.name }))}
-                required
+              {/* Multi-Role Picker */}
+              <MultiRolePicker
+                roles={roles}
+                selectedIds={newEmp.employeeRoles}
+                onChange={(ids) => setNewEmp({ ...newEmp, employeeRoles: ids })}
               />
               <Select
                 label="Employment Type"
@@ -2955,14 +3156,20 @@ export const EmployeeList = () => {
                             setEditFormData({ ...editFormData, department: val });
                             if (val) fetchDesignations(val);
                           }}
-                          options={departments.map((d) => ({ value: d.name || d._id, label: d.name }))}
+                          options={departments.map((d) => ({
+                            value: d._id || d.name,
+                            label: d.name || d.departmentName || d._id,
+                          }))}
                         />
                         <Select
                           label="Designation *"
                           placeholder="Select Designation"
                           value={editFormData.designation}
                           onChange={(e) => setEditFormData({ ...editFormData, designation: e.target.value })}
-                          options={designationOptions.map((d) => ({ value: d.label || d.value, label: d.label }))}
+                          options={designations.map((d) => ({
+                            value: d._id || d.id || d.name || d.title,
+                            label: d.name || d.title || d.label || d._id,
+                          }))}
                         />
                         <Select
                           label="Branch *"
@@ -3037,11 +3244,11 @@ export const EmployeeList = () => {
                           value={editFormData.dateOfJoining}
                           onChange={(e) => setEditFormData({ ...editFormData, dateOfJoining: e.target.value })}
                         />
-                        <Select
-                          label="Assigned System Role *"
-                          value={editFormData.employeeRole}
-                          onChange={(e) => setEditFormData({ ...editFormData, employeeRole: e.target.value })}
-                          options={roles.map((r) => ({ value: r._id, label: r.displayName || r.name || r.slug || r._id }))}
+                        {/* Multi-Role Picker (Edit) */}
+                        <MultiRolePicker
+                          roles={roles}
+                          selectedIds={editFormData.employeeRoles || []}
+                          onChange={(ids) => setEditFormData({ ...editFormData, employeeRoles: ids })}
                         />
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
@@ -3128,19 +3335,34 @@ export const EmployeeList = () => {
                           }
                           icon={User}
                         />
-                        <DetailField
-                          label="Assigned System Role"
-                          value={(() => {
-                            const roleRef = currentEmployeeDetail.employmentInfo?.employeeRole || currentEmployeeDetail.employeeRole;
-                            if (!roleRef) return 'Not Assigned';
-                            if (typeof roleRef === 'object') return roleRef.displayName || roleRef.name || roleRef.slug || 'Role Assigned';
-                            const matched = roles.find((r) => r._id === roleRef || r.name === roleRef);
-                            return matched ? (matched.displayName || matched.name || matched.slug) : roleRef;
-                          })()}
-                          isBadge
-                          badgeVariant="primary"
-                          icon={ShieldCheck}
-                        />
+                        <div style={{ gridColumn: 'span 2' }}>
+                          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <ShieldCheck size={13} /> Assigned System Role(s)
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                            {(() => {
+                              const rolesArr = currentEmployeeDetail.employmentInfo?.employeeRoles || currentEmployeeDetail.employeeRoles || [];
+                              const single = currentEmployeeDetail.employmentInfo?.employeeRole || currentEmployeeDetail.employeeRole;
+                              const list = rolesArr.length > 0 ? rolesArr : (single ? [single] : []);
+                              if (list.length === 0) return <span style={{ fontSize: '0.82rem', color: '#94a3b8' }}>Not Assigned</span>;
+                              return list.map((roleRef, idx) => {
+                                const rId = typeof roleRef === 'object' ? roleRef._id : roleRef;
+                                const matched = roles.find((r) => r._id === rId || r.name === rId);
+                                const label = matched ? (matched.displayName || matched.name) : (typeof roleRef === 'object' ? (roleRef.displayName || roleRef.name) : roleRef);
+                                return (
+                                  <span key={idx} style={{
+                                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                                    background: 'linear-gradient(135deg, var(--primary) 0%, #1e565d 100%)',
+                                    color: '#fff', padding: '3px 10px',
+                                    borderRadius: 20, fontSize: '0.78rem', fontWeight: 600,
+                                  }}>
+                                    <ShieldCheck size={11} /> {label}
+                                  </span>
+                                );
+                              });
+                            })()}
+                          </div>
+                        </div>
                         <DetailField
                           label="Salary Structure"
                           value={

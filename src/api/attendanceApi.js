@@ -291,8 +291,13 @@ export const attendanceApi = {
   },
 
   getMySiteAttendance: async (params) => {
-    const res = await apiClient.get('/attendance/site/me', { params });
-    return res.data;
+    try {
+      const res = await apiClient.get('/attendance/site/me', { params });
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 404) return { data: [], records: [] };
+      throw err;
+    }
   },
 
   getAllSiteAttendance: async (params) => {
@@ -309,8 +314,14 @@ export const attendanceApi = {
   },
 
   getEmployeeSiteAttendance: async (employeeId, params) => {
-    const res = await apiClient.get(`/attendance/site/employees/${employeeId}`, { params });
-    return res.data;
+    if (!employeeId) return { data: [], records: [] };
+    try {
+      const res = await apiClient.get(`/attendance/site/employees/${employeeId}`, { params });
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 404) return { data: [], records: [] };
+      throw err;
+    }
   },
 
   correctSiteAttendance: async (id, data) => {

@@ -260,13 +260,19 @@ export const SiteAttendance = () => {
         gpsAccuracy: coords.gpsAccuracy,
       });
 
-      const sitesList = res?.sites || res?.data?.sites || (Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []));
+      const sitesList =
+        res?.candidateSites ||
+        res?.sites ||
+        res?.data?.candidateSites ||
+        res?.data?.sites ||
+        (Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []));
       setDetectedSites(sitesList);
 
       if (sitesList.length > 0) {
         setSelectedCandidateSite(sitesList[0]);
-        if (sitesList[0].eligibleTasks?.length > 0) {
-          setSelectedTaskId(sitesList[0].eligibleTasks[0]._id);
+        const tasks = sitesList[0].eligibleTasks || sitesList[0].assignedTasks || [];
+        if (tasks.length > 0) {
+          setSelectedTaskId(tasks[0]._id || tasks[0].id);
         }
         showToast(`Detected ${sitesList.length} candidate project site(s) within 500m!`, 'success');
       } else {

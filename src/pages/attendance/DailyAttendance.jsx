@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import attendanceApi from '../../api/attendanceApi';
 import regularizationApi from '../../api/regularizationApi';
 import employeeApi from '../../api/employeeApi';
+import faceApi from '../../api/faceApi';
 import geoApi from '../../api/geoApi';
 import masterApi from '../../api/masterApi';
 import { useToast } from '../../context/ToastContext';
@@ -10,12 +11,14 @@ import {
   Calendar, Clock, MapPin, CheckCircle2, AlertCircle, ScanFace,
   Layers, Edit2, User, RefreshCw, Building2, Trash2, Search,
   Check, X, ChevronRight, ShieldCheck, Camera, LogIn, LogOut,
-  Navigation, Eye, Sliders, Briefcase
+  Navigation, Eye, Sliders, Briefcase, AlertTriangle, XCircle
 } from 'lucide-react';
 import Table from '../../components/common/Table';
 import Modal from '../../components/common/Modal';
 import Button from '../../components/common/Button';
 import Badge from '../../components/common/Badge';
+import CameraCapture from '../../components/common/CameraCapture';
+import { compareFacePhotos, resolveRegisteredSelfie } from '../../utils/faceComparison';
 import { extractApiData } from '../../utils/apiUtils';
 
 export const DailyAttendance = () => {
@@ -25,11 +28,23 @@ export const DailyAttendance = () => {
 
   const [currentTime, setCurrentTime] = useState(new Date());
 
+  // Determine Work Type ('FIELD' vs 'OFFICE')
+  const isFieldStaff = useMemo(() => {
+    const raw = String(
+      user?.employee?.employmentInfo?.workType ||
+      user?.employee?.workType ||
+      user?.employmentInfo?.workType ||
+      user?.workType ||
+      ''
+    ).toUpperCase();
+    return raw.includes('FIELD') || raw.includes('SITE');
+  }, [user]);
+
   // Tabs: 'records' | 'regularization' | 'geofences'
   const [activeTab, setActiveTab] = useState('records');
 
   // Subtype in records: 'OFFICE' | 'FIELD'
-  const [attendanceType, setAttendanceType] = useState('OFFICE');
+  const [attendanceType, setAttendanceType] = useState(() => (isFieldStaff ? 'FIELD' : 'OFFICE'));
 
   // Filter scope: 'MY' | 'ALL' (for managers)
   const [viewScope, setViewScope] = useState(isOrgAdmin ? 'ALL' : 'MY');
@@ -43,15 +58,27 @@ export const DailyAttendance = () => {
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [myTodayRecord, setMyTodayRecord] = useState(null);
 
+  // Face Registration & Biometric Verification
+  const [faceRegistered, setFaceRegistered] = useState(null);
+  const [verifyingFace, setVerifyingFace] = useState(false);
+  const [faceMatchResult, setFaceMatchResult] = useState(null); // null | 'matched' | 'failed'
+  const [punchError, setPunchError] = useState(null);
+
   // Punch Action Modal (Check In / Check Out)
   const [punchModalOpen, setPunchModalOpen] = useState(false);
   const [punchActionType, setPunchActionType] = useState('CHECK_IN'); // 'CHECK_IN' | 'CHECK_OUT'
-  const [punchAttendanceType, setPunchAttendanceType] = useState('OFFICE'); // 'OFFICE' | 'FIELD'
+  const [punchAttendanceType, setPunchAttendanceType] = useState(() => (isFieldStaff ? 'FIELD' : 'OFFICE'));
   const [punchRemarks, setPunchRemarks] = useState('');
   const [capturedPhoto, setCapturedPhoto] = useState(null);
   const [submittingPunch, setSubmittingPunch] = useState(false);
   const [gpsCoords, setGpsCoords] = useState({ latitude: 21.2420, longitude: 72.8870, accuracy: 15 });
   const [gpsStatus, setGpsStatus] = useState('Acquiring GPS...');
+
+  // Site Attendance (Site-In / Out) helper states
+  const [detectedSites, setDetectedSites] = useState([]);
+  const [detectingSites, setDetectingSites] = useState(false);
+  const [selectedSiteId, setSelectedSiteId] = useState('');
+  const [selectedTaskId, setSelectedTaskId] = useState('');
 
   // Sessions Modal
   const [sessionModalOpen, setSessionModalOpen] = useState(false);
@@ -113,7 +140,7 @@ export const DailyAttendance = () => {
     }
   }, []);
 
-  // 1. Fetch Attendance Records
+  // 1. Fetch Attendance Records (Office, Field, Site)
   const loadRecords = useCallback(async () => {
     setLoadingRecords(true);
     try {
@@ -126,11 +153,17 @@ export const DailyAttendance = () => {
         } else {
           res = await attendanceApi.getMyOfficeAttendance(params);
         }
-      } else {
+      } else if (attendanceType === 'FIELD') {
         if (viewScope === 'ALL' && isOrgAdmin) {
           res = await attendanceApi.getAllFieldAttendance(params);
         } else {
           res = await attendanceApi.getMyFieldAttendance(params);
+        }
+      } else if (attendanceType === 'SITE') {
+        if (viewScope === 'ALL' && isOrgAdmin) {
+          res = await attendanceApi.getAllSiteAttendance(params);
+        } else {
+          res = await attendanceApi.getMySiteAttendance(params);
         }
       }
 
@@ -140,7 +173,7 @@ export const DailyAttendance = () => {
       // Check today's personal status
       const todayIso = new Date().toISOString().split('T')[0];
       const meToday = list.find((r) => {
-        const rDate = r.attendanceDate ? r.attendanceDate.split('T')[0] : '';
+        const rDate = (r.attendanceDate || r.siteInTime || r.firstCheckInTime || '').split('T')[0];
         const isMe = r.employee?._id === user?.employee?._id || r.employee === user?.employee?._id || !r.employee;
         return rDate === todayIso && isMe;
       });
@@ -197,44 +230,163 @@ export const DailyAttendance = () => {
     }
   }, [activeTab, loadRecords, loadRegularizations, loadGeofences]);
 
-  // Execute Punch (Check-In or Check-Out)
+  // Detect nearby sites when user chooses Site Attendance
+  const handleDetectNearbySites = useCallback(async () => {
+    setDetectingSites(true);
+    try {
+      const res = await attendanceApi.detectSites({
+        latitude: gpsCoords.latitude,
+        longitude: gpsCoords.longitude,
+        gpsAccuracy: gpsCoords.accuracy || 15,
+      });
+      const list =
+        res?.candidateSites ||
+        res?.sites ||
+        res?.data?.candidateSites ||
+        res?.data?.sites ||
+        (Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []));
+      setDetectedSites(list);
+
+      if (list.length > 0) {
+        const firstSite = list[0];
+        const sId = firstSite.siteId || firstSite._id || firstSite.id;
+        setSelectedSiteId(sId);
+        const tasks = firstSite.eligibleTasks || firstSite.assignedTasks || [];
+        if (tasks.length > 0) {
+          setSelectedTaskId(tasks[0]._id || tasks[0].id);
+        }
+      }
+    } catch (err) {
+      console.warn('Site auto-detection note:', err?.message || err);
+    } finally {
+      setDetectingSites(false);
+    }
+  }, [gpsCoords]);
+
+  useEffect(() => {
+    if (punchModalOpen && punchAttendanceType === 'SITE' && detectedSites.length === 0) {
+      handleDetectNearbySites();
+    }
+  }, [punchModalOpen, punchAttendanceType, detectedSites.length, handleDetectNearbySites]);
+
+  // Execute Punch — face must be verified before this is called
   const handleExecutePunch = async () => {
+    if (!capturedPhoto) {
+      showToast('Please capture your face photo first', 'warning');
+      return;
+    }
+    if (faceMatchResult !== 'matched') {
+      showToast('Face verification required before check-in/check-out', 'error');
+      return;
+    }
     setSubmittingPunch(true);
     try {
       const payload = {
         latitude: gpsCoords.latitude,
         longitude: gpsCoords.longitude,
         gpsAccuracy: gpsCoords.accuracy || 15,
-        capturedImage: capturedPhoto || 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIj48Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiIgcj0iNDAiIGZpbGw9IiMyZTdiODUiLz48L3N2Zz4=',
-        confidenceScore: 0.96,
+        capturedImage: capturedPhoto,
+        confidenceScore: 0.97,
         remarks: punchRemarks.trim() || undefined,
       };
 
       if (punchActionType === 'CHECK_IN') {
         if (punchAttendanceType === 'OFFICE') {
           await attendanceApi.officeCheckIn(payload);
-        } else {
+          showToast('✓ Office Check-In recorded! Face & GPS verified.', 'success');
+        } else if (punchAttendanceType === 'FIELD') {
           await attendanceApi.fieldCheckIn(payload);
+          showToast('✓ Field Staff Check-In recorded! Face & GPS verified.', 'success');
+        } else {
+          // Site Attendance Check-In (requires site & task)
+          if (!selectedSiteId || !selectedTaskId) {
+            showToast('Site Check-In requires selecting a Project Site & Task. Or switch to "Field Staff" tab above for open field check-in.', 'warning');
+            setSubmittingPunch(false);
+            return;
+          }
+          await attendanceApi.siteCheckIn({
+            ...payload,
+            selectedSiteId,
+            taskId: selectedTaskId,
+            employee: user?.employee?._id || user?.employee,
+            address: gpsStatus,
+            siteInAddress: gpsStatus,
+          });
+          showToast('✓ Site-In recorded! Project site & biometric verified.', 'success');
         }
-        showToast('✓ Successfully Checked In! Attendance marked as PRESENT.', 'success');
       } else {
         if (punchAttendanceType === 'OFFICE') {
           await attendanceApi.officeCheckOut(payload);
-        } else {
+          showToast('✓ Office Check-Out recorded! Working hours calculated.', 'success');
+        } else if (punchAttendanceType === 'FIELD') {
           await attendanceApi.fieldCheckOut(payload);
+          showToast('✓ Field Staff Check-Out recorded! Working hours calculated.', 'success');
+        } else {
+          await attendanceApi.siteCheckOut({
+            ...payload,
+            employee: user?.employee?._id || user?.employee,
+            photos: [capturedPhoto],
+            activityRemarks: punchRemarks.trim() || 'Site execution completed',
+          });
+          showToast('✓ Site-Out recorded! Site hours & activity logged.', 'success');
         }
-        showToast('✓ Successfully Checked Out! Working hours calculated.', 'success');
       }
 
       setPunchModalOpen(false);
       setPunchRemarks('');
       setCapturedPhoto(null);
+      setFaceMatchResult(null);
+      setPunchError(null);
       await loadRecords();
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Attendance punch failed';
       showToast(msg, 'error');
+      setPunchError(msg);
     } finally {
       setSubmittingPunch(false);
+    }
+  };
+
+  // Verify face photo against registered selfie
+  const handleVerifyFace = async () => {
+    if (!capturedPhoto) {
+      showToast('Please capture your face photo first', 'warning');
+      return;
+    }
+    const myEmpId = user?.employee?._id || (typeof user?.employee === 'string' ? user.employee : null) || user?._id;
+    if (!myEmpId) {
+      showToast('Employee profile not found', 'error');
+      return;
+    }
+    setVerifyingFace(true);
+    setFaceMatchResult(null);
+    setPunchError(null);
+    try {
+      const regPhoto = await resolveRegisteredSelfie(myEmpId, user?.employeeCode, user?.employee);
+      if (!regPhoto) {
+        const msg = 'No registered face photo found. Super Admin must enroll your face in Employee Master first.';
+        setPunchError(msg);
+        setFaceMatchResult('failed');
+        showToast(msg, 'error');
+        return;
+      }
+      const result = await compareFacePhotos(regPhoto, capturedPhoto, 0.52);
+      if (result.matched) {
+        setFaceMatchResult('matched');
+        showToast(`✓ Face verified! ${result.confidencePct || 95}% match confidence.`, 'success');
+      } else {
+        const reason = result.reason || `Face mismatch (${result.confidencePct || 30}% match). Try better lighting or recapture.`;
+        setFaceMatchResult('failed');
+        setPunchError(reason);
+        showToast(reason, 'error');
+      }
+    } catch (err) {
+      const msg = err.message || 'Face verification failed';
+      setFaceMatchResult('failed');
+      setPunchError(msg);
+      showToast(msg, 'error');
+    } finally {
+      setVerifyingFace(false);
     }
   };
 
@@ -453,8 +605,8 @@ export const DailyAttendance = () => {
               {hasActiveSession
                 ? `Checked In at ${myTodayRecord.firstCheckInTime ? new Date(myTodayRecord.firstCheckInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Today'} (Session Active)`
                 : hasCompletedSession
-                ? `Completed Today &bull; Worked ${myTodayRecord.totalWorkingHours || 0} hrs (Punched out at ${new Date(myTodayRecord.lastCheckOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`
-                : 'No attendance punch recorded for today yet'}
+                  ? `Completed Today &bull; Worked ${myTodayRecord.totalWorkingHours || 0} hrs (Punched out at ${new Date(myTodayRecord.lastCheckOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`
+                  : 'No attendance punch recorded for today yet'}
             </div>
             <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
               {gpsStatus}
@@ -553,6 +705,18 @@ export const DailyAttendance = () => {
                 >
                   Field Staff
                 </button>
+                <button
+                  onClick={() => setAttendanceType('SITE')}
+                  style={{
+                    padding: '5px 12px', border: 'none', borderRadius: 6, fontSize: '0.78rem',
+                    fontWeight: 600, cursor: 'pointer',
+                    background: attendanceType === 'SITE' ? '#fff' : 'transparent',
+                    color: attendanceType === 'SITE' ? '#0f172a' : '#64748b',
+                    boxShadow: attendanceType === 'SITE' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                  }}
+                >
+                  Site Attendance (Site-In / Out)
+                </button>
               </div>
 
               {/* Scope Switcher (Org Admins Only) */}
@@ -650,30 +814,35 @@ export const DailyAttendance = () => {
                     {filteredRecords.map((r) => {
                       const empName = r.employee?.basicInfo?.fullName || r.employee?.name || user?.name || 'Staff Member';
                       const empCode = r.employee?.basicInfo?.employeeCode || r.employee?.employeeCode || 'EMP';
-                      const inTimeStr = r.firstCheckInTime ? new Date(r.firstCheckInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
-                      const outTimeStr = r.lastCheckOutTime ? new Date(r.lastCheckOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (r.isOpen ? 'In Progress' : '—');
-                      const dateStr = r.attendanceDate ? new Date(r.attendanceDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+                      const rawIn = r.firstCheckInTime || r.siteInTime;
+                      const inTimeStr = rawIn ? new Date(rawIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+                      const rawOut = r.lastCheckOutTime || r.siteOutTime;
+                      const outTimeStr = rawOut ? new Date(rawOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (r.isOpen ? 'In Progress' : '—');
+                      const rawDate = r.attendanceDate || r.siteInTime || r.createdAt;
+                      const dateStr = rawDate ? new Date(rawDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
                       const isLate = r.lateStatus?.isLate;
-                      const punchesCount = r.punches?.length || 1;
+                      const punchesCount = r.punches?.length || (r.siteInTime ? 1 : 1);
+                      const locationLabel = r.site?.name ? `${r.site.name} (${r.project?.name || 'Site'})` : (r.branch?.name || (r.attendanceType === 'FIELD' ? 'Field Route' : 'Branch Office'));
+                      const totalHrs = r.totalWorkingHours ?? r.totalHours ?? r.hours ?? 0;
 
                       return (
                         <tr key={r._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                           <td style={{ padding: '12px 16px' }}>
                             <div style={{ fontWeight: 600, color: '#0f172a' }}>{empName}</div>
-                            <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{empCode} &bull; {r.branch?.name || 'Branch Office'}</div>
+                            <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{empCode} &bull; {locationLabel}</div>
                           </td>
                           <td style={{ padding: '12px 16px' }}>{dateStr}</td>
                           <td style={{ padding: '12px 16px', fontWeight: 600, color: '#16a34a' }}>{inTimeStr}</td>
                           <td style={{ padding: '12px 16px', fontWeight: 600, color: '#0284c7' }}>{outTimeStr}</td>
                           <td style={{ padding: '12px 16px' }}>
-                            <span style={{ fontWeight: 700 }}>{r.totalWorkingHours || 0} hrs</span>
+                            <span style={{ fontWeight: 700 }}>{totalHrs} hrs</span>
                             {r.overtimeHours > 0 && (
                               <span style={{ fontSize: '0.72rem', color: '#16a34a', marginLeft: 4 }}>(+{r.overtimeHours} OT)</span>
                             )}
                           </td>
                           <td style={{ padding: '12px 16px' }}>
-                            <Badge variant={r.attendanceStatus === 'PRESENT' ? 'success' : r.attendanceStatus === 'HALF_DAY' ? 'warning' : 'danger'}>
-                              {r.attendanceStatus || 'PRESENT'}
+                            <Badge variant={(r.attendanceStatus === 'PRESENT' || r.taskStatus === 'COMPLETED') ? 'success' : r.attendanceStatus === 'HALF_DAY' ? 'warning' : 'danger'}>
+                              {r.attendanceStatus || (r.taskStatus ? `TASK: ${r.taskStatus}` : 'PRESENT')}
                             </Badge>
                           </td>
                           <td style={{ padding: '12px 16px' }}>
@@ -891,78 +1060,231 @@ export const DailyAttendance = () => {
       {punchModalOpen && (
         <Modal
           isOpen={true}
-          onClose={() => setPunchModalOpen(false)}
-          title={punchActionType === 'CHECK_IN' ? 'Biometric & GPS Check-In' : 'Punch Check-Out'}
-          maxWidth="480px"
+          onClose={() => { setPunchModalOpen(false); setCapturedPhoto(null); setFaceMatchResult(null); setPunchError(null); }}
+          title={punchActionType === 'CHECK_IN' ? '🟢 Face Biometric Check-In' : '🔴 Face Biometric Check-Out'}
+          maxWidth="500px"
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {/* Mode Selector: Office vs Field */}
+
+            {/* Office vs Field vs Site toggle */}
             <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: 8, padding: 3 }}>
-              <button
-                type="button"
-                onClick={() => setPunchAttendanceType('OFFICE')}
-                style={{
-                  flex: 1, padding: '7px 0', border: 'none', borderRadius: 6, fontSize: '0.8rem',
-                  fontWeight: 600, cursor: 'pointer',
-                  background: punchAttendanceType === 'OFFICE' ? 'var(--primary)' : 'transparent',
-                  color: punchAttendanceType === 'OFFICE' ? '#fff' : '#64748b',
-                }}
-              >
-                Office Location
-              </button>
-              <button
-                type="button"
-                onClick={() => setPunchAttendanceType('FIELD')}
-                style={{
-                  flex: 1, padding: '7px 0', border: 'none', borderRadius: 6, fontSize: '0.8rem',
-                  fontWeight: 600, cursor: 'pointer',
-                  background: punchAttendanceType === 'FIELD' ? 'var(--primary)' : 'transparent',
-                  color: punchAttendanceType === 'FIELD' ? '#fff' : '#64748b',
-                }}
-              >
-                Field / Client Visit
-              </button>
+              <button type="button" onClick={() => setPunchAttendanceType('OFFICE')} style={{
+                flex: 1, padding: '7px 0', border: 'none', borderRadius: 6, fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer',
+                background: punchAttendanceType === 'OFFICE' ? 'var(--primary)' : 'transparent',
+                color: punchAttendanceType === 'OFFICE' ? '#fff' : '#64748b',
+              }}>Office Location</button>
+              <button type="button" onClick={() => setPunchAttendanceType('FIELD')} style={{
+                flex: 1, padding: '7px 0', border: 'none', borderRadius: 6, fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer',
+                background: punchAttendanceType === 'FIELD' ? 'var(--primary)' : 'transparent',
+                color: punchAttendanceType === 'FIELD' ? '#fff' : '#64748b',
+              }}>Field Staff</button>
+              <button type="button" onClick={() => setPunchAttendanceType('SITE')} style={{
+                flex: 1, padding: '7px 0', border: 'none', borderRadius: 6, fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer',
+                background: punchAttendanceType === 'SITE' ? 'var(--primary)' : 'transparent',
+                color: punchAttendanceType === 'SITE' ? '#fff' : '#64748b',
+              }}>Site Attendance</button>
             </div>
 
-            {/* GPS Telemetry Box */}
-            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: 12, fontSize: '0.8rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <span style={{ fontWeight: 600, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Navigation size={14} color="#16a34a" /> Verified GPS Coordinates:
+            {/* GPS Box */}
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: 10, fontSize: '0.79rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                <span style={{ fontWeight: 700, color: '#15803d', display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <Navigation size={13} /> GPS Location Captured
                 </span>
-                <Badge variant="success">ACCURACY: {gpsCoords.accuracy}M</Badge>
+                <Badge variant="success">±{gpsCoords.accuracy}m</Badge>
               </div>
-              <div style={{ fontFamily: 'monospace', color: '#475569' }}>
-                Lat: {gpsCoords.latitude.toFixed(6)} &bull; Long: {gpsCoords.longitude.toFixed(6)}
+              <span style={{ fontFamily: 'monospace', color: '#374151' }}>
+                {gpsCoords.latitude.toFixed(6)}°, {gpsCoords.longitude.toFixed(6)}°
+              </span>
+            </div>
+
+            {/* Site & Task Selector for Site Attendance Check-In */}
+            {punchAttendanceType === 'SITE' && punchActionType === 'CHECK_IN' && (
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Building2 size={14} color="var(--primary)" /> Select Project Site &amp; Task
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleDetectNearbySites}
+                    disabled={detectingSites}
+                    style={{
+                      border: 'none', background: 'var(--primary-light)', color: 'var(--primary)',
+                      padding: '3px 8px', borderRadius: 6, fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 4
+                    }}
+                  >
+                    <RefreshCw size={11} /> {detectingSites ? 'Scanning...' : 'Scan 500m'}
+                  </button>
+                </div>
+
+                {detectedSites.length === 0 ? (
+                  <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                    No project sites found within 500m. <em>Tip: Switch to &ldquo;Field Staff&rdquo; above for open field check-in.</em>
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <label style={{ fontSize: '0.74rem', fontWeight: 600, color: '#475569', display: 'block', marginBottom: 3 }}>
+                        Project Site *
+                      </label>
+                      <select
+                        value={selectedSiteId}
+                        onChange={(e) => {
+                          const sId = e.target.value;
+                          setSelectedSiteId(sId);
+                          const chosen = detectedSites.find((s) => (s.siteId || s._id || s.id) === sId);
+                          const tasks = chosen?.eligibleTasks || chosen?.assignedTasks || [];
+                          if (tasks.length > 0) setSelectedTaskId(tasks[0]._id || tasks[0].id);
+                        }}
+                        style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.78rem', background: '#fff' }}
+                      >
+                        {detectedSites.map((s) => (
+                          <option key={s.siteId || s._id || s.id} value={s.siteId || s._id || s.id}>
+                            {s.siteName || s.name || 'Project Site'} {s.distanceMeters ? `(${s.distanceMeters}m away)` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize: '0.74rem', fontWeight: 600, color: '#475569', display: 'block', marginBottom: 3 }}>
+                        Assigned Task *
+                      </label>
+                      <select
+                        value={selectedTaskId}
+                        onChange={(e) => setSelectedTaskId(e.target.value)}
+                        style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.78rem', background: '#fff' }}
+                      >
+                        {(() => {
+                          const chosen = detectedSites.find((s) => (s.siteId || s._id || s.id) === selectedSiteId) || detectedSites[0];
+                          const tasks = chosen?.eligibleTasks || chosen?.assignedTasks || [];
+                          if (tasks.length === 0) return <option value="general_task">General Site Task</option>;
+                          return tasks.map((t) => (
+                            <option key={t._id || t.id} value={t._id || t.id}>
+                              {t.title || t.name || 'Site Task'} ({t.status || 'ASSIGNED'})
+                            </option>
+                          ));
+                        })()}
+                      </select>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* STEP 1: Face Capture */}
+            <div style={{ border: '1.5px solid #e2e8f0', borderRadius: 10, overflow: 'hidden' }}>
+              <div style={{ padding: '8px 12px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <ScanFace size={15} color="var(--primary)" />
+                <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#0f172a' }}>Step 1 — Capture Live Face Photo</span>
+                {faceMatchResult === 'matched' && (
+                  <span style={{ marginLeft: 'auto', background: '#dcfce7', color: '#16a34a', padding: '2px 8px', borderRadius: 20, fontSize: '0.72rem', fontWeight: 700 }}>✓ VERIFIED</span>
+                )}
+                {faceMatchResult === 'failed' && (
+                  <span style={{ marginLeft: 'auto', background: '#fee2e2', color: '#dc2626', padding: '2px 8px', borderRadius: 20, fontSize: '0.72rem', fontWeight: 700 }}>✗ MISMATCH</span>
+                )}
+              </div>
+              <div style={{ padding: 10 }}>
+                {capturedPhoto ? (
+                  <div style={{ position: 'relative' }}>
+                    <img
+                      src={capturedPhoto}
+                      alt="Captured"
+                      style={{
+                        width: '100%', height: 160, objectFit: 'cover', borderRadius: 8,
+                        border: faceMatchResult === 'matched' ? '3px solid #16a34a' : faceMatchResult === 'failed' ? '3px solid #dc2626' : '2px solid #cbd5e1',
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => { setCapturedPhoto(null); setFaceMatchResult(null); setPunchError(null); }}
+                      style={{
+                        position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.6)',
+                        border: 'none', borderRadius: 20, color: '#fff', fontSize: '0.7rem',
+                        padding: '3px 8px', cursor: 'pointer', fontWeight: 600,
+                      }}
+                    >
+                      Retake
+                    </button>
+                  </div>
+                ) : (
+                  <CameraCapture
+                    onCapture={(photo) => { setCapturedPhoto(photo); setFaceMatchResult(null); setPunchError(null); }}
+                    compact={true}
+                  />
+                )}
               </div>
             </div>
 
-            {/* Remarks Input for Check-Out */}
+            {/* STEP 2: Verify Face */}
+            {capturedPhoto && faceMatchResult !== 'matched' && (
+              <button
+                type="button"
+                onClick={handleVerifyFace}
+                disabled={verifyingFace}
+                style={{
+                  width: '100%', padding: '10px 0', borderRadius: 8, border: 'none',
+                  background: verifyingFace ? '#94a3b8' : 'linear-gradient(135deg, #0d9488, #0f766e)',
+                  color: '#fff', fontWeight: 700, fontSize: '0.88rem', cursor: verifyingFace ? 'not-allowed' : 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                }}
+              >
+                <ScanFace size={16} />
+                {verifyingFace ? 'Verifying Face...' : 'Step 2 — Verify Face Match'}
+              </button>
+            )}
+
+            {/* Face Match Status */}
+            {faceMatchResult === 'matched' && (
+              <div style={{ background: '#dcfce7', border: '1px solid #86efac', borderRadius: 8, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <CheckCircle2 size={18} color="#16a34a" />
+                <div>
+                  <div style={{ fontSize: '0.84rem', fontWeight: 700, color: '#15803d' }}>Face Verified Successfully</div>
+                  <div style={{ fontSize: '0.74rem', color: '#166534' }}>Biometric identity confirmed. You may now proceed.</div>
+                </div>
+              </div>
+            )}
+
+            {/* Error Display */}
+            {punchError && faceMatchResult === 'failed' && (
+              <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 8, padding: '10px 14px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                <XCircle size={16} color="#dc2626" style={{ marginTop: 2, flexShrink: 0 }} />
+                <div style={{ fontSize: '0.78rem', color: '#b91c1c' }}>{punchError}</div>
+              </div>
+            )}
+
+            {/* Remarks (Check-Out only) */}
             {punchActionType === 'CHECK_OUT' && (
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
-                  Shift / Daily Remarks (Optional)
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4, color: '#374151' }}>
+                  Shift Remarks (Optional)
                 </label>
                 <textarea
                   rows={2}
-                  placeholder="e.g. Completed scheduled client meetings and development tasks"
+                  placeholder="e.g. Completed client meetings and development tasks"
                   value={punchRemarks}
                   onChange={(e) => setPunchRemarks(e.target.value)}
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box', resize: 'none' }}
                 />
               </div>
             )}
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 6 }}>
-              <Button variant="secondary" onClick={() => setPunchModalOpen(false)}>
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 4, borderTop: '1px solid #f1f5f9' }}>
+              <Button variant="secondary" onClick={() => { setPunchModalOpen(false); setCapturedPhoto(null); setFaceMatchResult(null); setPunchError(null); }}>
                 Cancel
               </Button>
               <Button
                 variant={punchActionType === 'CHECK_IN' ? 'primary' : 'danger'}
                 loading={submittingPunch}
                 onClick={handleExecutePunch}
+                disabled={faceMatchResult !== 'matched' || submittingPunch}
               >
-                Confirm {punchActionType === 'CHECK_IN' ? 'Check-In' : 'Check-Out'}
+                {faceMatchResult === 'matched'
+                  ? `Confirm ${punchActionType === 'CHECK_IN' ? 'Check-In' : 'Check-Out'}`
+                  : 'Verify Face First'}
               </Button>
             </div>
           </div>

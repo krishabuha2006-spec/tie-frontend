@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Users,
@@ -105,6 +105,67 @@ export const Dashboard = () => {
   const initialLoadedRef = useRef(false);
   const lastFetchTimeRef = useRef(0);
 
+  // Work Type detection (OFFICE vs FIELD)
+  const userWorkType = useMemo(() => {
+    const raw = String(
+      user?.employee?.employmentInfo?.workType ||
+      user?.employee?.workType ||
+      user?.employmentInfo?.workType ||
+      user?.workType ||
+      ''
+    ).toUpperCase();
+    if (raw.includes('FIELD') || raw.includes('SITE')) return 'FIELD';
+    return 'OFFICE';
+  }, [user]);
+
+  const isFieldStaffUser = userWorkType === 'FIELD';
+
+  // Auto-capture GPS location on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setCoords({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            gpsAccuracy: Math.round(pos.coords.accuracy || 15),
+            address: `${pos.coords.latitude.toFixed(4)}°, ${pos.coords.longitude.toFixed(4)}°`,
+          });
+        },
+        (err) => {
+          console.warn('Auto GPS location capture warning:', err.message);
+        },
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
+      );
+    }
+  }, []);
+
+  const refreshGpsLocation = useCallback(() => {
+    return new Promise((resolve) => {
+      if (typeof window !== 'undefined' && 'geolocation' in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const loc = {
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude,
+              gpsAccuracy: Math.round(pos.coords.accuracy || 15),
+              address: `${pos.coords.latitude.toFixed(4)}°, ${pos.coords.longitude.toFixed(4)}°`,
+            };
+            setCoords(loc);
+            resolve(loc);
+          },
+          (err) => {
+            console.warn('GPS fetch failed or denied:', err);
+            resolve(coords);
+          },
+          { enableHighAccuracy: true, timeout: 8000 }
+        );
+      } else {
+        resolve(coords);
+      }
+    });
+  }, [coords]);
+
   // Extract department and branch cleanly from user / employee object
   const userDept =
     user?.department?.name ||
@@ -188,22 +249,41 @@ export const Dashboard = () => {
         const myEmpId = user?.employee?._id || (typeof user?.employee === 'string' ? user.employee : null) || user?._id;
         if (myEmpId) {
           try {
-            const myAtt = await attendanceApi.getMyOfficeAttendance({ date: todayStr }).catch(() => null);
-            const myAttList = extractApiData(myAtt, 'records', 'sessions', 'attendance');
+            let myAtt = null;
+            if (isFieldStaffUser) {
+              myAtt = await attendanceApi.getMyFieldAttendance({ date: todayStr }).catch(() => null);
+              if (!myAtt || (Array.isArray(myAtt) && myAtt.length === 0)) {
+                myAtt = await attendanceApi.getEmployeeFieldAttendance(myEmpId, { date: todayStr }).catch(() => null);
+              }
+            } else {
+              myAtt = await attendanceApi.getMyOfficeAttendance({ date: todayStr }).catch(() => null);
+            }
+            const myAttList = extractApiData(myAtt, 'records', 'sessions', 'attendance', 'data');
             const myRecord = myAttList.find((r) => {
-              const d = r.date ? String(r.date).substring(0, 10) : '';
-              const c = r.checkInTime ? String(r.checkInTime).substring(0, 10) : '';
+              const d = r.attendanceDate ? String(r.attendanceDate).substring(0, 10) : (r.date ? String(r.date).substring(0, 10) : '');
+              const c = r.checkInTime ? String(r.checkInTime).substring(0, 10) : (r.firstCheckInTime ? String(r.firstCheckInTime).substring(0, 10) : '');
               return d === todayStr || c.startsWith(todayStr);
             }) || (myAttList.length > 0 ? myAttList[0] : null);
-            setMyTodayAttendance(myRecord || null);
+
+            let cachedToday = null;
+            try {
+              const raw = localStorage.getItem(`tie_today_att_${myEmpId}_${todayStr}`);
+              if (raw) cachedToday = JSON.parse(raw);
+            } catch {}
+
+            setMyTodayAttendance(cachedToday || myRecord || null);
           } catch {}
 
           try {
             const st = await faceApi.getFaceStatus(myEmpId);
             const sData = st?.data || st;
             const isEnr = sData?.isRegistered === true || sData?.status === 'REGISTERED' || sData?.status === 'ENROLLED' || sData?.isEnrolled === true;
-            setMyFaceStatus({ isEnrolled: isEnr, details: sData });
-          } catch {}
+            const hasLocalSelfie = !!localStorage.getItem(`tie_reg_selfie_${myEmpId}`) || !!localStorage.getItem(`tie_face_enrolled_${myEmpId}`);
+            setMyFaceStatus({ isEnrolled: isEnr || hasLocalSelfie, details: sData });
+          } catch {
+            const hasLocalSelfie = !!localStorage.getItem(`tie_reg_selfie_${myEmpId}`) || !!localStorage.getItem(`tie_face_enrolled_${myEmpId}`);
+            setMyFaceStatus({ isEnrolled: hasLocalSelfie });
+          }
         }
 
         // Show UI immediately once core stats are loaded
@@ -304,12 +384,15 @@ export const Dashboard = () => {
     setFaceModalOpen(true);
     setCheckingFaceStatus(true);
 
-    // Resolve employee branch location coordinates & radius for 500m verification
+    // Auto-refresh GPS coordinates
+    refreshGpsLocation();
+
+    // Resolve employee branch location coordinates & radius for 500m verification (only relevant for OFFICE)
     const empBranch =
       user?.employee?.employmentInfo?.branch ||
       user?.employee?.branch ||
       user?.branch;
-    if (empBranch) {
+    if (empBranch && !isFieldStaffUser) {
       setLoadingBranchLocation(true);
       resolveBranchLocation(empBranch)
         .then((loc) => setBranchLocation(loc))
@@ -323,9 +406,11 @@ export const Dashboard = () => {
         const st = await faceApi.getFaceStatus(myEmpId);
         const sData = st?.data || st;
         const isEnr = sData?.isRegistered === true || sData?.status === 'REGISTERED' || sData?.status === 'ENROLLED' || sData?.isEnrolled === true;
-        setMyFaceStatus({ isEnrolled: isEnr, details: sData });
+        const hasLocalSelfie = !!localStorage.getItem(`tie_reg_selfie_${myEmpId}`) || !!localStorage.getItem(`tie_face_enrolled_${myEmpId}`);
+        setMyFaceStatus({ isEnrolled: isEnr || hasLocalSelfie, details: sData });
       } catch {
-        setMyFaceStatus({ isEnrolled: false });
+        const hasLocalSelfie = !!localStorage.getItem(`tie_reg_selfie_${myEmpId}`) || !!localStorage.getItem(`tie_face_enrolled_${myEmpId}`);
+        setMyFaceStatus({ isEnrolled: hasLocalSelfie });
       } finally {
         setCheckingFaceStatus(false);
       }
@@ -358,13 +443,20 @@ export const Dashboard = () => {
       return;
     }
     if (!myFaceStatus?.isEnrolled) {
-      showToast('Your face is not registered yet. Please contact Admin or enroll first.', 'error');
+      const notEnrolledMsg = 'Face registration required: Super Admin must register your face in Employee Master before you can check in.';
+      setPunchError(notEnrolledMsg);
+      showToast(notEnrolledMsg, 'error');
       return;
     }
 
-    // Require valid GPS coordinates
-    if (!coords || coords.gpsUnavailable || coords.error || (coords.latitude == null && coords.longitude == null)) {
-      const geoErr = 'GPS Location required: Please grant location permissions to verify you are within 500m of the branch.';
+    // Auto-capture GPS if not present yet
+    let activeCoords = coords;
+    if (!activeCoords || (activeCoords.latitude == null && activeCoords.longitude == null)) {
+      activeCoords = await refreshGpsLocation();
+    }
+
+    if (!activeCoords || activeCoords.gpsUnavailable || activeCoords.error || (activeCoords.latitude == null && activeCoords.longitude == null)) {
+      const geoErr = 'GPS Location required: Please enable device location / GPS permissions to record attendance.';
       setPunchError(geoErr);
       showToast(geoErr, 'error');
       return;
@@ -378,45 +470,44 @@ export const Dashboard = () => {
       // 1. CONDITION 1: Biometric Face Verification against Admin-Registered Selfie
       const regPhoto = await resolveRegisteredSelfie(myEmpId, user?.employeeCode, user?.employee);
       if (!regPhoto) {
-        const noPhotoErr = 'No registered selfie found for this employee. Please contact Admin to register your selfie before marking attendance.';
+        const noPhotoErr = 'No registered face photograph found for this employee. Super Admin must register your face in Employee Master before you can mark attendance.';
         setPunchError(noPhotoErr);
         showToast(noPhotoErr, 'error');
         setVerifyingFace(false);
         return;
       }
 
-      const compareResult = await compareFacePhotos(regPhoto, capturedPhoto, 0.60);
+      const compareResult = await compareFacePhotos(regPhoto, capturedPhoto, 0.55);
       if (!compareResult.matched) {
-        const mismatchReason = compareResult.reason || `Face biometric mismatch (${compareResult.confidencePct}% match). Live photo does not match registered employee selfie!`;
+        const mismatchReason = compareResult.reason || `Face biometric mismatch (${compareResult.confidencePct || 35}% match). Live camera face does not match the registered employee selfie! Check-in rejected.`;
         setPunchError(mismatchReason);
         showToast(mismatchReason, 'error');
         setVerifyingFace(false);
         return;
       }
 
-      // Also log verification with backend
+      // Also verify with backend faceApi
       let faceRes;
       try {
-        faceRes = await faceApi.verifyFace(myEmpId, capturedPhoto, 'OFFICE');
+        faceRes = await faceApi.verifyFace(myEmpId, capturedPhoto, userWorkType);
       } catch (err) {
         faceRes = err.response?.data || { matched: true };
       }
 
-      const confidence = faceRes?.confidenceScore ?? faceRes?.data?.confidenceScore ?? 0.95;
+      const confidence = faceRes?.confidenceScore ?? faceRes?.data?.confidenceScore ?? (compareResult.confidencePct ? compareResult.confidencePct / 100 : 0.95);
       const matchResult = faceRes?.matchResult || faceRes?.data?.matchResult || 'MATCHED';
       const isMatched = faceRes?.matched !== false && matchResult !== 'NOT_MATCHED' && matchResult !== 'NO_FACE_DETECTED' && matchResult !== 'LOW_CONFIDENCE';
 
       if (!isMatched) {
-        const reason = faceRes?.reason || faceRes?.data?.reason || `Face biometric mismatch (${Math.round(confidence * 100)}% match). Live photo does not match registered employee selfie.`;
+        const reason = faceRes?.reason || faceRes?.data?.reason || `Face biometric mismatch (${Math.round(confidence * 100)}% match). Live photo does not match registered employee selfie. Attendance rejected.`;
         setPunchError(reason);
         showToast('Face verification failed: Photo did not match registered selfie!', 'error');
         setVerifyingFace(false);
         return;
       }
 
-      // 2. CONDITION 2: 500m Radius Geo-Location Check against Branch
-      const activeCoords = coords;
-      if (branchLocation && branchLocation.latitude != null && branchLocation.longitude != null) {
+      // 2. CONDITION 2: 500m Radius Geo-Location Check against Branch (Only for OFFICE work type)
+      if (!isFieldStaffUser && branchLocation && branchLocation.latitude != null && branchLocation.longitude != null) {
         const distance = calculateDistanceMeters(
           activeCoords.latitude,
           activeCoords.longitude,
@@ -426,7 +517,7 @@ export const Dashboard = () => {
         const maxRadius = branchLocation.radiusMeters || 500;
 
         if (distance !== null && distance > maxRadius) {
-          const distErr = `Location check failed: You are ${distance}m away from ${branchLocation.branchName || 'your office branch'}. Check-in is only permitted within ${maxRadius}m radius.`;
+          const distErr = `Location check failed: You are ${distance}m away from ${branchLocation.branchName || 'your office branch'}. Office check-in is only permitted within ${maxRadius}m radius.`;
           setPunchError(distErr);
           showToast(distErr, 'error');
           setVerifyingFace(false);
@@ -441,7 +532,6 @@ export const Dashboard = () => {
       const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       const addressStr = activeCoords.address || `${activeCoords.latitude.toFixed(4)}, ${activeCoords.longitude.toFixed(4)}`;
 
-      // Backend accepts: latitude, longitude, gpsAccuracy, capturedImage, confidenceScore
       const checkInPayload = {
         latitude: activeCoords.latitude,
         longitude: activeCoords.longitude,
@@ -457,13 +547,40 @@ export const Dashboard = () => {
         confidenceScore: confidence || 0.95,
       };
 
-      if (punchMode === 'CHECK_IN') {
-        await attendanceApi.officeCheckIn(checkInPayload);
-        showToast('✓ Check-In successfully recorded! Face & 500m location verified.', 'success');
+      if (isFieldStaffUser) {
+        if (punchMode === 'CHECK_IN') {
+          await attendanceApi.fieldCheckIn(checkInPayload);
+          showToast('✓ Site-In successfully recorded! Face & GPS location verified.', 'success');
+        } else {
+          await attendanceApi.fieldCheckOut(checkOutPayload);
+          showToast('✓ Site-Out successfully recorded! Face & GPS location verified.', 'success');
+        }
       } else {
-        await attendanceApi.officeCheckOut(checkOutPayload);
-        showToast('✓ Check-Out successfully recorded! Face & 500m location verified.', 'success');
+        if (punchMode === 'CHECK_IN') {
+          await attendanceApi.officeCheckIn(checkInPayload);
+          showToast('✓ Office Check-In successfully recorded! Face & location verified.', 'success');
+        } else {
+          await attendanceApi.officeCheckOut(checkOutPayload);
+          showToast('✓ Office Check-Out successfully recorded! Face & location verified.', 'success');
+        }
       }
+
+      const isCheckIn = punchMode === 'CHECK_IN';
+      const updatedAttendance = {
+        ...(myTodayAttendance || {}),
+        attendanceDate: todayStr,
+        isOpen: isCheckIn,
+        firstCheckInTime: isCheckIn ? now.toISOString() : (myTodayAttendance?.firstCheckInTime || now.toISOString()),
+        checkInTime: isCheckIn ? now.toISOString() : (myTodayAttendance?.checkInTime || now.toISOString()),
+        lastCheckOutTime: isCheckIn ? null : now.toISOString(),
+        checkOutTime: isCheckIn ? null : now.toISOString(),
+        dutyCheckedIn: true,
+        dutyCheckedOut: !isCheckIn,
+      };
+      setMyTodayAttendance(updatedAttendance);
+      try {
+        localStorage.setItem(`tie_today_att_${myEmpId}_${todayStr}`, JSON.stringify(updatedAttendance));
+      } catch {}
 
       setPunchSuccess({
         mode: punchMode,
@@ -473,7 +590,7 @@ export const Dashboard = () => {
         address: addressStr,
       });
 
-      // Refresh Dashboard data and attendance
+      // Refresh Dashboard data and attendance in background
       fetchDashboardData(true);
     } catch (err) {
       const msg = err.response?.data?.message || 'Attendance submission failed. Please try again.';
@@ -779,30 +896,48 @@ export const Dashboard = () => {
 
       {/* Daily Face Biometric Attendance Card */}
       {(() => {
-        const isCheckedInToday = Boolean(
+        const isCheckedIn = Boolean(
           myTodayAttendance &&
-          (myTodayAttendance.firstCheckInTime || myTodayAttendance.checkInTime || myTodayAttendance.sessions?.length > 0 || myTodayAttendance.isOpen)
+          (myTodayAttendance.checkInTime || myTodayAttendance.firstCheckInTime || myTodayAttendance.dutyCheckedIn || myTodayAttendance.isOpen === true) &&
+          !myTodayAttendance.checkOutTime &&
+          !myTodayAttendance.lastCheckOutTime &&
+          !myTodayAttendance.dutyCheckedOut &&
+          myTodayAttendance.isOpen !== false
         );
-        const isOpenSession = Boolean(myTodayAttendance?.isOpen !== false && (myTodayAttendance?.firstCheckInTime || myTodayAttendance?.checkInTime));
-        const rawInTime = myTodayAttendance?.firstCheckInTime || myTodayAttendance?.checkInTime || myTodayAttendance?.sessions?.[0]?.checkInTime;
+
+        const isCheckedOut = Boolean(
+          myTodayAttendance &&
+          (myTodayAttendance.checkOutTime || myTodayAttendance.lastCheckOutTime || myTodayAttendance.dutyCheckedOut || myTodayAttendance.isOpen === false) &&
+          (myTodayAttendance.checkInTime || myTodayAttendance.firstCheckInTime || myTodayAttendance.dutyCheckedIn)
+        );
+
+        const rawInTime = myTodayAttendance?.firstCheckInTime || myTodayAttendance?.checkInTime;
         const todayCheckInTimeStr = rawInTime ? new Date(rawInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
+        const rawOutTime = myTodayAttendance?.lastCheckOutTime || myTodayAttendance?.checkOutTime;
+        const todayCheckOutTimeStr = rawOutTime ? new Date(rawOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
+
+        const checkInTitle = isFieldStaffUser ? 'Site-In' : 'Office Check-In';
+        const checkOutTitle = isFieldStaffUser ? 'Site-Out' : 'Office Check-Out';
+        const cardTitle = isFieldStaffUser ? 'Daily Site Attendance (Field Staff)' : 'Daily Office Attendance';
 
         return (
           <div
             className="card"
             style={{
               padding: '16px 20px',
-              background: isCheckedInToday
+              background: isCheckedIn
                 ? 'linear-gradient(135deg, rgba(240, 253, 244, 0.95) 0%, #ffffff 100%)'
+                : isCheckedOut
+                ? 'linear-gradient(135deg, rgba(239, 246, 255, 0.9) 0%, #ffffff 100%)'
                 : 'linear-gradient(135deg, rgba(254, 243, 199, 0.6) 0%, #ffffff 100%)',
-              border: isCheckedInToday ? '1px solid #bbf7d0' : '1px solid #fde68a',
+              border: isCheckedIn ? '1px solid #bbf7d0' : isCheckedOut ? '1px solid #bfdbfe' : '1px solid #fde68a',
               borderRadius: 12,
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
               flexWrap: 'wrap',
               gap: 16,
-              boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+              boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -811,11 +946,11 @@ export const Dashboard = () => {
                   width: 48,
                   height: 48,
                   borderRadius: '50%',
-                  backgroundColor: isCheckedInToday ? '#dcfce7' : '#fef3c7',
+                  backgroundColor: isCheckedIn ? '#dcfce7' : isCheckedOut ? '#dbeafe' : '#fef3c7',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: isCheckedInToday ? '#16a34a' : '#d97706',
+                  color: isCheckedIn ? '#16a34a' : isCheckedOut ? '#2563eb' : '#d97706',
                   flexShrink: 0,
                 }}
               >
@@ -824,36 +959,49 @@ export const Dashboard = () => {
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <span style={{ fontWeight: 700, fontSize: '1.05rem', color: 'var(--text-main)' }}>
-                    Daily Face Biometric Attendance
+                    {cardTitle}
                   </span>
-                  <Badge variant={isCheckedInToday ? (isOpenSession ? 'success' : 'neutral') : 'warning'}>
-                    {isCheckedInToday
-                      ? (isOpenSession ? '✓ Checked In • On Duty' : '✓ Completed For Today')
+                  <Badge variant={isCheckedIn ? 'success' : isCheckedOut ? 'primary' : 'warning'}>
+                    {isCheckedIn
+                      ? `✓ On Duty • ${checkInTitle} Recorded`
+                      : isCheckedOut
+                      ? `✓ Shift Completed • ${checkOutTitle} Recorded`
                       : '⚠️ Not Checked In Today'}
                   </Badge>
                   {myFaceStatus && (
                     <Badge variant={myFaceStatus.isEnrolled ? 'success' : 'danger'}>
-                      {myFaceStatus.isEnrolled ? 'Face Registered' : 'Face Pending'}
+                      {myFaceStatus.isEnrolled ? 'Face Registered' : '⚠️ Face Not Registered by Admin'}
                     </Badge>
+                  )}
+                  {coords && (
+                    <span style={{ fontSize: '0.74rem', background: '#f1f5f9', color: '#475569', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>
+                      📍 GPS Active ({coords.latitude.toFixed(3)}°, {coords.longitude.toFixed(3)}°)
+                    </span>
                   )}
                 </div>
                 <div style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginTop: 3 }}>
-                  {isCheckedInToday ? (
+                  {!myFaceStatus?.isEnrolled ? (
+                    <span style={{ color: '#b91c1c', fontWeight: 600 }}>
+                      ⚠️ Face registration required: Super Admin must register your face photograph before you can check in.
+                    </span>
+                  ) : isCheckedIn ? (
                     <span>
-                      Check-in recorded at <strong style={{ color: 'var(--text-main)' }}>{todayCheckInTimeStr || 'Today'}</strong>
-                      {myTodayAttendance?.lastCheckOutTime && (
-                        <span> • Check-out at <strong style={{ color: 'var(--text-main)' }}>{new Date(myTodayAttendance.lastCheckOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</strong></span>
-                      )}
+                      {checkInTitle} recorded at <strong style={{ color: 'var(--text-main)' }}>{todayCheckInTimeStr || 'Today'}</strong>. Click below to punch out.
+                    </span>
+                  ) : isCheckedOut ? (
+                    <span>
+                      {checkInTitle}: <strong style={{ color: 'var(--text-main)' }}>{todayCheckInTimeStr || 'Today'}</strong> • {checkOutTitle}: <strong style={{ color: 'var(--text-main)' }}>{todayCheckOutTimeStr || 'Today'}</strong>
                     </span>
                   ) : (
-                    <span>Verify your face with live camera match to mark today&apos;s check-in.</span>
+                    <span>Verify your face via live camera match to mark today&apos;s {checkInTitle}.</span>
                   )}
                 </div>
               </div>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              {!isCheckedInToday ? (
+              {/* Check-In / Check-Out Dynamic Primary Button */}
+              {!isCheckedIn && !isCheckedOut ? (
                 <button
                   type="button"
                   onClick={() => handleOpenFaceModal('CHECK_IN')}
@@ -869,9 +1017,9 @@ export const Dashboard = () => {
                     boxShadow: '0 2px 8px rgba(13, 148, 136, 0.25)',
                   }}
                 >
-                  <LogIn size={16} /> Check In (Face Biometrics)
+                  <LogIn size={16} /> {checkInTitle} (Face Match)
                 </button>
-              ) : isOpenSession ? (
+              ) : isCheckedIn ? (
                 <button
                   type="button"
                   onClick={() => handleOpenFaceModal('CHECK_OUT')}
@@ -887,9 +1035,10 @@ export const Dashboard = () => {
                     backgroundColor: '#dc2626',
                     borderColor: '#dc2626',
                     color: '#fff',
+                    boxShadow: '0 2px 8px rgba(220, 38, 38, 0.25)',
                   }}
                 >
-                  <LogOut size={16} /> Check Out (Face Biometrics)
+                  <LogOut size={16} /> {checkOutTitle} (Face Match)
                 </button>
               ) : (
                 <button
@@ -904,7 +1053,7 @@ export const Dashboard = () => {
                     fontSize: '0.82rem',
                   }}
                 >
-                  <RefreshCw size={14} /> Punch Again
+                  <RefreshCw size={14} /> Punch Again ({checkInTitle})
                 </button>
               )}
 
@@ -1217,7 +1366,11 @@ export const Dashboard = () => {
           setPunchSuccess(null);
           setPunchError(null);
         }}
-        title={punchMode === 'CHECK_IN' ? 'Daily Face Biometric Check-In' : 'Office Check-Out with Face Biometrics'}
+        title={
+          isFieldStaffUser
+            ? (punchMode === 'CHECK_IN' ? 'Field Site-In Biometric Verification' : 'Field Site-Out Biometric Verification')
+            : (punchMode === 'CHECK_IN' ? 'Office Check-In Biometric Verification' : 'Office Check-Out Biometric Verification')
+        }
         size="lg"
       >
         {punchSuccess ? (
@@ -1238,10 +1391,12 @@ export const Dashboard = () => {
               <CheckCircle2 size={36} />
             </div>
             <h3 style={{ fontSize: '1.2rem', fontWeight: 700, margin: '0 0 8px', color: '#166534' }}>
-              {punchSuccess.mode === 'CHECK_IN' ? 'Check-In Successfully Recorded!' : 'Check-Out Successfully Recorded!'}
+              {punchSuccess.mode === 'CHECK_IN'
+                ? (isFieldStaffUser ? 'Site-In Successfully Recorded!' : 'Office Check-In Successfully Recorded!')
+                : (isFieldStaffUser ? 'Site-Out Successfully Recorded!' : 'Office Check-Out Successfully Recorded!')}
             </h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 20px' }}>
-              Your face was verified with {punchSuccess.confidence}% confidence. Daily attendance has been updated.
+              Your face was verified with {punchSuccess.confidence}% biometric confidence and GPS coordinates recorded.
             </p>
             <div
               style={{
@@ -1295,7 +1450,7 @@ export const Dashboard = () => {
                   {user?.name || user?.basicInfo?.fullName || 'Employee'}
                 </div>
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                  Code: {user?.employeeCode || user?.basicInfo?.employeeCode || 'SELF'} &bull; {userDept}
+                  Code: {user?.employeeCode || user?.basicInfo?.employeeCode || 'SELF'} &bull; Work Type: <strong>{userWorkType}</strong> &bull; {userDept}
                 </div>
               </div>
               <div>
@@ -1314,31 +1469,34 @@ export const Dashboard = () => {
             {!checkingFaceStatus && myFaceStatus && !myFaceStatus.isEnrolled ? (
               <div
                 style={{
-                  padding: 20,
+                  padding: 24,
                   backgroundColor: '#fef2f2',
                   border: '1px solid #fecaca',
                   borderRadius: 10,
                   textAlign: 'center',
                 }}
               >
-                <AlertTriangle size={36} color="#dc2626" style={{ margin: '0 auto 10px' }} />
-                <h4 style={{ margin: '0 0 6px', color: '#991b1b', fontWeight: 700 }}>Face Biometrics Not Enrolled</h4>
-                <p style={{ margin: '0 0 16px', fontSize: '0.84rem', color: '#b91c1c' }}>
-                  Your face has not been enrolled in the biometric database yet.
-                  Face enrollment is required so the system can match your face during daily check-in.
+                <AlertTriangle size={38} color="#dc2626" style={{ margin: '0 auto 10px' }} />
+                <h4 style={{ margin: '0 0 6px', color: '#991b1b', fontWeight: 700 }}>
+                  Face Registration Required by Super Admin
+                </h4>
+                <p style={{ margin: '0 0 16px', fontSize: '0.84rem', color: '#b91c1c', lineHeight: 1.5 }}>
+                  Your face photograph has not been registered yet.
+                  <br />
+                  <strong>Policy:</strong> Super Admin must register the employee face in Employee Master before check-in can be performed.
                 </p>
-                {isOrgAdmin ? (
+                {isSuperAdmin ? (
                   <Link
-                    to="/attendance/face-punch?tab=register"
+                    to="/employees"
                     className="btn btn-primary btn-sm"
                     onClick={() => setFaceModalOpen(false)}
                   >
-                    Enroll Face Now
+                    Go to Employee Master to Register Face
                   </Link>
                 ) : (
-                  <span style={{ fontSize: '0.82rem', color: '#7f1d1d' }}>
-                    Please contact your HR Administrator to enroll your face profile.
-                  </span>
+                  <div style={{ fontSize: '0.82rem', color: '#7f1d1d', background: '#fee2e2', padding: '8px 14px', borderRadius: 6, display: 'inline-block' }}>
+                    Please contact your Super Admin to register your face photograph.
+                  </div>
                 )}
               </div>
             ) : (
@@ -1374,7 +1532,7 @@ export const Dashboard = () => {
                         onClick={() => setPunchMode('CHECK_IN')}
                         className={`btn ${punchMode === 'CHECK_IN' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
                       >
-                        Check-In
+                        {isFieldStaffUser ? 'Site-In' : 'Office Check-In'}
                       </button>
                       <button
                         type="button"
@@ -1382,7 +1540,7 @@ export const Dashboard = () => {
                         className={`btn ${punchMode === 'CHECK_OUT' ? 'btn-danger' : 'btn-secondary'} btn-sm`}
                         style={punchMode === 'CHECK_OUT' ? { backgroundColor: '#dc2626', borderColor: '#dc2626', color: '#fff' } : {}}
                       >
-                        Check-Out
+                        {isFieldStaffUser ? 'Site-Out' : 'Office Check-Out'}
                       </button>
                     </div>
                     <GeoLocationPicker
@@ -1421,12 +1579,12 @@ export const Dashboard = () => {
                     style={{ width: '100%', padding: '12px', fontWeight: 700, marginTop: 'auto' }}
                   >
                     {verifyingFace
-                      ? 'Verifying Face with Backend...'
+                      ? 'Matching Face with Registered Selfie...'
                       : submittingPunch
-                      ? 'Recording Attendance...'
+                      ? 'Recording Attendance with GPS...'
                       : punchMode === 'CHECK_IN'
-                      ? 'Match Face & Submit Check-In'
-                      : 'Match Face & Submit Check-Out'}
+                      ? (isFieldStaffUser ? 'Match Face & Submit Site-In' : 'Match Face & Submit Office Check-In')
+                      : (isFieldStaffUser ? 'Match Face & Submit Site-Out' : 'Match Face & Submit Office Check-Out')}
                   </Button>
                 </div>
               </div>

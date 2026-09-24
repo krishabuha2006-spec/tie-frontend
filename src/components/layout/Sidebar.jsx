@@ -79,7 +79,7 @@ export const Sidebar = ({ isMobileOpen, onCloseMobile }) => {
     }));
   };
 
-  // Modern, organized Enterprise Navigation Structure with module permission bindings
+  // Modern, simplified Navigation Structure with strict module permission bindings
   const navStructure = [
     {
       type: 'single',
@@ -95,14 +95,14 @@ export const Sidebar = ({ isMobileOpen, onCloseMobile }) => {
       icon: Users,
       module: 'hrm',
       items: [
-        { path: '/recruitment/jobs', label: 'Recruitment & Offers', icon: Briefcase, module: 'recruitment' },
-        { path: '/employees', label: 'Employee Master', icon: Users, module: 'employees' },
-        { path: '/attendance', label: 'Attendance & Biometrics', icon: CalendarCheck, module: 'attendance' },
-        { path: '/leaves', label: 'Leaves & Holidays', icon: CalendarOff, module: 'leaves' },
-        { path: '/payroll', label: 'Payroll & Payslips', icon: Banknote, module: 'payroll' },
-        { path: '/assets-claims', label: 'Assets, Claims & Loans', icon: Laptop, module: 'assets-claims' },
-        { path: '/performance', label: 'Performance & KRA', icon: Award, module: 'performance' },
-        { path: '/reports', label: 'Reports & Analytics', icon: BarChart3, module: 'reports' },
+        { path: '/recruitment/jobs', label: 'Recruitment', icon: Briefcase, module: 'recruitment' },
+        { path: '/employees', label: 'Employees', icon: Users, module: 'employees' },
+        { path: '/attendance', label: 'Attendance', icon: CalendarCheck, module: 'attendance' },
+        { path: '/leaves', label: 'Leaves', icon: CalendarOff, module: 'leaves' },
+        { path: '/payroll', label: 'Payroll', icon: Banknote, module: 'payroll' },
+        { path: '/assets-claims', label: 'Assets & Claims', icon: Laptop, module: 'assets-claims' },
+        { path: '/performance', label: 'Performance', icon: Award, module: 'performance' },
+        { path: '/reports', label: 'Reports', icon: BarChart3, module: 'reports' },
       ],
     },
     {
@@ -112,15 +112,15 @@ export const Sidebar = ({ isMobileOpen, onCloseMobile }) => {
       icon: FolderKanban,
       module: 'operations',
       items: [
-        { path: '/operations/projects', label: 'Projects & Sites', icon: FolderKanban, module: 'projects' },
+        { path: '/operations/projects', label: 'Projects', icon: FolderKanban, module: 'projects' },
         { path: '/operations/site-logs', label: 'Site Logs', icon: FileSpreadsheet, module: 'site-logs' },
-        { path: '/operations/tasks', label: 'Tasks Board', icon: CheckSquare, module: 'tasks' },
+        { path: '/operations/tasks', label: 'Tasks', icon: CheckSquare, module: 'tasks' },
       ],
     },
     {
       type: 'dropdown',
       key: 'masters',
-      label: 'Organization Masters',
+      label: 'Masters',
       icon: Building2,
       module: 'masters',
       items: [
@@ -128,8 +128,7 @@ export const Sidebar = ({ isMobileOpen, onCloseMobile }) => {
         { path: '/masters/branches', label: 'Branches', icon: Building2, module: 'branches' },
         { path: '/masters/departments', label: 'Departments', icon: Building2, module: 'departments' },
         { path: '/masters/designations', label: 'Designations', icon: Award, module: 'designations' },
-        { path: '/masters/roles', label: 'Roles & RBAC', icon: ShieldCheck, module: 'roles' },
-
+        { path: '/masters/roles', label: 'Roles', icon: ShieldCheck, module: 'roles' },
       ],
     },
   ];
@@ -227,15 +226,14 @@ export const Sidebar = ({ isMobileOpen, onCloseMobile }) => {
               );
             }
 
-            // Dropdown Group - Filter child items by RBAC access
+            // Dropdown Group - Filter child items strictly by RBAC permission access
             const visibleItems = menu.items.filter((item) => {
               if (isSuperAdmin) return true;
               return canAccessModule(item.module);
             });
 
-            // If user has no access to any sub-item in this group, hide the group
+            // If user has no access to any sub-item in this group, hide the entire group
             if (visibleItems.length === 0) return null;
-            if (!isSuperAdmin && menu.module && !canAccessModule(menu.module)) return null;
 
             const GroupIcon = menu.icon;
             const isOpen = !!openMenus[menu.key];
