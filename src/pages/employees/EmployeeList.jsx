@@ -652,16 +652,35 @@ export const EmployeeList = () => {
     return list;
   }, [designations]);
 
+  // Filter branches according to selected company
+  const availableBranches = useMemo(() => {
+    if (!newEmp.company) return branches;
+    const filtered = branches.filter((b) => {
+      const cId = b.company?._id || b.company?.id || b.company;
+      return !cId || String(cId) === String(newEmp.company);
+    });
+    return filtered.length > 0 ? filtered : branches;
+  }, [branches, newEmp.company]);
+
   // Open Create Employee Modal
   const openAddModal = () => {
     if (!designations || designations.length === 0) {
       fetchDesignations();
     }
     const defaultDesig = designationOptions[0]?.value || designations[0]?._id || '';
+    const initialCompany = companies[0]?._id || '';
+    const validBranches = initialCompany
+      ? branches.filter((b) => {
+          const cId = b.company?._id || b.company?.id || b.company;
+          return !cId || String(cId) === String(initialCompany);
+        })
+      : branches;
+    const initialBranch = validBranches[0]?._id || branches[0]?._id || '';
+
     setNewEmp({
       ...initialEmpState,
-      company: companies[0]?._id || '',
-      branch: branches[0]?._id || '',
+      company: initialCompany,
+      branch: initialBranch,
       department: departments[0]?._id || '',
       designation: defaultDesig,
       // Auto-assign lowest-privilege role ('employee') — user doesn't need to pick it
@@ -979,6 +998,7 @@ export const EmployeeList = () => {
 
     if (section === 'basic') {
       const b = currentEmployeeDetail.basicInfo || {};
+      const photoVal = b.photograph || b.photo || currentEmployeeDetail.photo || '';
       setEditFormData({
         employeeCode: b.employeeCode || currentEmployeeDetail.employeeCode || '',
         fullName: b.fullName || `${currentEmployeeDetail.firstName || ''} ${currentEmployeeDetail.lastName || ''}`.trim(),
@@ -989,33 +1009,36 @@ export const EmployeeList = () => {
         dateOfBirth: b.dateOfBirth ? new Date(b.dateOfBirth).toISOString().split('T')[0] : '1995-01-01',
         bloodGroup: b.bloodGroup || currentEmployeeDetail.bloodGroup || 'O+',
         maritalStatus: b.maritalStatus || currentEmployeeDetail.maritalStatus || 'SINGLE',
+        photo: photoVal,
+        photograph: photoVal,
       });
     } else if (section === 'employment') {
       const em = currentEmployeeDetail.employmentInfo || {};
       const doj = em.dateOfJoining || currentEmployeeDetail.dateOfJoining;
 
-      // Ensure department is resolved to its ObjectId
+      // Ensure department is resolved safely
       const rawDept = em.department?._id || em.department || currentEmployeeDetail.department?._id || currentEmployeeDetail.department;
       const matchedDept = departments.find((d) => d._id === rawDept || d.name === rawDept);
-      const deptId = matchedDept?._id || (/^[0-9a-fA-F]{24}$/.test(rawDept) ? rawDept : departments[0]?._id || '');
+      const deptVal = matchedDept?.name || matchedDept?._id || (typeof rawDept === 'string' ? rawDept : departments[0]?.name || departments[0]?._id || '');
 
-      // Ensure branch is resolved to its ObjectId
+      // Ensure branch is preserved from employee's actual valid record
       const rawBranch = em.branch?._id || em.branch || currentEmployeeDetail.branch?._id || currentEmployeeDetail.branch;
-      let matchedBranch = branches.find((b) => b._id === rawBranch);
-      if (!matchedBranch) {
-        matchedBranch = branches.find((b) => b.name === rawBranch);
-      }
-      const branchId = matchedBranch?._id || (branches.some((b) => String(b._id) === String(rawBranch)) ? rawBranch : branches[0]?._id || '');
+      let matchedBranch = branches.find((b) => b._id === rawBranch || b.name === rawBranch);
+      const branchId = /^[0-9a-fA-F]{24}$/.test(String(rawBranch)) ? String(rawBranch) : (matchedBranch?._id || String(rawBranch || ''));
 
-      // Ensure designation is resolved to its ObjectId
+      // Ensure designation is resolved safely
       const rawDesig = em.designation?._id || em.designation || currentEmployeeDetail.designation?._id || currentEmployeeDetail.designation;
       const matchedDesig = designations.find((d) => d._id === rawDesig || d.name === rawDesig || d.title === rawDesig);
-      const desigId = matchedDesig?._id || (/^[0-9a-fA-F]{24}$/.test(rawDesig) ? rawDesig : designations[0]?._id || '');
+      const desigVal = matchedDesig?.title || matchedDesig?.name || matchedDesig?._id || (typeof rawDesig === 'string' ? rawDesig : designations[0]?.title || designations[0]?._id || '');
+
+      const rawMgr = em.reportingManager?._id || em.reportingManager || currentEmployeeDetail.reportingManager?._id || currentEmployeeDetail.reportingManager || '';
+      const mgrId = /^[0-9a-fA-F]{24}$/.test(rawMgr) ? rawMgr : '';
 
       setEditFormData({
-        department: deptId,
-        designation: desigId,
+        department: deptVal,
+        designation: desigVal,
         branch: branchId,
+        reportingManager: mgrId,
         employmentType: em.employmentType || currentEmployeeDetail.employmentType || 'FULL_TIME',
         workType: em.workType || currentEmployeeDetail.workType || 'OFFICE',
         shift: em.shift || 'GENERAL',
@@ -1039,10 +1062,14 @@ export const EmployeeList = () => {
       });
     } else if (section === 'emergency') {
       const emg = currentEmployeeDetail.emergencyContact || {};
+      const cName = emg.contactName || emg.name || '';
+      const cPhone = emg.mobileNumber || emg.phone || '';
       setEditFormData({
-        name: emg.name || '',
+        contactName: cName,
+        name: cName,
         relationship: emg.relationship || '',
-        phone: emg.phone || '',
+        mobileNumber: cPhone,
+        phone: cPhone,
       });
     }
   };
@@ -1102,27 +1129,26 @@ export const EmployeeList = () => {
 
         const doj = editFormData.dateOfJoining || em.dateOfJoining || currentEmployeeDetail.dateOfJoining;
 
-        // Resolve department ObjectId
+        // Resolve department: prefer name per Swagger Module 2 schema, fallback to ID
         const rawDept = editFormData.department || em.department?._id || em.department;
         const matchedDept = departments.find((d) => d._id === rawDept || d.name === rawDept);
-        const deptId = matchedDept?._id || (/^[0-9a-fA-F]{24}$/.test(rawDept) ? rawDept : departments[0]?._id);
+        const deptVal = matchedDept?.name || (typeof rawDept === 'string' && !/^[0-9a-fA-F]{24}$/.test(rawDept) ? rawDept : (matchedDept?._id || departments[0]?.name || 'General'));
 
-        // Resolve designation ObjectId
+        // Resolve designation: prefer title/name per Swagger Module 2 schema, fallback to ID
         const rawDesig = editFormData.designation || em.designation?._id || em.designation;
         const matchedDesig = designations.find((d) => d._id === rawDesig || d.name === rawDesig || d.title === rawDesig);
-        const desigId = matchedDesig?._id || (/^[0-9a-fA-F]{24}$/.test(rawDesig) ? rawDesig : designations[0]?._id);
+        const desigVal = matchedDesig?.title || matchedDesig?.name || (typeof rawDesig === 'string' && !/^[0-9a-fA-F]{24}$/.test(rawDesig) ? rawDesig : (matchedDesig?._id || 'Staff'));
 
-        // Resolve branch ObjectId
-        const rawBranch = editFormData.branch || em.branch?._id || em.branch;
-        let matchedBranch = branches.find((b) => b._id === rawBranch);
-        if (!matchedBranch) {
-          matchedBranch = branches.find((b) => b.name === rawBranch);
-        }
-        const branchId = matchedBranch?._id || (branches.some((b) => String(b._id) === String(rawBranch)) ? rawBranch : branches[0]?._id);
+        // Resolve branch: ensure we use the employee's company branch, never an arbitrary other company's branch
+        const rawBranch = editFormData.branch || em.branch?._id || em.branch || currentEmployeeDetail.branch?._id || currentEmployeeDetail.branch;
+        let matchedBranch = branches.find((b) => b._id === rawBranch || b.name === rawBranch);
+        const branchId = /^[0-9a-fA-F]{24}$/.test(String(rawBranch))
+          ? String(rawBranch)
+          : (matchedBranch?._id || (typeof em.branch === 'object' ? em.branch?._id : em.branch) || branches[0]?._id);
 
         const payload = {
-          department: deptId,
-          designation: desigId || editFormData.designation || 'Staff',
+          department: deptVal,
+          designation: desigVal,
           branch: branchId,
           employmentType: editFormData.employmentType || em.employmentType || 'FULL_TIME',
           workType: editFormData.workType || em.workType || 'OFFICE',
@@ -1132,32 +1158,54 @@ export const EmployeeList = () => {
           employeeRole: roleId,
         };
 
+        if (editFormData.reportingManager && /^[0-9a-fA-F]{24}$/.test(editFormData.reportingManager) && String(editFormData.reportingManager) !== String(empId)) {
+          payload.reportingManager = editFormData.reportingManager;
+        }
+
         await employeeApi.updateEmploymentInfo(empId, payload);
         showToast('Employment details updated successfully', 'success');
       } else if (editSection === 'government') {
+        if (editFormData.panNumber?.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/i.test(editFormData.panNumber.trim())) {
+          showToast('Invalid PAN format (e.g. ABCDE1234F)', 'warning');
+          setSavingSection(false);
+          return;
+        }
+        if (editFormData.aadhaarNumber?.trim()) {
+          const cleanAadhaar = editFormData.aadhaarNumber.replace(/\D/g, '');
+          if (cleanAadhaar.length !== 12) {
+            showToast('Aadhaar Number must be exactly 12 digits', 'warning');
+            setSavingSection(false);
+            return;
+          }
+        }
         const govPayload = {
-          aadhaarNumber: editFormData.aadhaarNumber,
-          panNumber: editFormData.panNumber,
-          pfNumber: editFormData.pfNumber,
-          esicNumber: editFormData.esicNumber,
-          uanNumber: editFormData.uanNumber,
+          aadhaarNumber: editFormData.aadhaarNumber?.trim(),
+          panNumber: editFormData.panNumber?.trim()?.toUpperCase(),
+          pfNumber: editFormData.pfNumber?.trim(),
+          esicNumber: editFormData.esicNumber?.trim(),
+          uanNumber: editFormData.uanNumber?.trim(),
           bankAccountDetails: {
-            bankName: editFormData.bankName,
-            accountNumber: editFormData.accountNumber,
-            ifscCode: editFormData.ifscCode,
-            branchName: editFormData.branchName,
+            bankName: editFormData.bankName?.trim(),
+            accountNumber: editFormData.accountNumber?.trim(),
+            ifscCode: editFormData.ifscCode?.trim()?.toUpperCase(),
+            branchName: editFormData.branchName?.trim(),
           },
         };
         await employeeApi.updateGovernmentDetails(empId, govPayload);
         showToast('Government & Bank details updated successfully', 'success');
       } else if (editSection === 'emergency') {
-        const emgPhoneErr = validatePhone(editFormData.phone, { fieldName: 'Emergency mobile phone' });
+        const phoneToValidate = editFormData.mobileNumber || editFormData.phone;
+        const emgPhoneErr = validatePhone(phoneToValidate, { fieldName: 'Emergency mobile phone' });
         if (emgPhoneErr) {
           showToast(emgPhoneErr, 'warning');
           setSavingSection(false);
           return;
         }
-        await employeeApi.updateEmergencyContact(empId, editFormData);
+        await employeeApi.updateEmergencyContact(empId, {
+          contactName: editFormData.contactName || editFormData.name || '',
+          relationship: editFormData.relationship || '',
+          mobileNumber: phoneToValidate || '',
+        });
         showToast('Emergency contact updated successfully', 'success');
       }
       setEditSection(null);
@@ -1228,12 +1276,13 @@ export const EmployeeList = () => {
     if (!employeeToDelete) return;
     setDeleting(true);
     try {
-      await employeeApi.deleteEmployee(employeeToDelete._id);
+      const empId = employeeToDelete._id || employeeToDelete.id;
+      await employeeApi.deleteEmployee(empId);
       showToast('Employee permanently deleted', 'success');
       setDeleteModalOpen(false);
       loadEmployees();
     } catch (err) {
-      showToast(err.response?.data?.message || 'Cannot delete: Employee may have active direct reports', 'error');
+      showToast(err.response?.data?.message || 'Cannot delete: Employee may have active direct reports or assigned assets', 'error');
     } finally {
       setDeleting(false);
     }
@@ -1249,12 +1298,13 @@ export const EmployeeList = () => {
     if (!employeeToDeactivate) return;
     setDeactivating(true);
     try {
-      await employeeApi.deactivateEmployee(employeeToDeactivate._id);
+      const empId = employeeToDeactivate._id || employeeToDeactivate.id;
+      await employeeApi.deactivateEmployee(empId);
       showToast('Employee deactivated and user access revoked', 'success');
       setDeactivateModalOpen(false);
       loadEmployees();
-      if (currentEmployeeDetail && currentEmployeeDetail._id === employeeToDeactivate._id) {
-        const fresh = await employeeApi.getEmployeeById(employeeToDeactivate._id);
+      if (currentEmployeeDetail && (currentEmployeeDetail._id === empId || currentEmployeeDetail.id === empId)) {
+        const fresh = await employeeApi.getEmployeeById(empId);
         setCurrentEmployeeDetail(fresh?.data || fresh);
       }
     } catch (err) {
@@ -1267,7 +1317,8 @@ export const EmployeeList = () => {
   // Update Status (PUT /employees/:id/status)
   const openStatusModal = (emp) => {
     setEmployeeToStatus(emp);
-    setTargetStatus(emp.status || 'ACTIVE');
+    const currStatus = emp.employmentInfo?.employeeStatus || emp.status || 'ACTIVE';
+    setTargetStatus(currStatus);
     setStatusModalOpen(true);
   };
 
@@ -1275,7 +1326,8 @@ export const EmployeeList = () => {
     if (!employeeToStatus) return;
     setUpdatingStatus(true);
     try {
-      await employeeApi.updateStatus(employeeToStatus._id, targetStatus);
+      const empId = employeeToStatus._id || employeeToStatus.id;
+      await employeeApi.updateStatus(empId, targetStatus);
       showToast(`Employee status transitioned to ${targetStatus}`, 'success');
       setStatusModalOpen(false);
       loadEmployees();
@@ -1383,7 +1435,7 @@ export const EmployeeList = () => {
         const name = r.basicInfo?.fullName || (r.firstName ? `${r.firstName} ${r.lastName || ''}` : r.name || '-');
         const email = r.basicInfo?.email || r.email || '-';
         const phone = r.basicInfo?.mobileNumber || r.phone || r.mobileNumber;
-        const photo = r.basicInfo?.photo || r.photo;
+        const photo = r.basicInfo?.photograph || r.basicInfo?.photo || r.photo;
         return (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {photo ? (
@@ -1638,7 +1690,7 @@ export const EmployeeList = () => {
               }}
               options={[
                 { value: '', label: 'All Departments' },
-                ...departments.map((d) => ({ value: d._id, label: d.name })),
+                ...departments.map((d) => ({ value: d.name || d._id, label: d.name })),
               ]}
               style={{ marginBottom: 0 }}
             />
@@ -2049,15 +2101,35 @@ export const EmployeeList = () => {
               <Select
                 label="Company"
                 value={newEmp.company}
-                onChange={(e) => setNewEmp({ ...newEmp, company: e.target.value })}
+                onChange={(e) => {
+                  const compId = e.target.value;
+                  const matchingBranches = branches.filter((b) => {
+                    const cId = b.company?._id || b.company?.id || b.company;
+                    return !cId || String(cId) === String(compId);
+                  });
+                  setNewEmp({
+                    ...newEmp,
+                    company: compId,
+                    branch: matchingBranches[0]?._id || (branches[0]?._id || ''),
+                  });
+                }}
                 options={companies.map((c) => ({ value: c._id, label: c.name }))}
                 required
               />
               <Select
                 label="Branch"
                 value={newEmp.branch}
-                onChange={(e) => setNewEmp({ ...newEmp, branch: e.target.value })}
-                options={branches.map((b) => ({
+                onChange={(e) => {
+                  const bId = e.target.value;
+                  const chosenBranch = branches.find((b) => String(b._id) === String(bId));
+                  const branchCompany = chosenBranch?.company?._id || chosenBranch?.company;
+                  setNewEmp({
+                    ...newEmp,
+                    branch: bId,
+                    company: branchCompany || newEmp.company,
+                  });
+                }}
+                options={availableBranches.map((b) => ({
                   value: b._id,
                   label: b.company?.name ? `${b.name} (${b.company.name})` : b.name,
                 }))}
@@ -2089,7 +2161,7 @@ export const EmployeeList = () => {
                 options={[
                   { value: '', label: 'None / Top Level Manager' },
                   ...employees.map((em) => ({
-                    value: em._id,
+                    value: em._id || em.id,
                     label: `${em.basicInfo?.fullName || `${em.firstName || ''} ${em.lastName || ''}`.trim()} (${em.basicInfo?.employeeCode || em.employeeCode || 'EMP'})`,
                   })),
                 ]}
@@ -2487,9 +2559,9 @@ export const EmployeeList = () => {
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 {/* Avatar circle with Initials and status dot */}
                 <div style={{ position: 'relative' }}>
-                  {currentEmployeeDetail.basicInfo?.photo || currentEmployeeDetail.photo ? (
+                  {currentEmployeeDetail.basicInfo?.photograph || currentEmployeeDetail.basicInfo?.photo || currentEmployeeDetail.photo ? (
                     <img
-                      src={currentEmployeeDetail.basicInfo?.photo || currentEmployeeDetail.photo}
+                      src={currentEmployeeDetail.basicInfo?.photograph || currentEmployeeDetail.basicInfo?.photo || currentEmployeeDetail.photo}
                       alt="Profile"
                       style={{
                         width: 44,
@@ -2883,23 +2955,33 @@ export const EmployeeList = () => {
                             setEditFormData({ ...editFormData, department: val });
                             if (val) fetchDesignations(val);
                           }}
-                          options={departments.map((d) => ({ value: d._id, label: d.name }))}
+                          options={departments.map((d) => ({ value: d.name || d._id, label: d.name }))}
                         />
                         <Select
                           label="Designation *"
                           placeholder="Select Designation"
                           value={editFormData.designation}
                           onChange={(e) => setEditFormData({ ...editFormData, designation: e.target.value })}
-                          options={designationOptions}
+                          options={designationOptions.map((d) => ({ value: d.label || d.value, label: d.label }))}
                         />
                         <Select
                           label="Branch *"
                           value={editFormData.branch}
                           onChange={(e) => setEditFormData({ ...editFormData, branch: e.target.value })}
-                          options={branches.map((b) => ({
-                            value: b._id,
-                            label: b.company?.name ? `${b.name} (${b.company.name})` : b.name,
-                          }))}
+                          options={(() => {
+                            const empComp = currentEmployeeDetail?.company?._id || currentEmployeeDetail?.company;
+                            const compBranches = empComp
+                              ? branches.filter((b) => {
+                                  const cId = b.company?._id || b.company?.id || b.company;
+                                  return !cId || String(cId) === String(empComp);
+                                })
+                              : branches;
+                            const list = compBranches.length > 0 ? compBranches : branches;
+                            return list.map((b) => ({
+                              value: b._id,
+                              label: b.company?.name ? `${b.name} (${b.company.name})` : b.name,
+                            }));
+                          })()}
                         />
                         <Select
                           label="Employment Type"
@@ -2921,6 +3003,20 @@ export const EmployeeList = () => {
                             { value: 'FIELD', label: 'Field Staff' },
                             { value: 'SITE', label: 'Site / Project' },
                             { value: 'HYBRID', label: 'Hybrid' },
+                          ]}
+                        />
+                        <Select
+                          label="Reporting Manager"
+                          value={editFormData.reportingManager || ''}
+                          onChange={(e) => setEditFormData({ ...editFormData, reportingManager: e.target.value })}
+                          options={[
+                            { value: '', label: 'None / Top Level Manager' },
+                            ...employees
+                              .filter((em) => (em._id || em.id) !== currentEmployeeDetail._id)
+                              .map((em) => ({
+                                value: em._id || em.id,
+                                label: `${em.basicInfo?.fullName || `${em.firstName || ''} ${em.lastName || ''}`.trim()} (${em.basicInfo?.employeeCode || em.employeeCode || 'EMP'})`,
+                              })),
                           ]}
                         />
                         <Input
@@ -3282,13 +3378,13 @@ export const EmployeeList = () => {
                       <div className="grid-3">
                         <Input
                           label="Contact Person Name *"
-                          value={editFormData.name}
-                          onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
+                          value={editFormData.name || editFormData.contactName || ''}
+                          onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value, contactName: e.target.value })}
                           required
                         />
                         <Input
                           label="Relationship *"
-                          value={editFormData.relationship}
+                          value={editFormData.relationship || ''}
                           onChange={(e) => setEditFormData({ ...editFormData, relationship: e.target.value })}
                           required
                         />
@@ -3296,8 +3392,8 @@ export const EmployeeList = () => {
                           label="Emergency Mobile Phone *"
                           type="tel"
                           isPhone={true}
-                          value={editFormData.phone}
-                          onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
+                          value={editFormData.phone || editFormData.mobileNumber || ''}
+                          onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value, mobileNumber: e.target.value })}
                           placeholder="10-digit emergency number"
                           required
                         />

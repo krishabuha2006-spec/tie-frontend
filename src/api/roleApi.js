@@ -75,7 +75,7 @@ export const roleApi = {
     }
   },
 
-  // 7. Update Role Permission Matrix (PUT /roles/:id/permissions)
+
   updateRolePermissions: async (id, permissions) => {
     // Sanitize permissions to ensure all values are valid 12-action PermissionActions objects
     const sanitized = {};

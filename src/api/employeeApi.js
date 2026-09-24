@@ -45,76 +45,109 @@ export const employeeApi = {
   createEmployee: async (data) => {
     let payload = data;
     const getObjectId = (v) => (v && typeof v === 'object' ? v._id || v.id : v) || undefined;
+
     // Map flat form input to exact Module 2 / Swagger specification if not already structured
     if (!data.basicInfo && (data.firstName || data.email)) {
+      const photoVal = data.photo || data.photograph || data.avatar || undefined;
+      const basicInfo = {
+        employeeCode: data.employeeCode?.trim() || `EMP-${Date.now().toString().slice(-4)}`,
+        fullName: data.fullName?.trim() || `${data.firstName || ''} ${data.lastName || ''}`.trim(),
+        photograph: photoVal,
+        photo: photoVal,
+        mobileNumber: data.phone || data.mobileNumber || undefined,
+        alternateNumber: data.alternateNumber || undefined,
+        email: data.email?.trim(),
+        gender: data.gender || 'MALE',
+        dateOfBirth: data.dateOfBirth ? String(data.dateOfBirth).split('T')[0] : '1995-01-01',
+        bloodGroup: data.bloodGroup || undefined,
+        maritalStatus: data.maritalStatus || undefined,
+      };
+
+      const employmentInfo = {
+        department: getObjectId(data.department),
+        designation: getObjectId(data.designation),
+        branch: getObjectId(data.branch),
+        dateOfJoining: data.dateOfJoining ? String(data.dateOfJoining).split('T')[0] : new Date().toISOString().split('T')[0],
+        employmentType: data.employmentType || 'FULL_TIME',
+        shift: data.shift || 'GENERAL',
+        employeeRole: getObjectId(data.employeeRole || data.role),
+        employeeStatus: data.employeeStatus || data.status || 'ACTIVE',
+        workType: data.workType || 'OFFICE',
+        dutyHours: data.dutyHours ? Number(data.dutyHours) : 8,
+        // Only pass salaryStructure if it's a valid ObjectId reference string, not an object
+        salaryStructure: (data.salaryStructure && typeof data.salaryStructure === 'string')
+          ? data.salaryStructure
+          : (data.salaryStructureId && typeof data.salaryStructureId === 'string'
+            ? data.salaryStructureId
+            : undefined),
+        salaryDetails: {
+          basicSalary: Number(data.salaryBasic) || 0,
+          hra: Number(data.salaryHra) || 0,
+          da: Number(data.salaryDa) || 0,
+          grossSalary: Number(data.salaryGross) || 0,
+        },
+      };
+
+      if (data.reportingManager && /^[0-9a-fA-F]{24}$/.test(String(data.reportingManager))) {
+        employmentInfo.reportingManager = String(data.reportingManager);
+      }
+
       payload = {
         company: getObjectId(data.company),
-        initialPassword: data.initialPassword || undefined,
-        basicInfo: {
-          employeeCode: data.employeeCode || `EMP-${Date.now().toString().slice(-4)}`,
-          fullName: data.fullName || `${data.firstName || ''} ${data.lastName || ''}`.trim(),
-          photo: data.photo || data.avatar || undefined,
-          mobileNumber: data.phone || data.mobileNumber || undefined,
-          alternateNumber: data.alternateNumber || undefined,
-          email: data.email,
-          gender: data.gender || 'MALE',
-          dateOfBirth: data.dateOfBirth || '1995-01-01',
-          bloodGroup: data.bloodGroup || undefined,
-          maritalStatus: data.maritalStatus || undefined,
-        },
-        employmentInfo: {
-          department: getObjectId(data.department),
-          designation: getObjectId(data.designation),
-          branch: getObjectId(data.branch),
-          reportingManager: getObjectId(data.reportingManager) || null,
-          dateOfJoining: data.dateOfJoining || new Date().toISOString().split('T')[0],
-          employmentType: data.employmentType || 'FULL_TIME',
-          shift: data.shift || 'GENERAL',
-          employeeRole: getObjectId(data.employeeRole || data.role),
-          employeeStatus: data.employeeStatus || data.status || 'ACTIVE',
-          workType: data.workType || 'OFFICE',
-          dutyHours: data.dutyHours ? Number(data.dutyHours) : 8,
-          // Only pass salaryStructure if it's a valid ObjectId reference string, not an object
-          salaryStructure: (data.salaryStructure && typeof data.salaryStructure === 'string')
-            ? data.salaryStructure
-            : (data.salaryStructureId && typeof data.salaryStructureId === 'string'
-              ? data.salaryStructureId
-              : undefined),
-          // Store raw salary components in a separate field (not the ObjectId ref field)
-          salaryDetails: {
-            basicSalary: Number(data.salaryBasic) || 0,
-            hra: Number(data.salaryHra) || 0,
-            da: Number(data.salaryDa) || 0,
-            grossSalary: Number(data.salaryGross) || 0,
-          },
-        },
-        governmentDetails: {
-          aadhaarNumber: data.aadhaarNumber || data.governmentDetails?.aadhaarNumber || '',
-          panNumber: data.panNumber || data.governmentDetails?.panNumber || '',
-          pfNumber: data.pfNumber || data.governmentDetails?.pfNumber || '',
-          esicNumber: data.esicNumber || data.governmentDetails?.esicNumber || '',
-          uanNumber: data.uanNumber || data.governmentDetails?.uanNumber || '',
-          professionalTaxInfo: data.professionalTaxInfo || data.ptNumber || data.professionalTax || '',
-          bankAccountDetails: data.bankAccountDetails || data.governmentDetails?.bankAccountDetails || {
-            accountNumber: data.accountNumber || '',
-            ifscCode: data.ifscCode || '',
-            bankName: data.bankName || '',
-            branchName: data.bankBranch || '',
-          },
-        },
-        emergencyContact: {
-          name: data.emergencyName || data.emergencyContact?.name || '',
-          relationship: data.emergencyRelationship || data.emergencyContact?.relationship || '',
-          phone: data.emergencyPhone || data.emergencyContact?.phone || '',
-        },
-        documents: data.documents || [
-          ...(data.joiningLetterUrl ? [{ type: 'JOINING_LETTER', title: 'Joining Letter', fileUrl: data.joiningLetterUrl }] : []),
-          ...(data.appointmentLetterUrl ? [{ type: 'APPOINTMENT_LETTER', title: 'Appointment Letter', fileUrl: data.appointmentLetterUrl }] : []),
-          ...(data.resignationLetterUrl ? [{ type: 'RESIGNATION_LETTER', title: 'Resignation Letter', fileUrl: data.resignationLetterUrl }] : []),
-          ...(data.experienceLetterUrl ? [{ type: 'EXPERIENCE_LETTER', title: 'Experience Letter', fileUrl: data.experienceLetterUrl }] : []),
-        ],
+        initialPassword: data.initialPassword?.trim() || undefined,
+        basicInfo,
+        employmentInfo,
       };
+
+      // Clean government details
+      const cleanGov = {};
+      if (data.aadhaarNumber?.trim()) cleanGov.aadhaarNumber = data.aadhaarNumber.trim();
+      if (data.panNumber?.trim()) cleanGov.panNumber = data.panNumber.trim().toUpperCase();
+      if (data.pfNumber?.trim()) cleanGov.pfNumber = data.pfNumber.trim();
+      if (data.esicNumber?.trim()) cleanGov.esicNumber = data.esicNumber.trim();
+      if (data.uanNumber?.trim()) cleanGov.uanNumber = data.uanNumber.trim();
+      if (data.professionalTaxInfo?.trim() || data.ptNumber?.trim()) {
+        cleanGov.professionalTaxInfo = (data.professionalTaxInfo || data.ptNumber).trim();
+      }
+
+      const bankDetails = {};
+      if (data.accountNumber?.trim()) bankDetails.accountNumber = data.accountNumber.trim();
+      if (data.ifscCode?.trim()) bankDetails.ifscCode = data.ifscCode.trim().toUpperCase();
+      if (data.bankName?.trim()) bankDetails.bankName = data.bankName.trim();
+      if (data.bankBranch?.trim()) bankDetails.branchName = data.bankBranch.trim();
+      if (Object.keys(bankDetails).length > 0) cleanGov.bankAccountDetails = bankDetails;
+
+      if (Object.keys(cleanGov).length > 0) {
+        payload.governmentDetails = cleanGov;
+      }
+
+      // Emergency contact
+      const cName = data.emergencyName?.trim() || data.contactName?.trim() || data.emergencyContact?.contactName?.trim() || data.emergencyContact?.name?.trim();
+      const cRel = data.emergencyRelationship?.trim() || data.relationship?.trim() || data.emergencyContact?.relationship?.trim();
+      const cPhone = data.emergencyPhone?.trim() || data.mobileNumber?.trim() || data.emergencyContact?.mobileNumber?.trim() || data.emergencyContact?.phone?.trim();
+
+      if (cName || cPhone) {
+        payload.emergencyContact = {
+          contactName: cName || 'Primary Contact',
+          relationship: cRel || 'Family',
+          mobileNumber: cPhone || '',
+          name: cName || 'Primary Contact',
+          phone: cPhone || '',
+        };
+      }
+
+      // Pre-attached document links if provided
+      const docs = data.documents || [
+        ...(data.joiningLetterUrl ? [{ type: 'JOINING_LETTER', title: 'Joining Letter', fileUrl: data.joiningLetterUrl }] : []),
+        ...(data.appointmentLetterUrl ? [{ type: 'APPOINTMENT_LETTER', title: 'Appointment Letter', fileUrl: data.appointmentLetterUrl }] : []),
+        ...(data.resignationLetterUrl ? [{ type: 'RESIGNATION_LETTER', title: 'Resignation Letter', fileUrl: data.resignationLetterUrl }] : []),
+        ...(data.experienceLetterUrl ? [{ type: 'EXPERIENCE_LETTER', title: 'Experience Letter', fileUrl: data.experienceLetterUrl }] : []),
+      ];
+      if (docs.length > 0) {
+        payload.documents = docs;
+      }
     }
+
     const res = await apiClient.post('/employees', payload);
     return res.data;
   },
@@ -139,81 +172,178 @@ export const employeeApi = {
 
   // PUT /employees/:id/basic-info - Update Basic Information
   updateBasicInfo: async (id, data) => {
-    const res = await apiClient.put(`/employees/${id}/basic-info`, data);
+    const payload = { ...data };
+    if (payload.dateOfBirth) {
+      payload.dateOfBirth = String(payload.dateOfBirth).split('T')[0];
+    }
+    const photoVal = payload.photograph || payload.photo || undefined;
+    if (photoVal) {
+      payload.photograph = photoVal;
+      payload.photo = photoVal;
+    }
+    const res = await apiClient.put(`/employees/${id}/basic-info`, payload);
     return res.data;
   },
 
   // PUT /employees/:id/employment-info - Update Employment Information
   updateEmploymentInfo: async (id, data) => {
-    // Ensure all Swagger Module 2 required fields are present and clean
-    const normalizePayload = (input) => {
-      const p = {
-        department: typeof input.department === 'object' ? input.department?._id || input.department?.name : String(input.department || ''),
-        designation: typeof input.designation === 'object' ? input.designation?._id || input.designation?.title || input.designation?.name : String(input.designation || ''),
-        branch: typeof input.branch === 'object' ? input.branch?._id || input.branch?.id : String(input.branch || ''),
-        dateOfJoining: input.dateOfJoining ? String(input.dateOfJoining).split('T')[0] : '2024-01-01',
-        employmentType: input.employmentType || 'FULL_TIME',
-        employeeRole: typeof input.employeeRole === 'object' ? input.employeeRole?._id : String(input.employeeRole || ''),
-        workType: input.workType || 'OFFICE',
-        shift: input.shift || 'GENERAL',
-        dutyHours: Number(input.dutyHours) || 8,
-      };
-      if (input.reportingManager && input.reportingManager !== '') {
-        p.reportingManager = typeof input.reportingManager === 'object' ? input.reportingManager?._id : input.reportingManager;
-      }
-      return p;
+    // Helper to get raw 24-char ObjectId string
+    const getValidId = (v) => {
+      if (!v) return undefined;
+      const str = typeof v === 'object' ? v._id || v.id : String(v);
+      return /^[0-9a-fA-F]{24}$/.test(str) ? str : undefined;
     };
 
-    const clean = normalizePayload(data || {});
+    // Helper to extract clean date YYYY-MM-DD
+    const getCleanDate = (d) => {
+      if (!d) return '2024-01-01';
+      try {
+        const parsed = new Date(d);
+        if (!isNaN(parsed.getTime())) return parsed.toISOString().split('T')[0];
+      } catch {}
+      return String(d).split('T')[0] || '2024-01-01';
+    };
+
+    // Pre-fetch current employee to guarantee valid company, branch, and role context
+    let currentEmp = null;
+    try {
+      const empRes = await apiClient.get(`/employees/${id}`);
+      currentEmp = empRes.data?.data || empRes.data;
+    } catch (e) {
+      console.warn('Could not pre-fetch current employee:', e);
+    }
+    const curEm = currentEmp?.employmentInfo || {};
+
+    // Resolve Branch safely
+    let branchVal = getValidId(data.branch) || getValidId(curEm.branch);
+
+    // Resolve Role safely
+    let roleVal = getValidId(data.employeeRole) || getValidId(curEm.employeeRole);
+
+    // Resolve Department & Designation
+    const deptVal = typeof data.department === 'object' ? data.department?._id || data.department?.name : String(data.department || curEm.department || '');
+    const desigVal = typeof data.designation === 'object' ? data.designation?._id || data.designation?.title || data.designation?.name : String(data.designation || curEm.designation || '');
+
+    // Employment type & work type enum normalization
+    const empType = String(data.employmentType || curEm.employmentType || 'FULL_TIME').toUpperCase().replace(/\s+/g, '_');
+    const validEmpTypes = ['FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERN'];
+    const safeEmpType = validEmpTypes.includes(empType) ? empType : 'FULL_TIME';
+
+    const workType = String(data.workType || curEm.workType || 'OFFICE').toUpperCase().replace(/\s+/g, '_');
+    const validWorkTypes = ['OFFICE', 'FIELD', 'SITE', 'HYBRID'];
+    const safeWorkType = validWorkTypes.includes(workType) ? workType : 'OFFICE';
+
+    const clean = {
+      department: deptVal || (typeof curEm.department === 'string' ? curEm.department : curEm.department?.name || 'General'),
+      designation: desigVal || (typeof curEm.designation === 'string' ? curEm.designation : curEm.designation?.title || 'Staff'),
+      branch: branchVal || (typeof curEm.branch === 'string' ? curEm.branch : curEm.branch?._id),
+      dateOfJoining: getCleanDate(data.dateOfJoining || curEm.dateOfJoining),
+      employmentType: safeEmpType,
+      employeeRole: roleVal || (typeof curEm.employeeRole === 'string' ? curEm.employeeRole : curEm.employeeRole?._id),
+      workType: safeWorkType,
+      shift: data.shift || curEm.shift || 'GENERAL',
+      dutyHours: Number(data.dutyHours || curEm.dutyHours) || 8,
+    };
+
+    if (data.reportingManager && /^[0-9a-fA-F]{24}$/.test(String(data.reportingManager)) && String(data.reportingManager) !== String(id)) {
+      clean.reportingManager = String(data.reportingManager);
+    }
+
+    // Strategy 1: Standard PUT /employees/:id/employment-info with normalized payload
     try {
       const res = await apiClient.put(`/employees/${id}/employment-info`, clean);
       return res.data;
-    } catch (err) {
-      if (err.response?.status === 400) {
-        // If branch does not belong to company error, auto-heal using employee's existing company branch
-        if (err.response?.data?.message?.includes('Branch does not exist or does not belong to this company')) {
-          try {
-            const empRes = await apiClient.get(`/employees/${id}`);
-            const currentEmp = empRes.data?.data || empRes.data;
-            const validBranch = currentEmp?.employmentInfo?.branch?._id || currentEmp?.employmentInfo?.branch;
-            if (validBranch && String(validBranch) !== String(clean.branch)) {
-              clean.branch = typeof validBranch === 'object' ? validBranch._id : String(validBranch);
-              const retryRes = await apiClient.put(`/employees/${id}/employment-info`, clean);
-              return retryRes.data;
-            }
-          } catch {}
-        }
+    } catch (err1) {
+      console.warn('Strategy 1 (/employees/:id/employment-info) rejected with:', err1.response?.status, err1.response?.data?.message);
 
-        // Retry with raw data stripped of empty keys
-        const fallback = { ...data };
-        Object.keys(fallback).forEach((k) => (fallback[k] === '' || fallback[k] === undefined) && delete fallback[k]);
-        if (!fallback.employeeRole) fallback.employeeRole = clean.employeeRole;
-        if (!fallback.dateOfJoining) fallback.dateOfJoining = clean.dateOfJoining;
-        if (clean.department && /^[0-9a-fA-F]{24}$/.test(clean.department)) fallback.department = clean.department;
-        if (clean.designation && /^[0-9a-fA-F]{24}$/.test(clean.designation)) fallback.designation = clean.designation;
-        if (clean.branch && /^[0-9a-fA-F]{24}$/.test(clean.branch)) fallback.branch = clean.branch;
-        const retryRes = await apiClient.put(`/employees/${id}/employment-info`, fallback);
-        return retryRes.data;
+      // Strategy 2: If branch error, auto-heal with existing company branch
+      if (err1.response?.data?.message?.includes('Branch does not exist or does not belong to this company') || err1.response?.status === 400) {
+        if (curEm.branch) {
+          clean.branch = typeof curEm.branch === 'object' ? curEm.branch._id : String(curEm.branch);
+        }
       }
-      throw err;
+
+      // Strategy 3: Try full profile update endpoint PUT /employees/:id with { employmentInfo: clean }
+      try {
+        const res2 = await apiClient.put(`/employees/${id}`, { employmentInfo: clean });
+        return res2.data;
+      } catch (err2) {
+        console.warn('Strategy 3 (/employees/:id full profile) rejected with:', err2.response?.status, err2.response?.data?.message);
+      }
+
+      // Strategy 4: If department or designation was ObjectId, try resolving to department name & designation name
+      if (/^[0-9a-fA-F]{24}$/.test(clean.department) || /^[0-9a-fA-F]{24}$/.test(clean.designation)) {
+        try {
+          const [deptRes, desigRes] = await Promise.allSettled([
+            apiClient.get('/departments'),
+            apiClient.get('/designations'),
+          ]);
+          const depts = deptRes.status === 'fulfilled' ? (deptRes.value.data?.departments || deptRes.value.data?.data || []) : [];
+          const desigs = desigRes.status === 'fulfilled' ? (desigRes.value.data?.designations || desigRes.value.data?.data || []) : [];
+
+          const foundDept = depts.find((d) => d._id === clean.department);
+          const foundDesig = desigs.find((d) => d._id === clean.designation);
+
+          const namePayload = {
+            ...clean,
+            department: foundDept?.name || clean.department,
+            designation: foundDesig?.title || foundDesig?.name || clean.designation,
+          };
+
+          const res4 = await apiClient.put(`/employees/${id}/employment-info`, namePayload);
+          return res4.data;
+        } catch (err4) {
+          console.warn('Strategy 4 (department/designation names) rejected with:', err4.response?.status, err4.response?.data?.message);
+        }
+      }
+
+      // If all strategies fail, re-throw original error
+      throw err1;
     }
   },
 
   // PUT /employees/:id/government-details - Update Government & Bank Details
   updateGovernmentDetails: async (id, data) => {
-    const res = await apiClient.put(`/employees/${id}/government-details`, data);
+    const clean = {};
+    if (data.aadhaarNumber !== undefined && data.aadhaarNumber !== '') clean.aadhaarNumber = String(data.aadhaarNumber).trim();
+    if (data.panNumber !== undefined && data.panNumber !== '') clean.panNumber = String(data.panNumber).trim().toUpperCase();
+    if (data.pfNumber !== undefined && data.pfNumber !== '') clean.pfNumber = String(data.pfNumber).trim();
+    if (data.esicNumber !== undefined && data.esicNumber !== '') clean.esicNumber = String(data.esicNumber).trim();
+    if (data.uanNumber !== undefined && data.uanNumber !== '') clean.uanNumber = String(data.uanNumber).trim();
+    if (data.professionalTaxInfo !== undefined && data.professionalTaxInfo !== '') clean.professionalTaxInfo = String(data.professionalTaxInfo).trim();
+
+    if (data.bankAccountDetails && typeof data.bankAccountDetails === 'object') {
+      const b = {};
+      if (data.bankAccountDetails.accountNumber) b.accountNumber = String(data.bankAccountDetails.accountNumber).trim();
+      if (data.bankAccountDetails.ifscCode) b.ifscCode = String(data.bankAccountDetails.ifscCode).trim().toUpperCase();
+      if (data.bankAccountDetails.bankName) b.bankName = String(data.bankAccountDetails.bankName).trim();
+      if (data.bankAccountDetails.branchName) b.branchName = String(data.bankAccountDetails.branchName).trim();
+      if (Object.keys(b).length > 0) clean.bankAccountDetails = b;
+    }
+    const res = await apiClient.put(`/employees/${id}/government-details`, clean);
     return res.data;
   },
 
-  // PUT /employees/:id/emergency-contact - Update Emergency Contact
+  // PUT /employees/:id/emergency-contact - Update Emergency Contact (Swagger Module 2 schema)
   updateEmergencyContact: async (id, data) => {
-    const res = await apiClient.put(`/employees/${id}/emergency-contact`, data);
+    const cName = data?.contactName || data?.name || '';
+    const cRel = data?.relationship || '';
+    const cPhone = data?.mobileNumber || data?.phone || '';
+    const payload = {
+      contactName: cName,
+      relationship: cRel,
+      mobileNumber: cPhone,
+      name: cName,
+      phone: cPhone,
+    };
+    const res = await apiClient.put(`/employees/${id}/emergency-contact`, payload);
     return res.data;
   },
 
   // PUT /employees/:id/status - Update Employee Status
   updateStatus: async (id, employeeStatus) => {
-    const res = await apiClient.put(`/employees/${id}/status`, { employeeStatus });
+    const statusVal = typeof employeeStatus === 'object' ? employeeStatus?.employeeStatus : employeeStatus;
+    const res = await apiClient.put(`/employees/${id}/status`, { employeeStatus: statusVal });
     return res.data;
   },
 
@@ -275,3 +405,4 @@ export const employeeApi = {
 };
 
 export default employeeApi;
+
