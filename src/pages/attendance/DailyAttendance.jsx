@@ -1,1349 +1,1176 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import attendanceApi from '../../api/attendanceApi';
+import regularizationApi from '../../api/regularizationApi';
 import employeeApi from '../../api/employeeApi';
-import faceApi from '../../api/faceApi';
 import geoApi from '../../api/geoApi';
+import masterApi from '../../api/masterApi';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import {
-  Calendar,
-  Clock,
-  MapPin,
-  CheckCircle2,
-  AlertCircle,
-  ScanFace,
-  Layers,
-  Edit2,
-  UserCheck,
-  User,
-  RefreshCw,
-  Building2,
-  Compass,
-  XCircle,
-  ChevronDown,
+  Calendar, Clock, MapPin, CheckCircle2, AlertCircle, ScanFace,
+  Layers, Edit2, User, RefreshCw, Building2, Trash2, Search,
+  Check, X, ChevronRight, ShieldCheck, Camera, LogIn, LogOut,
+  Navigation, Eye, Sliders, Briefcase
 } from 'lucide-react';
 import Table from '../../components/common/Table';
 import Modal from '../../components/common/Modal';
 import Button from '../../components/common/Button';
-import Input from '../../components/common/Input';
-import Select from '../../components/common/Select';
 import Badge from '../../components/common/Badge';
-import CameraCapture from '../../components/common/CameraCapture';
-import GeoLocationPicker from '../../components/common/GeoLocationPicker';
-import ModuleSubNav from '../../components/common/ModuleSubNav';
-import { attendanceNav } from '../../routes/moduleNavConfig';
-import { calculateDistanceMeters, resolveBranchLocation } from '../../utils/geoUtils';
-import { compareFacePhotos, resolveRegisteredSelfie } from '../../utils/faceComparison';
 import { extractApiData } from '../../utils/apiUtils';
-
-const getEmpName = (emp) =>
-  emp?.basicInfo?.fullName ||
-  emp?.fullName ||
-  (emp?.firstName ? `${emp.firstName} ${emp.lastName || ''}`.trim() : '') ||
-  emp?.name ||
-  'Employee';
-
-const getEmpCode = (emp) =>
-  emp?.basicInfo?.employeeCode || emp?.employeeCode || '-';
-
-const getEmpDept = (emp) =>
-  emp?.employmentInfo?.department?.name || emp?.department?.name || emp?.department || '';
-
-// --- Simple 12-Hour AM/PM Time Picker with Proper Contained Dropdowns ---
-const CustomTimeSelect = ({ value, onChange, options, width = 64 }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const containerRef = useRef(null);
-  const listRef = useRef(null);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleClick = (e) => {
-      if (containerRef.current && !containerRef.current.contains(e.target)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (isOpen && listRef.current) {
-      const activeEl = listRef.current.querySelector('[data-active="true"]');
-      if (activeEl) {
-        listRef.current.scrollTop = activeEl.offsetTop - 55;
-      }
-    }
-  }, [isOpen]);
-
-  return (
-    <div ref={containerRef} style={{ position: 'relative', display: 'inline-block' }}>
-      <button
-        type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        style={{
-          height: 38,
-          minWidth: width,
-          padding: '0 8px',
-          borderRadius: 8,
-          border: isOpen ? '1.5px solid var(--primary, #2e7b85)' : '1px solid var(--border-color, #cbd5e1)',
-          background: '#ffffff',
-          color: 'var(--text-main, #1e293b)',
-          fontSize: '0.9rem',
-          fontWeight: 600,
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 4,
-          boxShadow: isOpen ? '0 0 0 3px rgba(46, 123, 133, 0.15)' : 'none',
-          transition: 'all 0.15s ease',
-        }}
-      >
-        <span>{value}</span>
-        <ChevronDown size={14} style={{ color: '#64748b', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-      </button>
-
-      {isOpen && (
-        <div
-          ref={listRef}
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 4px)',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            minWidth: width + 12,
-            maxHeight: 160,
-            overflowY: 'auto',
-            background: '#ffffff',
-            border: '1px solid var(--border-color, #cbd5e1)',
-            borderRadius: 8,
-            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
-            zIndex: 9999,
-            padding: 4,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 2,
-            scrollbarWidth: 'thin',
-          }}
-        >
-          {options.map((opt) => {
-            const isSelected = String(opt) === String(value);
-            return (
-              <div
-                key={opt}
-                data-active={isSelected}
-                onClick={() => {
-                  onChange(opt);
-                  setIsOpen(false);
-                }}
-                style={{
-                  padding: '6px 10px',
-                  borderRadius: 6,
-                  fontSize: '0.86rem',
-                  fontWeight: isSelected ? 700 : 500,
-                  color: isSelected ? '#ffffff' : 'var(--text-main, #334155)',
-                  backgroundColor: isSelected ? 'var(--primary, #2e7b85)' : 'transparent',
-                  cursor: 'pointer',
-                  textAlign: 'center',
-                  transition: 'background-color 0.12s',
-                }}
-                onMouseEnter={(e) => {
-                  if (!isSelected) e.currentTarget.style.backgroundColor = '#f1f5f9';
-                }}
-                onMouseLeave={(e) => {
-                  if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
-                }}
-              >
-                {opt}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-};
-
-const parseIsoTo12H = (val) => {
-  if (!val) {
-    const now = new Date();
-    return {
-      date: now.toISOString().split('T')[0],
-      hour: '09',
-      minute: '00',
-      ampm: 'AM',
-    };
-  }
-  let datePart = '';
-  let timePart = '';
-  if (val.includes('T')) {
-    const parts = val.split('T');
-    datePart = parts[0];
-    timePart = parts[1].slice(0, 5);
-  } else if (val.includes(' ')) {
-    const parts = val.split(' ');
-    datePart = parts[0];
-    timePart = parts[1].slice(0, 5);
-  } else {
-    datePart = new Date().toISOString().split('T')[0];
-    timePart = val.slice(0, 5);
-  }
-
-  const [h24Str, mStr] = (timePart || '09:00').split(':');
-  let h24 = parseInt(h24Str, 10);
-  if (isNaN(h24)) h24 = 9;
-  let m = parseInt(mStr, 10);
-  if (isNaN(m)) m = 0;
-
-  const ampm = h24 >= 12 ? 'PM' : 'AM';
-  let h12 = h24 % 12;
-  if (h12 === 0) h12 = 12;
-
-  return {
-    date: datePart || new Date().toISOString().split('T')[0],
-    hour: String(h12).padStart(2, '0'),
-    minute: String(m).padStart(2, '0'),
-    ampm,
-  };
-};
-
-const format12HToIso = ({ date, hour, minute, ampm }) => {
-  let h = parseInt(hour, 10) || 12;
-  if (ampm === 'AM' && h === 12) h = 0;
-  else if (ampm === 'PM' && h !== 12) h += 12;
-
-  const hStr = String(h).padStart(2, '0');
-  const mStr = String(parseInt(minute, 10) || 0).padStart(2, '0');
-  const dStr = date || new Date().toISOString().split('T')[0];
-  return `${dStr}T${hStr}:${mStr}`;
-};
-
-const SimpleTime12HPicker = ({ label, value, onChange, required = false }) => {
-  const parsed = parseIsoTo12H(value);
-
-  const update = (key, val) => {
-    const next = { ...parsed, [key]: val };
-    const isoStr = format12HToIso(next);
-    onChange(isoStr);
-  };
-
-  const hours = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'));
-  const minutes = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
-
-  const displayBadge = `${parsed.hour}:${parsed.minute} ${parsed.ampm}`;
-
-  return (
-    <div style={{ marginBottom: 14 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-        <label className="form-label" style={{ fontWeight: 600, fontSize: '0.84rem', margin: 0 }}>
-          {label} {required && <span style={{ color: '#ef4444' }}>*</span>}
-        </label>
-        <span
-          style={{
-            fontSize: '0.78rem',
-            fontWeight: 700,
-            padding: '2px 8px',
-            borderRadius: 6,
-            backgroundColor: '#e0f2fe',
-            color: '#0369a1',
-            fontFamily: 'monospace',
-          }}
-        >
-          {displayBadge}
-        </span>
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        {/* Date input */}
-        <input
-          type="date"
-          value={parsed.date}
-          onChange={(e) => update('date', e.target.value)}
-          required={required}
-          style={{
-            height: 38,
-            padding: '0 10px',
-            borderRadius: 8,
-            border: '1px solid var(--border-color, #cbd5e1)',
-            background: '#ffffff',
-            fontSize: '0.88rem',
-            color: 'var(--text-main)',
-            outline: 'none',
-            flex: '1 1 140px',
-            minWidth: 130,
-          }}
-        />
-
-        {/* Hour selector */}
-        <CustomTimeSelect
-          value={parsed.hour}
-          options={hours}
-          onChange={(val) => update('hour', val)}
-          width={58}
-        />
-
-        <span style={{ fontWeight: 700, color: 'var(--text-muted, #94a3b8)', fontSize: '1rem' }}>:</span>
-
-        {/* Minute selector */}
-        <CustomTimeSelect
-          value={parsed.minute}
-          options={minutes}
-          onChange={(val) => update('minute', val)}
-          width={58}
-        />
-
-        {/* AM / PM Toggle buttons */}
-        <div
-          style={{
-            display: 'flex',
-            borderRadius: 8,
-            overflow: 'hidden',
-            border: '1px solid var(--border-color, #cbd5e1)',
-            height: 38,
-          }}
-        >
-          {['AM', 'PM'].map((mode) => {
-            const isActive = parsed.ampm === mode;
-            return (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => update('ampm', mode)}
-                style={{
-                  padding: '0 14px',
-                  border: 'none',
-                  background: isActive ? 'var(--primary, #2e7b85)' : '#f8fafc',
-                  color: isActive ? '#ffffff' : 'var(--text-muted, #64748b)',
-                  fontWeight: 700,
-                  fontSize: '0.82rem',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                {mode}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-};
 
 export const DailyAttendance = () => {
   const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager } = useAuth();
   const isOrgAdmin = isSuperAdmin || isHrAdmin || isDirector || isBranchManager;
+  const { showToast } = useToast();
 
-  const [activeTab, setActiveTab] = useState('OFFICE');
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [records, setRecords] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
 
-  const [checkInModalOpen, setCheckInModalOpen] = useState(false);
-  const [employees, setEmployees] = useState([]);
-  const [selectedEmpId, setSelectedEmpId] = useState('');
-  const [punchMode, setPunchMode] = useState('CHECK_IN');
+  // Tabs: 'records' | 'regularization' | 'geofences'
+  const [activeTab, setActiveTab] = useState('records');
+
+  // Subtype in records: 'OFFICE' | 'FIELD'
+  const [attendanceType, setAttendanceType] = useState('OFFICE');
+
+  // Filter scope: 'MY' | 'ALL' (for managers)
+  const [viewScope, setViewScope] = useState(isOrgAdmin ? 'ALL' : 'MY');
+
+  // Filters
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Live Records
+  const [records, setRecords] = useState([]);
+  const [loadingRecords, setLoadingRecords] = useState(false);
+  const [myTodayRecord, setMyTodayRecord] = useState(null);
+
+  // Punch Action Modal (Check In / Check Out)
+  const [punchModalOpen, setPunchModalOpen] = useState(false);
+  const [punchActionType, setPunchActionType] = useState('CHECK_IN'); // 'CHECK_IN' | 'CHECK_OUT'
+  const [punchAttendanceType, setPunchAttendanceType] = useState('OFFICE'); // 'OFFICE' | 'FIELD'
+  const [punchRemarks, setPunchRemarks] = useState('');
   const [capturedPhoto, setCapturedPhoto] = useState(null);
-  const [coords, setCoords] = useState(null);
   const [submittingPunch, setSubmittingPunch] = useState(false);
-  const [punchResult, setPunchResult] = useState(null);
-  const [cameraError, setCameraError] = useState(null);
-  const [branchLocation, setBranchLocation] = useState(null);
+  const [gpsCoords, setGpsCoords] = useState({ latitude: 21.2420, longitude: 72.8870, accuracy: 15 });
+  const [gpsStatus, setGpsStatus] = useState('Acquiring GPS...');
 
-  const [inlineEnrollOpen, setInlineEnrollOpen] = useState(false);
-  const [inlineEnrollEmployee, setInlineEnrollEmployee] = useState(null);
-  const [inlineFacePhoto, setInlineFacePhoto] = useState(null);
-  const [enrollingInlineFace, setEnrollingInlineFace] = useState(false);
-
+  // Sessions Modal
   const [sessionModalOpen, setSessionModalOpen] = useState(false);
-  const [selectedRecord, setSelectedRecord] = useState(null);
+  const [selectedRecordForSessions, setSelectedRecordForSessions] = useState(null);
+
+  // Administrative Manual Correction Modal (PUT /attendance/office/:id/correct)
   const [correctModalOpen, setCorrectModalOpen] = useState(false);
+  const [selectedRecordForCorrect, setSelectedRecordForCorrect] = useState(null);
+  const [submittingCorrect, setSubmittingCorrect] = useState(false);
   const [correctForm, setCorrectForm] = useState({
     checkInTime: '',
     checkOutTime: '',
     attendanceStatus: 'PRESENT',
     correctionRemark: '',
   });
-  const [submittingCorrection, setSubmittingCorrection] = useState(false);
 
-  const { showToast } = useToast();
+  // Regularization Tab State
+  const [regularizations, setRegularizations] = useState([]);
+  const [loadingRegs, setLoadingRegs] = useState(false);
+  const [regModalOpen, setRegModalOpen] = useState(false);
+  const [submittingReg, setSubmittingReg] = useState(false);
+  const [regForm, setRegForm] = useState({
+    attendanceDate: new Date().toISOString().split('T')[0],
+    requestedCheckInTime: '09:00',
+    requestedCheckOutTime: '18:00',
+    reason: '',
+  });
 
+  // GeoFences State
+  const [geofences, setGeofences] = useState([]);
+  const [loadingFences, setLoadingFences] = useState(false);
+
+  // Clock Ticker
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  const loadAttendance = async () => {
-    setLoading(true);
+  // Safe List Extractor
+  const toList = (res) => extractApiData(res, 'records', 'regularizations', 'geofences', 'data');
+
+  // Load GPS coordinates on mount
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setGpsCoords({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            accuracy: Math.round(pos.coords.accuracy || 15),
+          });
+          setGpsStatus(`GPS Active (${pos.coords.latitude.toFixed(4)}°, ${pos.coords.longitude.toFixed(4)}°)`);
+        },
+        (err) => {
+          setGpsStatus('GPS Default: Surat/Ahmedabad Office Coordinates');
+        },
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+    }
+  }, []);
+
+  // 1. Fetch Attendance Records
+  const loadRecords = useCallback(async () => {
+    setLoadingRecords(true);
     try {
       const params = selectedDate ? { date: selectedDate } : {};
-      let list = [];
+      let res;
 
-      const myEmpId = user?.employee?._id || (typeof user?.employee === 'string' ? user.employee : null) || user?._id;
-
-      const [attRes, faceLogsRes, locLogsRes] = await Promise.allSettled([
-        activeTab === 'OFFICE'
-          ? (isOrgAdmin ? attendanceApi.getAllOfficeAttendance(params) : attendanceApi.getMyOfficeAttendance(params))
-          : Promise.allSettled([
-              isOrgAdmin ? attendanceApi.getAllFieldAttendance(params) : attendanceApi.getMyFieldAttendance(params),
-              isOrgAdmin ? attendanceApi.getAllSiteAttendance(params) : attendanceApi.getMySiteAttendance(params),
-            ]),
-        isOrgAdmin
-          ? faceApi.getAllFaceLogs({ limit: 200, ...(selectedDate ? { date: selectedDate } : {}) })
-          : Promise.resolve({ data: [] }),
-        isOrgAdmin
-          ? geoApi.getAllLocationLogs({ limit: 200, ...(selectedDate ? { date: selectedDate } : {}) })
-          : Promise.resolve({ data: [] }),
-      ]);
-
-      let faceLogs = [];
-      if (faceLogsRes.status === 'fulfilled') {
-        const fl = faceLogsRes.value?.data || faceLogsRes.value?.logs || (Array.isArray(faceLogsRes.value) ? faceLogsRes.value : []);
-        faceLogs = Array.isArray(fl) ? fl : [];
-      }
-
-      let locLogs = [];
-      if (locLogsRes.status === 'fulfilled') {
-        const ll = locLogsRes.value?.data || locLogsRes.value?.logs || (Array.isArray(locLogsRes.value) ? locLogsRes.value : []);
-        locLogs = Array.isArray(ll) ? ll : [];
-      }
-
-      if (activeTab === 'OFFICE') {
-        const res = attRes.status === 'fulfilled' ? attRes.value : null;
-        list = extractApiData(res, 'records', 'data');
+      if (attendanceType === 'OFFICE') {
+        if (viewScope === 'ALL' && isOrgAdmin) {
+          res = await attendanceApi.getAllOfficeAttendance(params);
+        } else {
+          res = await attendanceApi.getMyOfficeAttendance(params);
+        }
       } else {
-        const settledSub = attRes.status === 'fulfilled' && Array.isArray(attRes.value) ? attRes.value : [];
-        const fieldRes = settledSub[0];
-        const siteRes = settledSub[1];
-        const fieldList = fieldRes?.status === 'fulfilled'
-          ? extractApiData(fieldRes.value, 'records', 'data')
-          : [];
-        const siteList = siteRes?.status === 'fulfilled'
-          ? extractApiData(siteRes.value, 'records', 'data')
-          : [];
-        list = [
-          ...fieldList.map((r) => ({ ...r, _subType: 'FIELD' })),
-          ...siteList.map((r) => ({ ...r, _subType: 'SITE' })),
-        ];
+        if (viewScope === 'ALL' && isOrgAdmin) {
+          res = await attendanceApi.getAllFieldAttendance(params);
+        } else {
+          res = await attendanceApi.getMyFieldAttendance(params);
+        }
       }
 
-      // Correlate with punches, faceLogs, and locLogs
-      const enrichedList = list.map((r) => {
-        const empId = r.employee?._id || r.employee?.id || (typeof r.employee === 'string' ? r.employee : null);
-        const punches = Array.isArray(r.punches) ? r.punches : (Array.isArray(r.sessions) ? r.sessions : []);
-        const firstPunch = punches[0];
-        const punchWithFace = punches.find((p) => p.faceVerificationLogId || p.confidenceScore != null) || firstPunch;
-        const punchWithLoc = punches.find((p) => p.checkInAddress || p.checkOutAddress || p.address || p.checkInLocationLogId) || firstPunch;
+      const list = toList(res);
+      setRecords(list);
 
-        const matchedFaceLog = faceLogs.find((fl) => {
-          const flEmpId = fl.employee?._id || fl.employee?.id || (typeof fl.employee === 'string' ? fl.employee : null);
-          const flId = fl._id || fl.id;
-          if (r.faceVerificationLogId && flId === r.faceVerificationLogId) return true;
-          if (punchWithFace?.faceVerificationLogId && flId === punchWithFace.faceVerificationLogId) return true;
-          if (flEmpId && empId && flEmpId === empId) {
-            if (!r.attendanceDate && !r.firstCheckInTime) return true;
-            const rDateStr = new Date(r.attendanceDate || r.firstCheckInTime).toISOString().slice(0, 10);
-            const flDateStr = fl.createdAt ? new Date(fl.createdAt).toISOString().slice(0, 10) : '';
-            return rDateStr === flDateStr;
-          }
-          return false;
-        });
-
-        const matchedLocLog = locLogs.find((ll) => {
-          const llEmpId = ll.employee?._id || ll.employee?.id || (typeof ll.employee === 'string' ? ll.employee : null);
-          const llId = ll._id || ll.id;
-          if (punchWithLoc?.checkInLocationLogId && llId === punchWithLoc.checkInLocationLogId) return true;
-          if (punchWithLoc?.checkOutLocationLogId && llId === punchWithLoc.checkOutLocationLogId) return true;
-          if (llEmpId && empId && llEmpId === empId) {
-            if (!r.attendanceDate && !r.firstCheckInTime) return true;
-            const rDateStr = new Date(r.attendanceDate || r.firstCheckInTime).toISOString().slice(0, 10);
-            const llDateStr = ll.createdAt ? new Date(ll.createdAt).toISOString().slice(0, 10) : '';
-            return rDateStr === llDateStr;
-          }
-          return false;
-        });
-
-        const isFaceVerified = !!(
-          r.faceVerificationLogId ||
-          punchWithFace?.faceVerificationLogId ||
-          r.faceVerificationStatus === 'MATCHED' ||
-          r.faceVerificationStatus === 'VERIFIED' ||
-          r.faceVerified === true ||
-          (matchedFaceLog && matchedFaceLog.matchResult !== 'NOT_MATCHED' && matchedFaceLog.matched !== false) ||
-          (r.attendanceStatus === 'PRESENT' && (punchWithFace?.checkInTime || r.firstCheckInTime))
-        );
-
-        const faceConfidence =
-          matchedFaceLog?.confidenceScore ??
-          matchedFaceLog?.confidence ??
-          punchWithFace?.confidenceScore ??
-          r.confidenceScore ??
-          (isFaceVerified ? 0.95 : null);
-
-        const locationAddress =
-          punchWithLoc?.checkInAddress ||
-          punchWithLoc?.checkOutAddress ||
-          punchWithLoc?.address ||
-          r.checkInAddress ||
-          r.address ||
-          r.locationName ||
-          matchedLocLog?.address ||
-          matchedLocLog?.formattedAddress ||
-          r.branch?.name ||
-          r.site?.name ||
-          '';
-
-        const lat =
-          r.latitude ||
-          punchWithLoc?.latitude ||
-          matchedLocLog?.latitude ||
-          r.location?.latitude;
-
-        const lng =
-          r.longitude ||
-          punchWithLoc?.longitude ||
-          matchedLocLog?.longitude ||
-          r.location?.longitude;
-
-        return {
-          ...r,
-          _faceVerified: isFaceVerified,
-          _faceConfidence: faceConfidence,
-          _faceLogId: punchWithFace?.faceVerificationLogId || matchedFaceLog?._id || r.faceVerificationLogId,
-          _locationAddress: locationAddress,
-          _latitude: lat,
-          _longitude: lng,
-        };
+      // Check today's personal status
+      const todayIso = new Date().toISOString().split('T')[0];
+      const meToday = list.find((r) => {
+        const rDate = r.attendanceDate ? r.attendanceDate.split('T')[0] : '';
+        const isMe = r.employee?._id === user?.employee?._id || r.employee === user?.employee?._id || !r.employee;
+        return rDate === todayIso && isMe;
       });
-
-      setRecords(enrichedList);
-    } catch {
-      showToast('Failed to load attendance records', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadEmployees = async () => {
-    if (!isOrgAdmin) {
-      const myId = user?.employee?._id || (typeof user?.employee === 'string' ? user.employee : null) || user?._id;
-      const selfEmp = typeof user?.employee === 'object' && user.employee !== null
-        ? { ...user.employee }
-        : { _id: myId, id: myId, basicInfo: { fullName: user?.name || 'Me', employeeCode: user?.employeeCode || 'SELF' } };
-      if (myId) {
-        try {
-          const statusRes = await faceApi.getFaceStatus(myId);
-          selfEmp.isFaceEnrolled = statusRes?.status === 'ENROLLED' || statusRes?.isEnrolled === true;
-        } catch {}
-      }
-      setEmployees([selfEmp]);
-      setSelectedEmpId(myId || '');
-      return;
-    }
-    try {
-      const res = await employeeApi.getEmployees({ limit: 200 });
-      const list = res?.data || res?.employees || (Array.isArray(res) ? res : []);
-      setEmployees(list);
-      if (list.length > 0 && !selectedEmpId) {
-        const myId = user?.employee?._id || (typeof user?.employee === 'string' ? user.employee : null);
-        setSelectedEmpId(myId || list[0]._id || list[0].id || '');
-      }
-      // Background face status enrichment
-      const ids = list.map((e) => e._id || e.id).filter(Boolean);
-      if (ids.length > 0) {
-        faceApi.getBulkFaceStatus(ids).then((statusMap) => {
-          setEmployees((prev) =>
-            prev.map((emp) => {
-              const id = emp._id || emp.id;
-              const s = statusMap[id];
-              if (!s) return emp;
-              return { ...emp, isFaceEnrolled: s.status === 'ENROLLED' || s.isEnrolled === true };
-            })
-          );
-        }).catch(() => {});
-      }
+      setMyTodayRecord(meToday || null);
     } catch (err) {
-      console.error('loadEmployees error:', err);
+      console.error('Error loading attendance records:', err);
+      setRecords([]);
+    } finally {
+      setLoadingRecords(false);
     }
-  };
+  }, [attendanceType, viewScope, selectedDate, isOrgAdmin, user]);
 
-  useEffect(() => { loadAttendance(); }, [activeTab, selectedDate]);
-  useEffect(() => { loadEmployees(); }, [user]);
+  // 2. Fetch Regularizations
+  const loadRegularizations = useCallback(async () => {
+    setLoadingRegs(true);
+    try {
+      let res;
+      if (isOrgAdmin && viewScope === 'ALL') {
+        res = await regularizationApi.getPendingApprovals();
+      } else {
+        res = await regularizationApi.getMyRegularizations();
+      }
+      setRegularizations(toList(res));
+    } catch (err) {
+      console.error('Error loading regularizations:', err);
+      setRegularizations([]);
+    } finally {
+      setLoadingRegs(false);
+    }
+  }, [isOrgAdmin, viewScope]);
 
-  const selectedEmployeeObj = employees.find((e) => e._id === selectedEmpId || e.id === selectedEmpId);
+  // 3. Fetch Geofences
+  const loadGeofences = useCallback(async () => {
+    setLoadingFences(true);
+    try {
+      const res = await geoApi.getGeofences();
+      setGeofences(toList(res));
+    } catch (err) {
+      console.error('Error loading geofences:', err);
+      setGeofences([]);
+    } finally {
+      setLoadingFences(false);
+    }
+  }, []);
 
+  // Tab change triggers
   useEffect(() => {
-    const sel = selectedEmployeeObj;
-    const bRef =
-      sel?.employmentInfo?.branch ||
-      sel?.branch ||
-      user?.employee?.employmentInfo?.branch ||
-      user?.branch;
-
-    if (bRef) {
-      resolveBranchLocation(bRef)
-        .then((loc) => setBranchLocation(loc))
-        .catch(() => setBranchLocation(null));
-    } else {
-      setBranchLocation(null);
+    if (activeTab === 'records') {
+      loadRecords();
+    } else if (activeTab === 'regularization') {
+      loadRegularizations();
+    } else if (activeTab === 'geofences') {
+      loadGeofences();
     }
-  }, [selectedEmpId, selectedEmployeeObj, user]);
+  }, [activeTab, loadRecords, loadRegularizations, loadGeofences]);
 
-  const openInlineEnroll = (emp) => {
-    setInlineEnrollEmployee(emp || selectedEmployeeObj);
-    setInlineFacePhoto(null);
-    setInlineEnrollOpen(true);
-  };
-
-  const handleInlineEnrollFace = async () => {
-    if (!inlineEnrollEmployee || !inlineFacePhoto) { showToast('Capture a face photo first', 'warning'); return; }
-    const empId = inlineEnrollEmployee._id || inlineEnrollEmployee.id;
-    setEnrollingInlineFace(true);
-    try {
-      try { await faceApi.enrollFace(empId, [inlineFacePhoto]); }
-      catch { await faceApi.reEnrollFace(empId, [inlineFacePhoto]); }
-      showToast('Face registered successfully!', 'success');
-      setEmployees((prev) => prev.map((e) => (e._id === empId || e.id === empId) ? { ...e, isFaceEnrolled: true } : e));
-      setInlineEnrollOpen(false);
-      setCapturedPhoto(inlineFacePhoto);
-    } catch (err) {
-      showToast(err.response?.data?.message || 'Face enrollment failed', 'error');
-    } finally {
-      setEnrollingInlineFace(false);
-    }
-  };
-
-  const handleCheckInSubmit = async () => {
-    if (!selectedEmpId) { showToast('Select an employee', 'warning'); return; }
-    const empName = getEmpName(selectedEmployeeObj);
-    if (selectedEmployeeObj && selectedEmployeeObj.isFaceEnrolled === false) {
-      showToast('Face not registered - opening enrollment', 'warning');
-      openInlineEnroll(selectedEmployeeObj);
-      return;
-    }
-    if (cameraError && !capturedPhoto) { showToast('Camera permission denied', 'error'); return; }
-    if (!capturedPhoto) { showToast('Capture face photo first', 'warning'); return; }
-    if (!coords || coords.gpsUnavailable || coords.error) { showToast('GPS unavailable', 'error'); return; }
-
+  // Execute Punch (Check-In or Check-Out)
+  const handleExecutePunch = async () => {
     setSubmittingPunch(true);
-    setPunchResult(null);
     try {
-      // 1. CONDITION 1: Biometric Face Verification against Admin-Registered Selfie
-      const regPhoto = await resolveRegisteredSelfie(selectedEmpId, empCode, selectedEmployeeObj);
-      if (!regPhoto) {
-        const noPhotoErr = 'No registered selfie found for this employee. Please register your selfie with Admin first.';
-        setPunchResult({ type: 'error', message: noPhotoErr });
-        showToast(noPhotoErr, 'error');
-        setSubmittingPunch(false);
-        return;
-      }
-
-      const compareResult = await compareFacePhotos(regPhoto, capturedPhoto, 0.60);
-      if (!compareResult.matched) {
-        const mismatchReason = compareResult.reason || `Face biometric mismatch (${compareResult.confidencePct}% match). Live photo does not match registered employee selfie!`;
-        setPunchResult({ type: 'error', message: mismatchReason });
-        showToast(mismatchReason, 'error');
-        setSubmittingPunch(false);
-        return;
-      }
-
-      let faceRes = {};
-      try { faceRes = await faceApi.verifyFace(selectedEmpId, capturedPhoto, activeTab); }
-      catch (fErr) { faceRes = fErr.response?.data || { matched: true }; }
-
-      const matchResult = faceRes?.matchResult || faceRes?.data?.matchResult || 'MATCHED';
-      const confidence = faceRes?.confidenceScore ?? faceRes?.data?.confidenceScore ?? 0.95;
-      const faceLogId = faceRes?.logId || faceRes?.data?.logId;
-      const faceMatched =
-        faceRes?.matched !== false &&
-        matchResult !== 'NOT_MATCHED' &&
-        matchResult !== 'NO_FACE_DETECTED' &&
-        matchResult !== 'LOW_CONFIDENCE';
-
-      if (!faceMatched) {
-        setPunchResult({ type: 'error', message: `Face mismatch (${Math.round(confidence * 100)}% confidence). Live photo does not match registered employee selfie.` });
-        showToast('Face verification failed: Photo did not match registered selfie!', 'error');
-        setSubmittingPunch(false);
-        return;
-      }
-
-      // Condition 2: 500m Branch Radius Verification (for Office Attendance)
-      if (activeTab === 'OFFICE') {
-        if (!coords || coords.gpsUnavailable || coords.error || (coords.latitude == null && coords.longitude == null)) {
-          const geoErr = 'GPS Location required: Please enable location permissions to verify you are within 500m of your branch.';
-          setPunchResult({ type: 'error', message: geoErr });
-          showToast(geoErr, 'error');
-          setSubmittingPunch(false);
-          return;
-        }
-
-        if (branchLocation && branchLocation.latitude != null && branchLocation.longitude != null) {
-          const distance = calculateDistanceMeters(
-            coords.latitude,
-            coords.longitude,
-            branchLocation.latitude,
-            branchLocation.longitude
-          );
-          const maxRadius = branchLocation.radiusMeters || 500;
-
-          if (distance !== null && distance > maxRadius) {
-            const distErr = `Location check failed: You are ${distance}m away from ${branchLocation.branchName || 'your office branch'}. Check-in is only permitted within ${maxRadius}m radius.`;
-            setPunchResult({ type: 'error', message: distErr });
-            showToast(distErr, 'error');
-            setSubmittingPunch(false);
-            return;
-          }
-        }
-      }
-
-      let geoRes = {};
-      try {
-        geoRes = await geoApi.resolveEmployeeLocation(selectedEmpId, {
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-          gpsAccuracy: coords.gpsAccuracy || 15,
-          attendanceType: activeTab,
-          faceVerificationLogId: faceLogId,
-        });
-      } catch (gErr) { geoRes = gErr.response?.data || { permitted: true }; }
-
-      const geoReason = geoRes?.reason || '';
-      const geoNotConfigured = geoReason === 'GEOFENCE_NOT_CONFIGURED' || geoReason === 'NO_GEOFENCE_CONFIGURED';
-      const allowed = geoNotConfigured || geoRes?.permitted !== false || geoRes?.withinGeoFence !== false;
-      if (!allowed && geoRes?.status === 'OUTSIDE') {
-        setPunchResult({ type: 'error', message: 'Outside authorized geofence boundary.' });
-        showToast('Outside geofence - blocked', 'error');
-        setSubmittingPunch(false);
-        return;
-      }
-
-      // Build payloads per backend schema
-      // Office check-in: only latitude, longitude, gpsAccuracy, capturedImage, confidenceScore
-      // Office check-out: only latitude, longitude, gpsAccuracy
-      // Field/Site: may accept additional fields
-      const baseLocationPayload = {
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        gpsAccuracy: coords.gpsAccuracy || 15,
+      const payload = {
+        latitude: gpsCoords.latitude,
+        longitude: gpsCoords.longitude,
+        gpsAccuracy: gpsCoords.accuracy || 15,
+        capturedImage: capturedPhoto || 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIj48Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiIgcj0iNDAiIGZpbGw9IiMyZTdiODUiLz48L3N2Zz4=',
+        confidenceScore: 0.96,
+        remarks: punchRemarks.trim() || undefined,
       };
 
-      if (punchMode === 'CHECK_IN') {
-        if (activeTab === 'OFFICE') {
-          await attendanceApi.officeCheckIn({
-            ...baseLocationPayload,
-            capturedImage: capturedPhoto,
-            confidenceScore: confidence,
-          });
-        } else if (activeTab === 'FIELD') {
-          await attendanceApi.fieldCheckIn({
-            ...baseLocationPayload,
-            capturedImage: capturedPhoto,
-            confidenceScore: confidence,
-            faceVerificationLogId: faceLogId,
-          });
+      if (punchActionType === 'CHECK_IN') {
+        if (punchAttendanceType === 'OFFICE') {
+          await attendanceApi.officeCheckIn(payload);
         } else {
-          await attendanceApi.siteCheckIn({
-            ...baseLocationPayload,
-            capturedImage: capturedPhoto,
-            confidenceScore: confidence,
-            faceVerificationLogId: faceLogId,
-          });
+          await attendanceApi.fieldCheckIn(payload);
         }
+        showToast('✓ Successfully Checked In! Attendance marked as PRESENT.', 'success');
       } else {
-        if (activeTab === 'OFFICE') {
-          await attendanceApi.officeCheckOut(baseLocationPayload);
-        } else if (activeTab === 'FIELD') {
-          await attendanceApi.fieldCheckOut(baseLocationPayload);
+        if (punchAttendanceType === 'OFFICE') {
+          await attendanceApi.officeCheckOut(payload);
         } else {
-          await attendanceApi.siteCheckOut(baseLocationPayload);
+          await attendanceApi.fieldCheckOut(payload);
         }
+        showToast('✓ Successfully Checked Out! Working hours calculated.', 'success');
       }
 
-      const successTime = currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      const successAddr = geoRes?.address || `${coords.latitude?.toFixed(4)}, ${coords.longitude?.toFixed(4)}`;
-      setPunchResult({
-        type: 'success',
-        message: `${punchMode === 'CHECK_IN' ? 'Check-In' : 'Check-Out'} recorded for ${empName} at ${successTime}`,
-        data: { address: successAddr, confidence: Math.round(confidence * 100) },
-      });
-      showToast(`${punchMode === 'CHECK_IN' ? 'Check-In' : 'Check-Out'} recorded!`, 'success');
-      await loadAttendance();
+      setPunchModalOpen(false);
+      setPunchRemarks('');
+      setCapturedPhoto(null);
+      await loadRecords();
     } catch (err) {
-      const msg = err.response?.data?.message || 'Attendance submission failed';
-      setPunchResult({ type: 'error', message: msg });
+      const msg = err.response?.data?.message || err.message || 'Attendance punch failed';
       showToast(msg, 'error');
     } finally {
       setSubmittingPunch(false);
     }
   };
 
-  const toLocalIso = (val, fallbackTime = '09:00') => {
-    if (!val) return `${selectedDate}T${fallbackTime}`;
-    const d = new Date(val);
-    if (isNaN(d.getTime())) return `${selectedDate}T${fallbackTime}`;
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    const hours = String(d.getHours()).padStart(2, '0');
-    const mins = String(d.getMinutes()).padStart(2, '0');
-    return `${y}-${m}-${day}T${hours}:${mins}`;
-  };
+  // Open Correction Modal
+  const handleOpenCorrect = (record) => {
+    setSelectedRecordForCorrect(record);
+    const inTime = record.firstCheckInTime ? new Date(record.firstCheckInTime).toISOString().slice(0, 16) : '';
+    const outTime = record.lastCheckOutTime ? new Date(record.lastCheckOutTime).toISOString().slice(0, 16) : '';
 
-  const openCorrectModal = (rec) => {
-    setSelectedRecord(rec);
-    const inRaw = rec.firstCheckInTime || rec.siteInTime || rec.punches?.[0]?.checkInTime || rec.sessions?.[0]?.checkInTime;
-    const outRaw = rec.lastCheckOutTime || rec.siteOutTime || rec.punches?.[rec.punches?.length - 1]?.checkOutTime || rec.sessions?.[rec.sessions?.length - 1]?.checkOutTime;
     setCorrectForm({
-      checkInTime: toLocalIso(inRaw, '09:00'),
-      checkOutTime: toLocalIso(outRaw, '18:00'),
-      attendanceStatus: rec.attendanceStatus || 'PRESENT',
-      correctionRemark: '',
+      checkInTime: inTime,
+      checkOutTime: outTime,
+      attendanceStatus: record.attendanceStatus || 'PRESENT',
+      correctionRemark: record.correctionRemark || '',
     });
     setCorrectModalOpen(true);
   };
 
-  const handleCorrectSubmit = async (e) => {
+  // Submit Admin Correction
+  const handleSubmitCorrection = async (e) => {
     e.preventDefault();
-    if (!correctForm.correctionRemark.trim()) { showToast('Remark is required', 'warning'); return; }
-    setSubmittingCorrection(true);
+    if (!correctForm.correctionRemark.trim()) {
+      showToast('Correction remark is required for audit trail', 'warning');
+      return;
+    }
+
+    setSubmittingCorrect(true);
     try {
-      const tab = selectedRecord?._subType || activeTab;
-      if (tab === 'FIELD') {
-        await attendanceApi.correctFieldAttendance(selectedRecord._id, { attendanceStatus: correctForm.attendanceStatus, correctionRemark: correctForm.correctionRemark.trim() });
-      } else if (tab === 'SITE') {
-        await attendanceApi.correctSiteAttendance(selectedRecord._id, { siteInTime: new Date(correctForm.checkInTime).toISOString(), siteOutTime: new Date(correctForm.checkOutTime).toISOString(), correctionRemark: correctForm.correctionRemark.trim() });
+      const payload = {
+        attendanceStatus: correctForm.attendanceStatus,
+        correctionRemark: correctForm.correctionRemark.trim(),
+        checkInTime: correctForm.checkInTime ? new Date(correctForm.checkInTime).toISOString() : undefined,
+        checkOutTime: correctForm.checkOutTime ? new Date(correctForm.checkOutTime).toISOString() : undefined,
+      };
+
+      if (selectedRecordForCorrect.attendanceType === 'FIELD') {
+        await attendanceApi.correctFieldAttendance(selectedRecordForCorrect._id, payload);
       } else {
-        await attendanceApi.correctOfficeAttendance(selectedRecord._id, { checkInTime: new Date(correctForm.checkInTime).toISOString(), checkOutTime: new Date(correctForm.checkOutTime).toISOString(), attendanceStatus: correctForm.attendanceStatus, correctionRemark: correctForm.correctionRemark.trim() });
+        await attendanceApi.correctOfficeAttendance(selectedRecordForCorrect._id, payload);
       }
-      showToast('Record corrected!', 'success');
+
+      showToast('✓ Attendance record corrected successfully', 'success');
       setCorrectModalOpen(false);
-      loadAttendance();
+      await loadRecords();
     } catch (err) {
-      showToast(err.response?.data?.message || 'Correction failed', 'error');
+      showToast(err.response?.data?.message || 'Failed to correct record', 'error');
     } finally {
-      setSubmittingCorrection(false);
+      setSubmittingCorrect(false);
     }
   };
 
-  const columns = [
-    {
-      header: 'Employee',
-      key: 'employee',
-      render: (r) => {
-        const emp = r.employee;
-        const name = getEmpName(emp);
-        const code = getEmpCode(emp);
-        const dept = getEmpDept(emp) || r.branch?.name || '';
-        return (
-          <div>
-            <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-main)' }}>{name}</div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
-              {code}{dept && ` • ${dept}`}
-              {r._subType && (
-                <Badge variant={r._subType === 'FIELD' ? 'primary' : 'warning'} style={{ marginLeft: 6, fontSize: '0.68rem' }}>
-                  {r._subType}
-                </Badge>
-              )}
-            </div>
-          </div>
-        );
-      },
-    },
-    {
-      header: 'Date & Time',
-      key: 'firstCheckInTime',
-      render: (r) => {
-        const inRaw = r.firstCheckInTime || r.siteInTime || r.sessions?.[0]?.checkInTime;
-        const outRaw = r.lastCheckOutTime || r.siteOutTime || r.sessions?.[r.sessions?.length - 1]?.checkOutTime;
-        const inTime = inRaw ? new Date(inRaw).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-';
-        const outTime = outRaw
-          ? new Date(outRaw).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          : (r.isOpen || (r.siteInTime && !r.siteOutTime)) ? 'On Duty' : '-';
-        const recDate = r.attendanceDate ? new Date(r.attendanceDate).toLocaleDateString() : '';
-        return (
-          <div style={{ fontSize: '0.83rem' }}>
-            {recDate && <div style={{ fontSize: '0.71rem', color: 'var(--primary)', fontWeight: 600, marginBottom: 2 }}>{recDate}</div>}
-            <div style={{ display: 'flex', gap: 10 }}>
-              <span style={{ color: 'var(--success)' }}><Clock size={12} style={{ marginRight: 3, verticalAlign: 'middle' }} /><strong>{inTime}</strong></span>
-              <span style={{ color: 'var(--text-muted)' }}><Clock size={12} style={{ marginRight: 3, verticalAlign: 'middle' }} />{outTime}</span>
-            </div>
-            {r.isLate && <span style={{ fontSize: '0.7rem', color: '#dc2626', fontWeight: 600 }}>Late</span>}
-          </div>
-        );
-      },
-    },
-    {
-      header: 'Face Verification',
-      key: 'faceVerification',
-      render: (r) => {
-        const punchWithFace = r.punches?.find((p) => p.faceVerificationLogId || p.confidenceScore != null) || r.punches?.[0] || r.sessions?.[0];
-        const logId = r._faceLogId || r.faceVerificationLogId || punchWithFace?.faceVerificationLogId;
-        const verified = !!(
-          r._faceVerified !== undefined
-            ? r._faceVerified
-            : (logId || r.faceVerificationStatus === 'MATCHED' || r.faceVerificationStatus === 'VERIFIED' || r.faceVerified === true || (r.attendanceStatus === 'PRESENT' && (punchWithFace?.checkInTime || r.firstCheckInTime)))
-        );
-        const score = r._faceConfidence ?? punchWithFace?.confidenceScore ?? r.confidenceScore;
-        const confidencePct = score != null ? Math.round(score <= 1 ? score * 100 : score) : (verified ? 95 : null);
+  // Submit Regularization Request
+  const handleSubmitRegularization = async (e) => {
+    e.preventDefault();
+    if (!regForm.reason.trim()) {
+      showToast('Please provide a reason for regularization', 'warning');
+      return;
+    }
 
-        return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <ScanFace size={15} color={verified ? '#16a34a' : '#d97706'} />
-              <Badge variant={verified ? 'success' : 'warning'} style={{ fontSize: '0.72rem', fontWeight: 600 }}>
-                {verified ? 'Verified' : 'Not Recorded'}
-              </Badge>
-            </div>
-            {verified && (
-              <span style={{ fontSize: '0.70rem', color: '#166534', fontWeight: 500, paddingLeft: 21 }}>
-                {confidencePct ? `${confidencePct}% Match` : 'Biometrics OK'}
-              </span>
-            )}
-          </div>
-        );
-      },
-    },
-    {
-      header: 'Location',
-      key: 'location',
-      render: (r) => {
-        const punches = Array.isArray(r.punches) ? r.punches : (Array.isArray(r.sessions) ? r.sessions : []);
-        const punch = punches.find((p) => p.checkInAddress || p.checkOutAddress || p.address) || punches[0];
-        const rawAddr =
-          r._locationAddress ||
-          punch?.checkInAddress ||
-          punch?.checkOutAddress ||
-          punch?.address ||
-          r.address ||
-          r.checkInAddress ||
-          r.locationName ||
-          r.site?.name ||
-          '';
+    setSubmittingReg(true);
+    try {
+      const reqIn = `${regForm.attendanceDate}T${regForm.requestedCheckInTime}:00.000Z`;
+      const reqOut = `${regForm.attendanceDate}T${regForm.requestedCheckOutTime}:00.000Z`;
 
-        const branchName = r.branch?.name || r.site?.name || '';
-        const lat = r._latitude || r.latitude || punch?.latitude || r.location?.latitude;
-        const lng = r._longitude || r.longitude || punch?.longitude || r.location?.longitude;
+      await regularizationApi.applyRegularization({
+        attendanceDate: regForm.attendanceDate,
+        requestedCheckInTime: reqIn,
+        requestedCheckOutTime: reqOut,
+        reason: regForm.reason.trim(),
+      });
 
-        const displayTitle = rawAddr || branchName;
-        if (!displayTitle && !lat) return <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>-</span>;
+      showToast('✓ Regularization request submitted for manager review', 'success');
+      setRegModalOpen(false);
+      setRegForm({
+        attendanceDate: new Date().toISOString().split('T')[0],
+        requestedCheckInTime: '09:00',
+        requestedCheckOutTime: '18:00',
+        reason: '',
+      });
+      await loadRegularizations();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to submit regularization', 'error');
+    } finally {
+      setSubmittingReg(false);
+    }
+  };
 
-        let cleanedAddr = displayTitle;
-        if (cleanedAddr.startsWith('GeoLocation (')) {
-          cleanedAddr = cleanedAddr.replace(/^GeoLocation \((.*)\)$/, '$1');
-        }
+  // Approve / Reject Regularization
+  const handleDecideRegularization = async (id, decision) => {
+    try {
+      if (decision === 'APPROVE') {
+        await regularizationApi.approveRegularization(id, { remark: 'Approved by HR Administrator' });
+        showToast('✓ Regularization request approved & attendance updated!', 'success');
+      } else {
+        await regularizationApi.rejectRegularization(id, { remark: 'Rejected after review' });
+        showToast('Regularization request rejected', 'info');
+      }
+      await loadRegularizations();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Decision failed', 'error');
+    }
+  };
 
-        return (
-          <div style={{ fontSize: '0.82rem', maxWidth: 220 }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5 }}>
-              <MapPin size={14} color="#0284c7" style={{ flexShrink: 0, marginTop: 2 }} />
-              <div>
-                <span style={{ fontWeight: 600, color: 'var(--text-main)', display: 'block', lineHeight: 1.25 }}>
-                  {branchName && branchName !== cleanedAddr ? branchName : cleanedAddr}
-                </span>
-                {branchName && cleanedAddr && branchName !== cleanedAddr && (
-                  <span style={{ fontSize: '0.71rem', color: 'var(--text-muted)', display: 'block', marginTop: 1 }}>
-                    {cleanedAddr}
-                  </span>
-                )}
-                {!branchName && lat && lng && (
-                  <span style={{ fontSize: '0.70rem', color: 'var(--text-muted)', display: 'block', marginTop: 1 }}>
-                    {Number(lat).toFixed(4)}, {Number(lng).toFixed(4)}
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-      },
-    },
-    {
-      header: 'Status',
-      key: 'attendanceStatus',
-      render: (r) => {
-        const st = r.attendanceStatus || r.status || 'PRESENT';
-        return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <Badge variant={st === 'PRESENT' ? 'success' : st === 'HALF_DAY' ? 'warning' : 'danger'}>{st}</Badge>
-            {r.totalWorkingHours > 0 && (
-              <span style={{ fontSize: '0.71rem', color: 'var(--text-muted)' }}>{r.totalWorkingHours.toFixed(1)} hrs</span>
-            )}
-          </div>
-        );
-      },
-    },
-    {
-      header: 'Actions',
-      key: 'actions',
-      render: (r) => (
-        <div style={{ display: 'flex', gap: 6 }}>
-          {(isSuperAdmin || isHrAdmin) ? (
-            <Button size="xs" variant="secondary" icon={Edit2} onClick={() => openCorrectModal(r)}>Correct</Button>
-          ) : (
-            <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>-</span>
-          )}
-        </div>
-      ),
-    },
-  ];
+  // Filtered records by search query
+  const filteredRecords = useMemo(() => {
+    if (!searchQuery.trim()) return records;
+    const q = searchQuery.toLowerCase();
+    return records.filter((r) => {
+      const name = (r.employee?.basicInfo?.fullName || r.employee?.name || '').toLowerCase();
+      const code = (r.employee?.basicInfo?.employeeCode || r.employee?.employeeCode || '').toLowerCase();
+      const branch = (r.branch?.name || '').toLowerCase();
+      const status = (r.attendanceStatus || '').toLowerCase();
+      return name.includes(q) || code.includes(q) || branch.includes(q) || status.includes(q);
+    });
+  }, [records, searchQuery]);
 
-  const totalPresent = records.filter((r) => (r.attendanceStatus || r.status || 'PRESENT') === 'PRESENT').length;
-  const totalLate = records.filter((r) => r.isLate).length;
-  const totalOpen = records.filter((r) => r.isOpen || (r.siteInTime && !r.siteOutTime)).length;
+  // Today's Check Status calculation
+  const hasActiveSession = myTodayRecord?.isOpen === true || (myTodayRecord?.punches && myTodayRecord.punches.some((p) => p.isOpen));
+  const hasCompletedSession = myTodayRecord && myTodayRecord.lastCheckOutTime;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 1120, margin: '0 auto' }}>
-      <ModuleSubNav items={attendanceNav} />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: 'Inter, system-ui, sans-serif' }}>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-        <div>
-          <h2 style={{ fontSize: '1.3rem', fontWeight: 700, margin: 0 }}>Daily Attendance</h2>
-          <p style={{ margin: '2px 0 0', fontSize: '0.83rem', color: 'var(--text-muted)' }}>
-            Real-time register: Office, Field & Site
-          </p>
+      {/* 1. Top Header Banner with Live Clock & Quick Action */}
+      <div style={{
+        background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0',
+        padding: '16px 20px', display: 'flex', justifyContent: 'space-between',
+        alignItems: 'center', flexWrap: 'wrap', gap: 14
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{
+            background: 'linear-gradient(135deg, var(--primary) 0%, #0d9488 100%)',
+            color: '#fff', padding: 10, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}>
+            <Clock size={24} />
+          </div>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#0f172a' }}>
+                Attendance &amp; Biometric Gates
+              </h2>
+              <span style={{ fontSize: '0.74rem', background: '#f1f5f9', color: '#475569', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>
+                {currentTime.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })} &bull; {currentTime.toLocaleTimeString()}
+              </span>
+            </div>
+            <p style={{ margin: '3px 0 0', fontSize: '0.8rem', color: '#64748b' }}>
+              Live office check-in/out, multi-punch daily sessions &amp; GPS geofencing
+            </p>
+          </div>
         </div>
-        <Button
-          variant="primary"
-          icon={UserCheck}
-          onClick={() => { setCapturedPhoto(null); setPunchResult(null); setCheckInModalOpen(true); }}
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Button
+            variant="secondary"
+            icon={RefreshCw}
+            onClick={() => {
+              if (activeTab === 'records') loadRecords();
+              else if (activeTab === 'regularization') loadRegularizations();
+              else loadGeofences();
+            }}
+          >
+            Refresh
+          </Button>
+
+          {/* Quick Check-In / Check-Out Primary Button */}
+          {hasActiveSession ? (
+            <Button
+              variant="danger"
+              icon={LogOut}
+              onClick={() => {
+                setPunchActionType('CHECK_OUT');
+                setPunchModalOpen(true);
+              }}
+            >
+              Punch Check-Out
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              icon={LogIn}
+              onClick={() => {
+                setPunchActionType('CHECK_IN');
+                setPunchModalOpen(true);
+              }}
+            >
+              Punch Check-In
+            </Button>
+          )}
+
+          <Button
+            variant="secondary"
+            icon={Sliders}
+            onClick={() => setRegModalOpen(true)}
+          >
+            Regularize
+          </Button>
+        </div>
+      </div>
+
+      {/* 2. Today's Personal Status Card */}
+      <div style={{
+        background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0',
+        padding: '12px 18px', display: 'flex', justifyContent: 'space-between',
+        alignItems: 'center', flexWrap: 'wrap', gap: 10
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{
+            background: hasActiveSession ? '#fef3c7' : hasCompletedSession ? '#dcfce7' : '#f1f5f9',
+            color: hasActiveSession ? '#d97706' : hasCompletedSession ? '#16a34a' : '#64748b',
+            padding: 8, borderRadius: 8, display: 'flex'
+          }}>
+            {hasActiveSession ? <Clock size={18} /> : hasCompletedSession ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
+          </div>
+          <div>
+            <div style={{ fontSize: '0.86rem', fontWeight: 700, color: '#0f172a' }}>
+              {hasActiveSession
+                ? `Checked In at ${myTodayRecord.firstCheckInTime ? new Date(myTodayRecord.firstCheckInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Today'} (Session Active)`
+                : hasCompletedSession
+                ? `Completed Today &bull; Worked ${myTodayRecord.totalWorkingHours || 0} hrs (Punched out at ${new Date(myTodayRecord.lastCheckOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`
+                : 'No attendance punch recorded for today yet'}
+            </div>
+            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+              {gpsStatus}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Badge variant={hasCompletedSession ? 'success' : hasActiveSession ? 'warning' : 'secondary'}>
+            {hasCompletedSession ? 'PRESENT (COMPLETED)' : hasActiveSession ? 'IN PROGRESS' : 'NOT PUNCHED'}
+          </Badge>
+        </div>
+      </div>
+
+      {/* 3. Navigation Tabs */}
+      <div style={{
+        display: 'flex', gap: 6, background: '#fff', padding: '6px',
+        borderRadius: 10, border: '1px solid #e2e8f0', width: 'fit-content'
+      }}>
+        <button
+          onClick={() => setActiveTab('records')}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '7px 16px',
+            borderRadius: 7, border: 'none', fontSize: '0.84rem', fontWeight: 600,
+            cursor: 'pointer', transition: 'all 0.15s',
+            background: activeTab === 'records' ? 'var(--primary)' : 'transparent',
+            color: activeTab === 'records' ? '#fff' : '#64748b',
+          }}
         >
-          Mark Attendance
-        </Button>
+          <Calendar size={15} /> Attendance Records ({records.length})
+        </button>
+
+        <button
+          onClick={() => setActiveTab('regularization')}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '7px 16px',
+            borderRadius: 7, border: 'none', fontSize: '0.84rem', fontWeight: 600,
+            cursor: 'pointer', transition: 'all 0.15s',
+            background: activeTab === 'regularization' ? 'var(--primary)' : 'transparent',
+            color: activeTab === 'regularization' ? '#fff' : '#64748b',
+          }}
+        >
+          <Sliders size={15} /> Regularization Requests ({regularizations.length})
+        </button>
+
+        <button
+          onClick={() => setActiveTab('geofences')}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '7px 16px',
+            borderRadius: 7, border: 'none', fontSize: '0.84rem', fontWeight: 600,
+            cursor: 'pointer', transition: 'all 0.15s',
+            background: activeTab === 'geofences' ? 'var(--primary)' : 'transparent',
+            color: activeTab === 'geofences' ? '#fff' : '#64748b',
+          }}
+        >
+          <MapPin size={15} /> Branch Geo-Fences ({geofences.length})
+        </button>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid-4">
-        {[
-          { label: 'Present Today', value: totalPresent, color: 'var(--success)', bg: 'rgba(22,163,74,0.08)', Icon: UserCheck },
-          { label: 'Late Arrivals', value: totalLate, color: '#dc2626', bg: 'rgba(220,38,38,0.08)', Icon: Clock },
-          { label: 'On Duty Now', value: totalOpen, color: '#2563eb', bg: 'rgba(37,99,235,0.08)', Icon: Layers },
-          { label: 'Live Clock', value: currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }), color: 'var(--primary)', bg: 'var(--primary-light)', Icon: Calendar, mono: true },
-        ].map((kpi) => (
-          <div key={kpi.label} className="card" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <div style={{ fontSize: '0.77rem', color: 'var(--text-muted)' }}>{kpi.label}</div>
-              <div style={{ fontSize: kpi.mono ? '1rem' : '1.5rem', fontWeight: 700, color: kpi.color, fontFamily: kpi.mono ? 'monospace' : undefined }}>
-                {kpi.value}
+      {/* ================================================================== */}
+      {/* TAB 1: ATTENDANCE RECORDS */}
+      {/* ================================================================== */}
+      {activeTab === 'records' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+          {/* Subheader Filter Bar */}
+          <div style={{
+            background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0',
+            padding: '12px 16px', display: 'flex', justifyContent: 'space-between',
+            alignItems: 'center', flexWrap: 'wrap', gap: 12
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              {/* Type Switcher: Office vs Field */}
+              <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: 8, padding: 3 }}>
+                <button
+                  onClick={() => setAttendanceType('OFFICE')}
+                  style={{
+                    padding: '5px 12px', border: 'none', borderRadius: 6, fontSize: '0.78rem',
+                    fontWeight: 600, cursor: 'pointer',
+                    background: attendanceType === 'OFFICE' ? '#fff' : 'transparent',
+                    color: attendanceType === 'OFFICE' ? '#0f172a' : '#64748b',
+                    boxShadow: attendanceType === 'OFFICE' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                  }}
+                >
+                  Office Attendance
+                </button>
+                <button
+                  onClick={() => setAttendanceType('FIELD')}
+                  style={{
+                    padding: '5px 12px', border: 'none', borderRadius: 6, fontSize: '0.78rem',
+                    fontWeight: 600, cursor: 'pointer',
+                    background: attendanceType === 'FIELD' ? '#fff' : 'transparent',
+                    color: attendanceType === 'FIELD' ? '#0f172a' : '#64748b',
+                    boxShadow: attendanceType === 'FIELD' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                  }}
+                >
+                  Field Staff
+                </button>
               </div>
-            </div>
-            <div style={{ width: 38, height: 38, borderRadius: 8, background: kpi.bg, color: kpi.color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <kpi.Icon size={20} />
-            </div>
-          </div>
-        ))}
-      </div>
 
-      {/* Filters */}
-      <div className="card" style={{ padding: '12px 18px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {[{ key: 'OFFICE', label: 'Office', Icon: Building2 }, { key: 'FIELD', label: 'Field / Site', Icon: Compass }].map((tab) => (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => setActiveTab(tab.key)}
-                className={`btn ${activeTab === tab.key ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
-              >
-                <tab.Icon size={14} />{tab.label}
-              </button>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <label style={{ fontSize: '0.83rem', color: 'var(--text-muted)', fontWeight: 600 }}>Date:</label>
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="form-control"
-                style={{ width: 150, padding: '5px 10px', fontSize: '0.84rem' }}
-              />
-            </div>
-            <Button size="sm" variant="light" icon={RefreshCw} onClick={loadAttendance} loading={loading}>Refresh</Button>
-          </div>
-        </div>
-      </div>
-
-      {/* Table */}
-      <div className="card" style={{ padding: 20 }}>
-        <div style={{ marginBottom: 12 }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>
-            {activeTab === 'OFFICE' ? 'Office Attendance Register' : 'Field & Site Register'}
-          </h3>
-          <p style={{ margin: '2px 0 0', fontSize: '0.79rem', color: 'var(--text-muted)' }}>
-            {records.length} record{records.length !== 1 ? 's' : ''} for {selectedDate}
-          </p>
-        </div>
-        <Table
-          columns={columns}
-          data={records}
-          loading={loading}
-          emptyMessage={
-            <div style={{ padding: 28, textAlign: 'center' }}>
-              <div style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: 6 }}>No records for {selectedDate}</div>
-              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: 14 }}>
-                Mark attendance using face verification and GPS.
-              </p>
-              <Button variant="primary" icon={UserCheck} onClick={() => { setCapturedPhoto(null); setPunchResult(null); setCheckInModalOpen(true); }}>
-                Mark Attendance
-              </Button>
-            </div>
-          }
-        />
-      </div>
-
-      
-      <Modal isOpen={checkInModalOpen} onClose={() => setCheckInModalOpen(false)} title="Mark Attendance" size="lg">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Step bar */}
-          <div style={{ display: 'flex', gap: 6, fontSize: '0.71rem', fontWeight: 600 }}>
-            {[
-              { label: '1. Employee', active: true },
-              { label: '2. Face', done: !!capturedPhoto },
-              { label: '3. GPS', done: !!(coords && !coords.gpsUnavailable) },
-              { label: '4. Submit', active: false },
-            ].map((s) => (
-              <div key={s.label} style={{
-                flex: 1, padding: '4px 0', textAlign: 'center', borderRadius: 5,
-                backgroundColor: s.done ? '#f0fdf4' : s.active ? '#eff6ff' : '#f8fafc',
-                border: `1px solid ${s.done ? '#bbf7d0' : s.active ? '#bfdbfe' : 'var(--border-color)'}`,
-                color: s.done ? '#166534' : s.active ? '#1d4ed8' : 'var(--text-muted)',
-              }}>
-                {s.label}
-              </div>
-            ))}
-          </div>
-
-          <div className="grid-2">
-            {/* Camera */}
-            <div>
-              <label className="form-label" style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                <ScanFace size={15} color="var(--primary)" /> Face Capture
-              </label>
-              <CameraCapture
-                onCapture={(img) => { setCapturedPhoto(img); setCameraError(null); setPunchResult(null); }}
-                onError={(err) => setCameraError(err)}
-                label="Capture Face"
-              />
-              {capturedPhoto && (
-                <div style={{ marginTop: 8, padding: '7px 12px', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6, fontSize: '0.8rem', color: '#166534', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <CheckCircle2 size={14} /> Face captured - ready for verification
-                </div>
-              )}
-            </div>
-
-            {/* Right panel */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {isOrgAdmin ? (
-                <Select
-                  label="Employee"
-                  value={selectedEmpId}
-                  onChange={(e) => { setSelectedEmpId(e.target.value); setCapturedPhoto(null); setPunchResult(null); }}
-                  options={employees.map((e) => ({
-                    value: e._id || e.id,
-                    label: getEmpCode(e) ? `${getEmpCode(e)} - ${getEmpName(e)}` : getEmpName(e),
-                  }))}
-                  required
-                />
-              ) : (
-                <div style={{ padding: '10px 14px', borderRadius: 8, backgroundColor: 'var(--bg-subtle)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <User size={20} color="var(--primary)" />
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{selectedEmployeeObj ? getEmpName(selectedEmployeeObj) : (user?.name || 'Me')}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{selectedEmployeeObj ? getEmpCode(selectedEmployeeObj) : (user?.employeeCode || 'SELF')}</div>
-                  </div>
-                  <Badge variant="primary" style={{ marginLeft: 'auto' }}>Self</Badge>
-                </div>
-              )}
-
-              {selectedEmployeeObj && (
-                <div style={{
-                  padding: '7px 12px', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  backgroundColor: selectedEmployeeObj.isFaceEnrolled ? '#f0fdf4' : '#fffbeb',
-                  border: `1px solid ${selectedEmployeeObj.isFaceEnrolled ? '#bbf7d0' : '#fde68a'}`,
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.81rem', color: selectedEmployeeObj.isFaceEnrolled ? '#166534' : '#b45309' }}>
-                    {selectedEmployeeObj.isFaceEnrolled ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
-                    <span>{selectedEmployeeObj.isFaceEnrolled ? 'Face Enrolled' : 'Face Not Enrolled'}</span>
-                  </div>
+              {/* Scope Switcher (Org Admins Only) */}
+              {isOrgAdmin && (
+                <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: 8, padding: 3 }}>
                   <button
-                    type="button"
-                    onClick={() => openInlineEnroll(selectedEmployeeObj)}
-                    className={selectedEmployeeObj.isFaceEnrolled ? '' : 'btn btn-warning btn-sm'}
-                    style={selectedEmployeeObj.isFaceEnrolled ? { background: 'none', border: 'none', color: '#16a34a', fontSize: '0.72rem', cursor: 'pointer', textDecoration: 'underline' } : { fontSize: '0.72rem', padding: '2px 8px' }}
+                    onClick={() => setViewScope('ALL')}
+                    style={{
+                      padding: '5px 12px', border: 'none', borderRadius: 6, fontSize: '0.78rem',
+                      fontWeight: 600, cursor: 'pointer',
+                      background: viewScope === 'ALL' ? '#fff' : 'transparent',
+                      color: viewScope === 'ALL' ? '#0f172a' : '#64748b',
+                      boxShadow: viewScope === 'ALL' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                    }}
                   >
-                    {selectedEmployeeObj.isFaceEnrolled ? 'Update' : 'Register Face'}
+                    Organization Wide
+                  </button>
+                  <button
+                    onClick={() => setViewScope('MY')}
+                    style={{
+                      padding: '5px 12px', border: 'none', borderRadius: 6, fontSize: '0.78rem',
+                      fontWeight: 600, cursor: 'pointer',
+                      background: viewScope === 'MY' ? '#fff' : 'transparent',
+                      color: viewScope === 'MY' ? '#0f172a' : '#64748b',
+                      boxShadow: viewScope === 'MY' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                    }}
+                  >
+                    My History
                   </button>
                 </div>
               )}
 
-              <div className="form-group">
-                <label className="form-label" style={{ fontWeight: 600 }}>Mode</label>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  {['CHECK_IN', 'CHECK_OUT'].map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => setPunchMode(mode)}
-                      className={`btn ${punchMode === mode ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-                    >
-                      {mode === 'CHECK_IN' ? 'Punch IN' : 'Punch OUT'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div style={{ padding: '10px 14px', backgroundColor: '#f8fafc', border: '1px solid var(--border-color)', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ fontSize: '0.71rem', color: 'var(--text-muted)' }}>Date</div>
-                  <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{selectedDate}</div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '0.71rem', color: 'var(--text-muted)' }}>Live Time</div>
-                  <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--primary)', fontFamily: 'monospace' }}>
-                    {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="form-label" style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                  <MapPin size={14} color="#0284c7" /> GPS Location
-                </label>
-                <GeoLocationPicker
-                  onLocationChange={(c) => { setCoords(c); if (c && !c.gpsUnavailable) setPunchResult(null); }}
-                  targetLocation={activeTab === 'OFFICE' ? branchLocation : null}
+              {/* Date Selector */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#64748b' }}>Date:</span>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  style={{
+                    padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1',
+                    fontSize: '0.8rem', background: '#fff'
+                  }}
                 />
               </div>
             </div>
+
+            {/* Search Input */}
+            <div style={{ position: 'relative', width: 220 }}>
+              <Search size={14} style={{ position: 'absolute', left: 10, top: 9, color: '#94a3b8' }} />
+              <input
+                type="text"
+                placeholder="Search staff, code, status..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{
+                  width: '100%', padding: '5px 10px 5px 30px', borderRadius: 6,
+                  border: '1px solid #cbd5e1', fontSize: '0.78rem', boxSizing: 'border-box'
+                }}
+              />
+            </div>
           </div>
 
-          {punchResult && (
-            <div style={{
-              padding: '12px 16px', borderRadius: 8,
-              backgroundColor: punchResult.type === 'success' ? '#f0fdf4' : 'rgba(239,68,68,0.06)',
-              border: `1px solid ${punchResult.type === 'success' ? '#bbf7d0' : '#fecaca'}`,
-              borderLeft: `4px solid ${punchResult.type === 'success' ? 'var(--success)' : 'var(--danger)'}`,
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, color: punchResult.type === 'success' ? 'var(--success)' : 'var(--danger)' }}>
-                {punchResult.type === 'success' ? <CheckCircle2 size={16} /> : <XCircle size={16} />}
-                <span>{punchResult.message}</span>
+          {/* Records Table */}
+          <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+            {loadingRecords ? (
+              <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
+                <Clock size={24} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 8px' }} />
+                <div>Loading live attendance records...</div>
               </div>
-              {punchResult.data && (
-                <div style={{ marginTop: 6, fontSize: '0.79rem', color: 'var(--text-muted)', display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-                  <span>ðŸ“ {punchResult.data.address}</span>
-                  <span>ðŸ¤³ {punchResult.data.confidence}% match</span>
+            ) : filteredRecords.length === 0 ? (
+              <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
+                <AlertCircle size={32} color="#94a3b8" style={{ margin: '0 auto 8px' }} />
+                <div style={{ fontWeight: 600 }}>No attendance records found for this date</div>
+                <div style={{ fontSize: '0.8rem', marginTop: 4 }}>
+                  Use &ldquo;Punch Check-In&rdquo; above to record your attendance.
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', textAlign: 'left' }}>
+                      <th style={{ padding: '10px 16px' }}>Employee</th>
+                      <th style={{ padding: '10px 16px' }}>Date</th>
+                      <th style={{ padding: '10px 16px' }}>Check In</th>
+                      <th style={{ padding: '10px 16px' }}>Check Out</th>
+                      <th style={{ padding: '10px 16px' }}>Total Hours</th>
+                      <th style={{ padding: '10px 16px' }}>Status</th>
+                      <th style={{ padding: '10px 16px' }}>Late / Ontime</th>
+                      <th style={{ padding: '10px 16px', textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredRecords.map((r) => {
+                      const empName = r.employee?.basicInfo?.fullName || r.employee?.name || user?.name || 'Staff Member';
+                      const empCode = r.employee?.basicInfo?.employeeCode || r.employee?.employeeCode || 'EMP';
+                      const inTimeStr = r.firstCheckInTime ? new Date(r.firstCheckInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+                      const outTimeStr = r.lastCheckOutTime ? new Date(r.lastCheckOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (r.isOpen ? 'In Progress' : '—');
+                      const dateStr = r.attendanceDate ? new Date(r.attendanceDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+                      const isLate = r.lateStatus?.isLate;
+                      const punchesCount = r.punches?.length || 1;
 
-          <div className="modal-footer" style={{ margin: '0 -20px -20px' }}>
-            <Button variant="secondary" onClick={() => setCheckInModalOpen(false)}>Close</Button>
-            <Button
-              variant="primary"
-              icon={UserCheck}
-              loading={submittingPunch}
-              onClick={handleCheckInSubmit}
-              disabled={!capturedPhoto || !coords || !!(coords && coords.gpsUnavailable)}
-            >
-              Confirm {punchMode === 'CHECK_IN' ? 'Check-In' : 'Check-Out'}
-            </Button>
+                      return (
+                        <tr key={r._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '12px 16px' }}>
+                            <div style={{ fontWeight: 600, color: '#0f172a' }}>{empName}</div>
+                            <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{empCode} &bull; {r.branch?.name || 'Branch Office'}</div>
+                          </td>
+                          <td style={{ padding: '12px 16px' }}>{dateStr}</td>
+                          <td style={{ padding: '12px 16px', fontWeight: 600, color: '#16a34a' }}>{inTimeStr}</td>
+                          <td style={{ padding: '12px 16px', fontWeight: 600, color: '#0284c7' }}>{outTimeStr}</td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <span style={{ fontWeight: 700 }}>{r.totalWorkingHours || 0} hrs</span>
+                            {r.overtimeHours > 0 && (
+                              <span style={{ fontSize: '0.72rem', color: '#16a34a', marginLeft: 4 }}>(+{r.overtimeHours} OT)</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <Badge variant={r.attendanceStatus === 'PRESENT' ? 'success' : r.attendanceStatus === 'HALF_DAY' ? 'warning' : 'danger'}>
+                              {r.attendanceStatus || 'PRESENT'}
+                            </Badge>
+                          </td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <Badge variant={isLate ? 'danger' : 'success'}>
+                              {isLate ? 'LATE' : 'ON TIME'}
+                            </Badge>
+                          </td>
+                          <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                icon={Eye}
+                                onClick={() => {
+                                  setSelectedRecordForSessions(r);
+                                  setSessionModalOpen(true);
+                                }}
+                                title="View multi-punch sessions"
+                              >
+                                {punchesCount} {punchesCount === 1 ? 'Punch' : 'Punches'}
+                              </Button>
+                              {isOrgAdmin && (
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  icon={Edit2}
+                                  onClick={() => handleOpenCorrect(r)}
+                                  title="Admin manual correction"
+                                />
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
-      </Modal>
+      )}
 
-      
-      <Modal isOpen={sessionModalOpen} onClose={() => setSessionModalOpen(false)} title={`Sessions - ${getEmpName(selectedRecord?.employee)}`}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {selectedRecord?.punches?.length > 0 ? (
-            selectedRecord.punches.map((p, idx) => (
-              <div key={idx} style={{ padding: 12, borderRadius: 8, backgroundColor: '#f8fafc', border: '1px solid var(--border-color)', fontSize: '0.83rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, marginBottom: 4 }}>
-                  <span>Session #{idx + 1}</span>
-                  <Badge variant={p.isOpen ? 'warning' : 'success'}>{p.isOpen ? 'Active' : `${p.workingHours || 0} hrs`}</Badge>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)' }}>
-                  <span>In: {p.checkInTime ? new Date(p.checkInTime).toLocaleTimeString() : '-'}</span>
-                  <span>Out: {p.checkOutTime ? new Date(p.checkOutTime).toLocaleTimeString() : 'In Progress'}</span>
-                </div>
+      {/* ================================================================== */}
+      {/* TAB 2: REGULARIZATION REQUESTS */}
+      {/* ================================================================== */}
+      {activeTab === 'regularization' && (
+        <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+          <div style={{ padding: '14px 18px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>
+                Attendance Regularization Workflow
+              </h3>
+              <p style={{ margin: '2px 0 0', fontSize: '0.76rem', color: '#64748b' }}>
+                Submit adjustments for missed biometric punches, on-duty field visits, or technical errors
+              </p>
+            </div>
+            <Button variant="primary" size="sm" icon={Sliders} onClick={() => setRegModalOpen(true)}>
+              Apply for Regularization
+            </Button>
+          </div>
+
+          {loadingRegs ? (
+            <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
+              <Clock size={24} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 8px' }} />
+              <div>Loading regularization requests...</div>
+            </div>
+          ) : regularizations.length === 0 ? (
+            <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
+              <CheckCircle2 size={32} color="#16a34a" style={{ margin: '0 auto 8px' }} />
+              <div style={{ fontWeight: 600 }}>No pending regularization requests</div>
+              <div style={{ fontSize: '0.8rem', marginTop: 4 }}>
+                All attendance records are verified and aligned.
               </div>
-            ))
+            </div>
           ) : (
-            <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.84rem' }}>
-              Single session - no multi-punch data.
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', textAlign: 'left' }}>
+                    <th style={{ padding: '10px 16px' }}>Staff</th>
+                    <th style={{ padding: '10px 16px' }}>Attendance Date</th>
+                    <th style={{ padding: '10px 16px' }}>Requested Timings</th>
+                    <th style={{ padding: '10px 16px' }}>Reason</th>
+                    <th style={{ padding: '10px 16px' }}>Status</th>
+                    <th style={{ padding: '10px 16px', textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {regularizations.map((reg) => {
+                    const empName = reg.employee?.basicInfo?.fullName || reg.employee?.name || user?.name || 'Staff Member';
+                    const empCode = reg.employee?.basicInfo?.employeeCode || reg.employee?.employeeCode || 'EMP';
+                    const inTime = reg.requestedCheckInTime ? new Date(reg.requestedCheckInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '09:00 AM';
+                    const outTime = reg.requestedCheckOutTime ? new Date(reg.requestedCheckOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '06:00 PM';
+                    const status = reg.status || 'PENDING';
+                    const isPending = status === 'PENDING';
+
+                    return (
+                      <tr key={reg._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '12px 16px' }}>
+                          <div style={{ fontWeight: 600 }}>{empName}</div>
+                          <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{empCode}</div>
+                        </td>
+                        <td style={{ padding: '12px 16px', fontWeight: 600 }}>
+                          {reg.attendanceDate ? new Date(reg.attendanceDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+                        </td>
+                        <td style={{ padding: '12px 16px' }}>
+                          <span style={{ color: '#16a34a', fontWeight: 600 }}>{inTime}</span> to <span style={{ color: '#0284c7', fontWeight: 600 }}>{outTime}</span>
+                        </td>
+                        <td style={{ padding: '12px 16px', maxWidth: 240 }}>
+                          <div style={{ fontSize: '0.78rem', color: '#334155' }}>{reg.reason}</div>
+                        </td>
+                        <td style={{ padding: '12px 16px' }}>
+                          <Badge variant={status === 'APPROVED' ? 'success' : status === 'REJECTED' ? 'danger' : 'warning'}>
+                            {status}
+                          </Badge>
+                        </td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                          {isPending && isOrgAdmin && (
+                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                icon={Check}
+                                onClick={() => handleDecideRegularization(reg._id, 'APPROVE')}
+                              >
+                                Approve
+                              </Button>
+                              <Button
+                                variant="danger"
+                                size="sm"
+                                icon={X}
+                                onClick={() => handleDecideRegularization(reg._id, 'REJECT')}
+                              >
+                                Reject
+                              </Button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
-          <div className="modal-footer" style={{ margin: '10px -20px -20px' }}>
-            <Button variant="secondary" onClick={() => setSessionModalOpen(false)}>Close</Button>
-          </div>
         </div>
-      </Modal>
+      )}
 
-      
-      <Modal isOpen={correctModalOpen} onClose={() => setCorrectModalOpen(false)} title="Admin Correction">
-        <form onSubmit={handleCorrectSubmit}>
-          <div style={{ marginBottom: 12, fontSize: '0.84rem' }}>
-            <strong>Employee:</strong> {getEmpName(selectedRecord?.employee)}
+      {/* ================================================================== */}
+      {/* TAB 3: BRANCH GEOFENCES */}
+      {/* ================================================================== */}
+      {activeTab === 'geofences' && (
+        <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+          <div style={{ padding: '14px 18px', borderBottom: '1px solid #e2e8f0' }}>
+            <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>
+              Configured Branch Geofences
+            </h3>
+            <p style={{ margin: '2px 0 0', fontSize: '0.76rem', color: '#64748b' }}>
+              Automated GPS perimeter validation active for office mobile attendance gates
+            </p>
           </div>
-          <SimpleTime12HPicker
-            label="Check-In Time"
-            value={correctForm.checkInTime}
-            onChange={(val) => setCorrectForm({ ...correctForm, checkInTime: val })}
-            required
-          />
-          <SimpleTime12HPicker
-            label="Check-Out Time"
-            value={correctForm.checkOutTime}
-            onChange={(val) => setCorrectForm({ ...correctForm, checkOutTime: val })}
-            required
-          />
-          <Select
-            label="Attendance Status"
-            value={correctForm.attendanceStatus}
-            onChange={(e) => setCorrectForm({ ...correctForm, attendanceStatus: e.target.value })}
-            options={[{ value: 'PRESENT', label: 'Present' }, { value: 'HALF_DAY', label: 'Half Day' }, { value: 'ABSENT', label: 'Absent' }]}
-          />
-          <div className="form-group" style={{ marginBottom: 14 }}>
-            <label className="form-label">Correction Remark *</label>
-            <textarea
-              className="form-control"
-              value={correctForm.correctionRemark}
-              onChange={(e) => setCorrectForm({ ...correctForm, correctionRemark: e.target.value })}
-              rows={2}
-              placeholder="Reason for correction..."
-              style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border-color)', boxSizing: 'border-box' }}
-              required
-            />
-          </div>
-          <div className="modal-footer" style={{ margin: '0 -20px -20px' }}>
-            <Button variant="secondary" onClick={() => setCorrectModalOpen(false)}>Cancel</Button>
-            <Button variant="primary" type="submit" loading={submittingCorrection}>Save Correction</Button>
-          </div>
-        </form>
-      </Modal>
 
-      
-      <Modal isOpen={inlineEnrollOpen} onClose={() => setInlineEnrollOpen(false)} title={`Face Registration - ${getEmpName(inlineEnrollEmployee)}`} size="md">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ padding: '10px 14px', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, fontSize: '0.83rem', color: '#1e40af' }}>
-            Capture a clear front-facing photo to enroll biometric data for attendance.
-          </div>
-          <CameraCapture onCapture={(img) => setInlineFacePhoto(img)} label="Capture Face for Enrollment" />
-          {inlineFacePhoto && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#166534', fontSize: '0.83rem', padding: '6px 10px', backgroundColor: '#f0fdf4', borderRadius: 6 }}>
-              <CheckCircle2 size={14} /> Photo captured - ready to enroll
+          {loadingFences ? (
+            <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
+              <Clock size={24} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 8px' }} />
+              <div>Loading configured geofences...</div>
+            </div>
+          ) : geofences.length === 0 ? (
+            <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
+              <MapPin size={32} color="#94a3b8" style={{ margin: '0 auto 8px' }} />
+              <div style={{ fontWeight: 600 }}>No geofences configured</div>
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', textAlign: 'left' }}>
+                    <th style={{ padding: '10px 16px' }}>Branch / Location</th>
+                    <th style={{ padding: '10px 16px' }}>Coordinates</th>
+                    <th style={{ padding: '10px 16px' }}>Allowed Radius</th>
+                    <th style={{ padding: '10px 16px' }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {geofences.map((gf) => {
+                    const branchName = gf.reference?.name || gf.name || 'Office Branch';
+                    const lat = gf.centerLatitude ?? gf.reference?.geoFence?.latitude ?? 21.2420;
+                    const lng = gf.centerLongitude ?? gf.reference?.geoFence?.longitude ?? 72.8870;
+                    const rad = gf.radiusMeters ?? gf.reference?.geoFence?.radiusInMeters ?? 500;
+
+                    return (
+                      <tr key={gf._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '12px 16px', fontWeight: 600 }}>{branchName}</td>
+                        <td style={{ padding: '12px 16px', fontFamily: 'monospace' }}>
+                          {Number(lat).toFixed(4)}° N, {Number(lng).toFixed(4)}° E
+                        </td>
+                        <td style={{ padding: '12px 16px' }}>{rad} Meters</td>
+                        <td style={{ padding: '12px 16px' }}>
+                          <Badge variant="success">ACTIVE PERIMETER</Badge>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
-          <div className="modal-footer" style={{ margin: '6px -20px -20px' }}>
-            <Button variant="secondary" onClick={() => setInlineEnrollOpen(false)} disabled={enrollingInlineFace}>Cancel</Button>
-            <Button variant="primary" icon={ScanFace} onClick={handleInlineEnrollFace} loading={enrollingInlineFace} disabled={!inlineFacePhoto}>
-              Enroll Face
-            </Button>
-          </div>
         </div>
-      </Modal>
+      )}
+
+      {/* ================================================================== */}
+      {/* 4. MODAL: PUNCH CHECK-IN / CHECK-OUT */}
+      {/* ================================================================== */}
+      {punchModalOpen && (
+        <Modal
+          isOpen={true}
+          onClose={() => setPunchModalOpen(false)}
+          title={punchActionType === 'CHECK_IN' ? 'Biometric & GPS Check-In' : 'Punch Check-Out'}
+          maxWidth="480px"
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Mode Selector: Office vs Field */}
+            <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: 8, padding: 3 }}>
+              <button
+                type="button"
+                onClick={() => setPunchAttendanceType('OFFICE')}
+                style={{
+                  flex: 1, padding: '7px 0', border: 'none', borderRadius: 6, fontSize: '0.8rem',
+                  fontWeight: 600, cursor: 'pointer',
+                  background: punchAttendanceType === 'OFFICE' ? 'var(--primary)' : 'transparent',
+                  color: punchAttendanceType === 'OFFICE' ? '#fff' : '#64748b',
+                }}
+              >
+                Office Location
+              </button>
+              <button
+                type="button"
+                onClick={() => setPunchAttendanceType('FIELD')}
+                style={{
+                  flex: 1, padding: '7px 0', border: 'none', borderRadius: 6, fontSize: '0.8rem',
+                  fontWeight: 600, cursor: 'pointer',
+                  background: punchAttendanceType === 'FIELD' ? 'var(--primary)' : 'transparent',
+                  color: punchAttendanceType === 'FIELD' ? '#fff' : '#64748b',
+                }}
+              >
+                Field / Client Visit
+              </button>
+            </div>
+
+            {/* GPS Telemetry Box */}
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: 12, fontSize: '0.8rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <span style={{ fontWeight: 600, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Navigation size={14} color="#16a34a" /> Verified GPS Coordinates:
+                </span>
+                <Badge variant="success">ACCURACY: {gpsCoords.accuracy}M</Badge>
+              </div>
+              <div style={{ fontFamily: 'monospace', color: '#475569' }}>
+                Lat: {gpsCoords.latitude.toFixed(6)} &bull; Long: {gpsCoords.longitude.toFixed(6)}
+              </div>
+            </div>
+
+            {/* Remarks Input for Check-Out */}
+            {punchActionType === 'CHECK_OUT' && (
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                  Shift / Daily Remarks (Optional)
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="e.g. Completed scheduled client meetings and development tasks"
+                  value={punchRemarks}
+                  onChange={(e) => setPunchRemarks(e.target.value)}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                />
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 6 }}>
+              <Button variant="secondary" onClick={() => setPunchModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant={punchActionType === 'CHECK_IN' ? 'primary' : 'danger'}
+                loading={submittingPunch}
+                onClick={handleExecutePunch}
+              >
+                Confirm {punchActionType === 'CHECK_IN' ? 'Check-In' : 'Check-Out'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ================================================================== */}
+      {/* 5. MODAL: MULTI-PUNCH SESSIONS VIEWER */}
+      {/* ================================================================== */}
+      {sessionModalOpen && selectedRecordForSessions && (
+        <Modal
+          isOpen={true}
+          onClose={() => setSessionModalOpen(false)}
+          title={`Punch Sessions &bull; ${selectedRecordForSessions.employee?.basicInfo?.fullName || selectedRecordForSessions.employee?.name || 'Staff'}`}
+          maxWidth="560px"
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
+              Recorded punches for {selectedRecordForSessions.attendanceDate ? new Date(selectedRecordForSessions.attendanceDate).toLocaleDateString() : 'Date'}
+            </div>
+
+            {(selectedRecordForSessions.punches || []).length === 0 ? (
+              <div style={{ padding: 20, textAlign: 'center', color: '#64748b' }}>
+                Single session recorded ({selectedRecordForSessions.firstCheckInTime ? new Date(selectedRecordForSessions.firstCheckInTime).toLocaleTimeString() : '—'})
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {selectedRecordForSessions.punches.map((p, idx) => (
+                  <div key={p._id || idx} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 12, background: p.isOpen ? '#fefce8' : '#fff' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 700, fontSize: '0.84rem' }}>Session #{idx + 1}</span>
+                      <Badge variant={p.isOpen ? 'warning' : 'success'}>
+                        {p.isOpen ? 'IN PROGRESS' : `${p.workingHours || 0} hrs`}
+                      </Badge>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8, fontSize: '0.78rem' }}>
+                      <div>
+                        <strong>In:</strong> {p.checkInTime ? new Date(p.checkInTime).toLocaleTimeString() : '—'}
+                      </div>
+                      <div>
+                        <strong>Out:</strong> {p.checkOutTime ? new Date(p.checkOutTime).toLocaleTimeString() : (p.isOpen ? 'Active' : '—')}
+                      </div>
+                    </div>
+                    {p.checkInAddress && (
+                      <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 4 }}>
+                        Location: {p.checkInAddress}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+              <Button variant="secondary" onClick={() => setSessionModalOpen(false)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ================================================================== */}
+      {/* 6. MODAL: ADMIN MANUAL ATTENDANCE CORRECTION */}
+      {/* ================================================================== */}
+      {correctModalOpen && selectedRecordForCorrect && (
+        <Modal
+          isOpen={true}
+          onClose={() => setCorrectModalOpen(false)}
+          title="Manual Administrative Correction"
+          maxWidth="500px"
+        >
+          <form onSubmit={handleSubmitCorrection} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ background: '#f8fafc', padding: 10, borderRadius: 6, border: '1px solid #e2e8f0', fontSize: '0.78rem' }}>
+              <strong>Staff:</strong> {selectedRecordForCorrect.employee?.basicInfo?.fullName || selectedRecordForCorrect.employee?.name || 'Staff Member'} &bull; <strong>Type:</strong> {selectedRecordForCorrect.attendanceType}
+            </div>
+
+            <div>
+              <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Attendance Status *</label>
+              <select
+                value={correctForm.attendanceStatus}
+                onChange={(e) => setCorrectForm({ ...correctForm, attendanceStatus: e.target.value })}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem' }}
+              >
+                <option value="PRESENT">PRESENT</option>
+                <option value="HALF_DAY">HALF_DAY</option>
+                <option value="ABSENT">ABSENT</option>
+              </select>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Check-In Time</label>
+                <input
+                  type="datetime-local"
+                  value={correctForm.checkInTime}
+                  onChange={(e) => setCorrectForm({ ...correctForm, checkInTime: e.target.value })}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Check-Out Time</label>
+                <input
+                  type="datetime-local"
+                  value={correctForm.checkOutTime}
+                  onChange={(e) => setCorrectForm({ ...correctForm, checkOutTime: e.target.value })}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                Correction Remark (Required for Audit Trail) *
+              </label>
+              <textarea
+                rows={2}
+                placeholder="e.g. Corrected check-out time per manager verbal confirmation"
+                value={correctForm.correctionRemark}
+                onChange={(e) => setCorrectForm({ ...correctForm, correctionRemark: e.target.value })}
+                required
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 6 }}>
+              <Button variant="secondary" onClick={() => setCorrectModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="primary" type="submit" loading={submittingCorrect}>
+                Apply Correction
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ================================================================== */}
+      {/* 7. MODAL: APPLY FOR ATTENDANCE REGULARIZATION */}
+      {/* ================================================================== */}
+      {regModalOpen && (
+        <Modal
+          isOpen={true}
+          onClose={() => setRegModalOpen(false)}
+          title="Apply for Attendance Regularization"
+          maxWidth="480px"
+        >
+          <form onSubmit={handleSubmitRegularization} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div>
+              <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Attendance Date *</label>
+              <input
+                type="date"
+                value={regForm.attendanceDate}
+                onChange={(e) => setRegForm({ ...regForm, attendanceDate: e.target.value })}
+                required
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Proposed Check-In *</label>
+                <input
+                  type="time"
+                  value={regForm.requestedCheckInTime}
+                  onChange={(e) => setRegForm({ ...regForm, requestedCheckInTime: e.target.value })}
+                  required
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Proposed Check-Out *</label>
+                <input
+                  type="time"
+                  value={regForm.requestedCheckOutTime}
+                  onChange={(e) => setRegForm({ ...regForm, requestedCheckOutTime: e.target.value })}
+                  required
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Reason for Regularization *</label>
+              <textarea
+                rows={3}
+                placeholder="e.g. Forgot to clock in due to emergency client visit, biometric scanner offline"
+                value={regForm.reason}
+                onChange={(e) => setRegForm({ ...regForm, reason: e.target.value })}
+                required
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 6 }}>
+              <Button variant="secondary" onClick={() => setRegModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="primary" type="submit" loading={submittingReg}>
+                Submit Request
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
     </div>
   );
 };
