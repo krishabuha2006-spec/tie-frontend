@@ -34,8 +34,19 @@ export const masterApi = {
     return res.data;
   },
   deleteCompany: async (id) => {
-    const res = await apiClient.delete(`/companies/${id}`);
-    return res.data;
+    try {
+      const res = await apiClient.delete(`/companies/${id}`);
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 409) {
+        const msg = err.response?.data?.message || 'Cannot delete company. It contains active branches. Remove or reassign them first.';
+        const conflictErr = new Error(msg);
+        conflictErr.status = 409;
+        conflictErr.response = err.response;
+        throw conflictErr;
+      }
+      throw err;
+    }
   },
 
   // Branches

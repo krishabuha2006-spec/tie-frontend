@@ -112,7 +112,7 @@ export const Departments = () => {
       setDeleteConfirmOpen(false);
       loadData();
     } catch (err) {
-      showToast(err.response?.data?.message || 'Failed to deactivate department', 'error');
+      showToast(err.response?.data?.message || err.message || 'Failed to deactivate department', 'error');
     } finally {
       setSubmitting(false);
     }

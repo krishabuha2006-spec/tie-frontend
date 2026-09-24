@@ -155,7 +155,7 @@ export const Companies = () => {
       setDeleteConfirmOpen(false);
       loadCompanies();
     } catch (err) {
-      showToast(err.response?.data?.message || 'Failed to deactivate company', 'error');
+      showToast(err.response?.data?.message || err.message || 'Failed to deactivate company', 'error');
     } finally {
       setSubmitting(false);
     }

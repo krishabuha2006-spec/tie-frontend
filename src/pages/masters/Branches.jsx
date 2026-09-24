@@ -234,7 +234,7 @@ export const Branches = () => {
       setDeleteConfirmOpen(false);
       loadData();
     } catch (err) {
-      showToast(err.response?.data?.message || 'Failed to deactivate branch', 'error');
+      showToast(err.response?.data?.message || err.message || 'Failed to deactivate branch', 'error');
     } finally {
       setSubmitting(false);
     }

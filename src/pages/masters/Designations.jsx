@@ -152,7 +152,7 @@ export const Designations = () => {
       setDesigToDelete(null);
       loadData();
     } catch (err) {
-      showToast(err.response?.data?.message || 'Failed to delete designation', 'error');
+      showToast(err.response?.data?.message || err.message || 'Failed to delete designation', 'error');
     } finally {
       setSubmitting(false);
     }
