@@ -13,6 +13,11 @@ export default defineConfig({
         secure: false,
         timeout: 60000,
         proxyTimeout: 60000,
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, _res) => {
+            console.warn('[Vite Proxy]:', err.message);
+          });
+        },
       },
     },
   },

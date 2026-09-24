@@ -116,20 +116,32 @@ apiClient.interceptors.response.use(
       }
     }
 
-    // Automatic retry once for transient network drop / ERR_NETWORK_CHANGED on GET
-    const isNetworkError =
+    // Automatic retry for transient proxy errors (502 Bad Gateway, 503, 504) or network drops on GET requests
+    const status = error.response?.status;
+    const isGatewayOrNetworkError =
+      status === 502 ||
+      status === 503 ||
+      status === 504 ||
       error.code === 'ERR_NETWORK' ||
       error.code === 'ECONNABORTED' ||
+      error.code === 'ETIMEDOUT' ||
       (typeof error.message === 'string' && error.message.toLowerCase().includes('network'));
 
     if (
-      !originalRequest?._retryNetwork &&
-      isNetworkError &&
+      isGatewayOrNetworkError &&
       (!originalRequest?.method || originalRequest.method.toLowerCase() === 'get')
     ) {
-      originalRequest._retryNetwork = true;
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      return apiClient(originalRequest);
+      originalRequest._retryCount = (originalRequest._retryCount || 0) + 1;
+      if (originalRequest._retryCount <= 2) {
+        await new Promise((resolve) => setTimeout(resolve, originalRequest._retryCount * 600));
+
+        // If local proxy returned 502/504, switch directly to the live backend URL
+        if (originalRequest._retryCount === 2 && typeof window !== 'undefined' && LIVE_BACKEND_URL) {
+          originalRequest.baseURL = LIVE_BACKEND_URL;
+        }
+
+        return apiClient(originalRequest);
+      }
     }
 
     return Promise.reject(error);
