@@ -999,14 +999,13 @@ export const EmployeeList = () => {
       const matchedDept = departments.find((d) => d._id === rawDept || d.name === rawDept);
       const deptId = matchedDept?._id || (/^[0-9a-fA-F]{24}$/.test(rawDept) ? rawDept : departments[0]?._id || '');
 
-      // Ensure branch is resolved to its ObjectId belonging to employee's company
-      const validBranches = scopedBranchesForDetail.length > 0 ? scopedBranchesForDetail : branches;
+      // Ensure branch is resolved to its ObjectId
       const rawBranch = em.branch?._id || em.branch || currentEmployeeDetail.branch?._id || currentEmployeeDetail.branch;
-      let matchedBranch = validBranches.find((b) => b._id === rawBranch);
+      let matchedBranch = branches.find((b) => b._id === rawBranch);
       if (!matchedBranch) {
-        matchedBranch = validBranches.find((b) => b.name === rawBranch);
+        matchedBranch = branches.find((b) => b.name === rawBranch);
       }
-      const branchId = matchedBranch?._id || (validBranches.some((b) => String(b._id) === String(rawBranch)) ? rawBranch : validBranches[0]?._id || '');
+      const branchId = matchedBranch?._id || (branches.some((b) => String(b._id) === String(rawBranch)) ? rawBranch : branches[0]?._id || '');
 
       // Ensure designation is resolved to its ObjectId
       const rawDesig = em.designation?._id || em.designation || currentEmployeeDetail.designation?._id || currentEmployeeDetail.designation;
@@ -1113,14 +1112,13 @@ export const EmployeeList = () => {
         const matchedDesig = designations.find((d) => d._id === rawDesig || d.name === rawDesig || d.title === rawDesig);
         const desigId = matchedDesig?._id || (/^[0-9a-fA-F]{24}$/.test(rawDesig) ? rawDesig : designations[0]?._id);
 
-        // Resolve branch ObjectId belonging to employee's company
-        const validBranches = scopedBranchesForDetail.length > 0 ? scopedBranchesForDetail : branches;
+        // Resolve branch ObjectId
         const rawBranch = editFormData.branch || em.branch?._id || em.branch;
-        let matchedBranch = validBranches.find((b) => b._id === rawBranch);
+        let matchedBranch = branches.find((b) => b._id === rawBranch);
         if (!matchedBranch) {
-          matchedBranch = validBranches.find((b) => b.name === rawBranch);
+          matchedBranch = branches.find((b) => b.name === rawBranch);
         }
-        const branchId = matchedBranch?._id || (validBranches.some((b) => String(b._id) === String(rawBranch)) ? rawBranch : validBranches[0]?._id);
+        const branchId = matchedBranch?._id || (branches.some((b) => String(b._id) === String(rawBranch)) ? rawBranch : branches[0]?._id);
 
         const payload = {
           department: deptId,
@@ -2059,7 +2057,10 @@ export const EmployeeList = () => {
                 label="Branch"
                 value={newEmp.branch}
                 onChange={(e) => setNewEmp({ ...newEmp, branch: e.target.value })}
-                options={branches.map((b) => ({ value: b._id, label: b.name }))}
+                options={branches.map((b) => ({
+                  value: b._id,
+                  label: b.company?.name ? `${b.name} (${b.company.name})` : b.name,
+                }))}
                 required
               />
               <Select
@@ -2895,7 +2896,10 @@ export const EmployeeList = () => {
                           label="Branch *"
                           value={editFormData.branch}
                           onChange={(e) => setEditFormData({ ...editFormData, branch: e.target.value })}
-                          options={scopedBranchesForDetail.map((b) => ({ value: b._id, label: b.name }))}
+                          options={branches.map((b) => ({
+                            value: b._id,
+                            label: b.company?.name ? `${b.name} (${b.company.name})` : b.name,
+                          }))}
                         />
                         <Select
                           label="Employment Type"
