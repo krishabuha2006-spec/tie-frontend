@@ -308,6 +308,14 @@ export const AppRoutes = () => {
           }
         />
         <Route
+          path="payroll/payslips"
+          element={
+            <ProtectedRoute module="payroll">
+              <PayrollPayslips defaultTab="payslips" />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="assets-claims"
           element={
             <ProtectedRoute module="assets-claims">

@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import payrollApi from '../../api/payrollApi';
 import masterApi from '../../api/masterApi';
 import employeeApi from '../../api/employeeApi';
@@ -7,7 +8,7 @@ import { useToast } from '../../context/ToastContext';
 import {
   DollarSign, FileText, CheckCircle2, Clock, Plus, RefreshCw,
   Download, Printer, Eye, Users, Calendar, AlertCircle, Loader2,
-  ChevronRight, ArrowUpRight, Check, X, ShieldCheck, Building2
+  Building2, Trash2, Search, Sliders, Briefcase, FileSpreadsheet, Check
 } from 'lucide-react';
 import Modal from '../../components/common/Modal';
 import Button from '../../components/common/Button';
@@ -19,47 +20,60 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
-export const PayrollPayslips = () => {
+export const PayrollPayslips = ({ defaultTab = 'runs' }) => {
+  const location = useLocation();
   const { user, isSuperAdmin, isHrAdmin, isDirector } = useAuth();
   const { showToast } = useToast();
   const isManagerOrAdmin = isSuperAdmin || isHrAdmin || isDirector;
 
   const now = new Date();
-  const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
-  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
-
-  // Tabs: 'runs' (Payroll Runs) | 'payslips' (Payslips) | 'structures' (Salary Structures)
-  const [activeTab, setActiveTab] = useState('runs');
+  const initialTab = defaultTab || (location?.pathname?.includes('payslips') ? 'payslips' : 'runs');
+  const [activeTab, setActiveTab] = useState(initialTab);
 
   // Master Data
   const [companies, setCompanies] = useState([]);
   const [branches, setBranches] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [loadingMasters, setLoadingMasters] = useState(false);
 
-  // Stable refs to avoid stale closures without causing re-renders
-  const selectedRunRef = React.useRef(null);
-  const runsRef = React.useRef([]);
+  // Filter & Batch Creation State
+  const [batchModalOpen, setBatchModalOpen] = useState(false);
+  const [selectedCompanyId, setSelectedCompanyId] = useState('');
+  const [selectedBranchId, setSelectedBranchId] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
+  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
 
+  // 1. Payroll Runs State
   const [runs, setRuns] = useState([]);
   const [loadingRuns, setLoadingRuns] = useState(false);
   const [selectedRun, setSelectedRun] = useState(null);
   const [lineItems, setLineItems] = useState([]);
   const [loadingItems, setLoadingItems] = useState(false);
   const [processingRun, setProcessingRun] = useState(false);
-  const [approvingRun, setApprovingRun] = useState(false);
+  const [approvingRunId, setApprovingRunId] = useState(null);
+  const [deletingRunId, setDeletingRunId] = useState(null);
+  const [runSearchQuery, setRunSearchQuery] = useState('');
+
+  // Stable ref for runs to prevent dependency loops
+  const runsRef = useRef([]);
 
   // 2. Payslips State
   const [payslipsList, setPayslipsList] = useState([]);
   const [loadingPayslips, setLoadingPayslips] = useState(false);
   const [viewingPayslip, setViewingPayslip] = useState(null);
+  const [viewingLineItem, setViewingLineItem] = useState(null);
+  const [loadingLineItemDetails, setLoadingLineItemDetails] = useState(false);
   const [generatingPayslipRunId, setGeneratingPayslipRunId] = useState(null);
+  const [payslipSearchQuery, setPayslipSearchQuery] = useState('');
 
   // 3. Salary Structures State
   const [structures, setStructures] = useState([]);
   const [loadingStructures, setLoadingStructures] = useState(false);
   const [structureModalOpen, setStructureModalOpen] = useState(false);
   const [creatingStructure, setCreatingStructure] = useState(false);
+  const [deletingStructureId, setDeletingStructureId] = useState(null);
   const [newStructure, setNewStructure] = useState({
+    company: '',
     name: '',
     basicSalary: 30000,
     hra: 12000,
@@ -70,27 +84,49 @@ export const PayrollPayslips = () => {
     overtimeMultiplier: 1.5,
   });
 
-  // Helper to extract array safely from various backend shapes
+  // Safe helper to extract arrays
   const toList = (res) => extractApiData(res, 'runs', 'structures', 'payslips', 'employees', 'lineItems', 'data');
 
-  // Load Masters
+  // Load Master Data (Companies, Branches, Employees)
   useEffect(() => {
     const fetchMasters = async () => {
+      setLoadingMasters(true);
       try {
         const [cRes, bRes, eRes] = await Promise.allSettled([
           masterApi.getCompanies(),
           masterApi.getBranches(),
-          employeeApi.getEmployees({ limit: 100 }),
+          employeeApi.getEmployees({ limit: 200 }),
         ]);
-        if (cRes.status === 'fulfilled') setCompanies(toList(cRes.value));
-        if (bRes.status === 'fulfilled') setBranches(toList(bRes.value));
-        if (eRes.status === 'fulfilled') setEmployees(toList(eRes.value));
+
+        const compList = cRes.status === 'fulfilled' ? toList(cRes.value) : [];
+        const branchList = bRes.status === 'fulfilled' ? toList(bRes.value) : [];
+        const empList = eRes.status === 'fulfilled' ? toList(eRes.value) : [];
+
+        setCompanies(compList);
+        setBranches(branchList);
+        setEmployees(empList);
+
+        // Auto-select first company or logged-in user's company
+        const defaultCompId = user?.company?._id || user?.company || compList[0]?._id || '';
+        setSelectedCompanyId(defaultCompId);
+        setNewStructure((prev) => ({ ...prev, company: defaultCompId }));
       } catch (e) {
         console.error('Master data load error:', e);
+      } finally {
+        setLoadingMasters(false);
       }
     };
     fetchMasters();
-  }, []);
+  }, [user]);
+
+  // Branches filtered by selected company
+  const filteredBranches = useMemo(() => {
+    if (!selectedCompanyId) return branches;
+    return branches.filter((b) => {
+      const bCompId = b.company?._id || b.company;
+      return bCompId === selectedCompanyId;
+    });
+  }, [branches, selectedCompanyId]);
 
   // --------------------------------------------------------------------------
   // 1. BACKEND API: Payroll Runs
@@ -102,11 +138,13 @@ export const PayrollPayslips = () => {
       const list = toList(res);
       setRuns(list);
       runsRef.current = list;
-      // Only set selectedRun if none is selected yet
-      if (list.length > 0 && !selectedRunRef.current) {
-        selectedRunRef.current = list[0];
-        setSelectedRun(list[0]);
-      }
+
+      // Select first run if none selected or previous selection no longer exists
+      setSelectedRun((prev) => {
+        if (!prev && list.length > 0) return list[0];
+        const stillExists = list.find((r) => r._id === prev?._id);
+        return stillExists || (list.length > 0 ? list[0] : null);
+      });
     } catch (err) {
       console.error('Error fetching payroll runs:', err);
       setRuns([]);
@@ -114,11 +152,14 @@ export const PayrollPayslips = () => {
     } finally {
       setLoadingRuns(false);
     }
-  }, []); // stable — no deps that change
+  }, []);
 
   // Load line items when a run is selected
   useEffect(() => {
-    if (!selectedRun?._id) return;
+    if (!selectedRun?._id) {
+      setLineItems([]);
+      return;
+    }
     const loadLineItems = async () => {
       setLoadingItems(true);
       try {
@@ -134,13 +175,12 @@ export const PayrollPayslips = () => {
     loadLineItems();
   }, [selectedRun]);
 
-  // Initiate & Calculate Monthly Payroll Run on Backend
-  const handleInitiatePayrollRun = async () => {
-    const userCompany = companies[0]?._id || user?.company?._id || user?.company;
-    const userBranch = branches[0]?._id || user?.branch?._id || user?.branch;
+  // Process / Initiate & Calculate Payroll Run
+  const handleProcessPayroll = async (e) => {
+    if (e) e.preventDefault();
 
-    if (!userCompany) {
-      showToast('No company found to initiate payroll', 'warning');
+    if (!selectedCompanyId) {
+      showToast('Please select a company to process payroll', 'warning');
       return;
     }
 
@@ -152,52 +192,88 @@ export const PayrollPayslips = () => {
 
     try {
       showToast(`Initiating payroll run for ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}...`, 'info');
-      
+
       // 1. Create run on backend
-      const createRes = await payrollApi.createPayrollRun({
-        company: userCompany,
-        branch: userBranch || undefined,
+      const payload = {
+        company: selectedCompanyId,
+        branch: selectedBranchId || undefined,
         payPeriodFrom,
         payPeriodTo,
-      });
+      };
+
+      const createRes = await payrollApi.createPayrollRun(payload);
       const runId = createRes?.data?._id || createRes?._id;
 
       if (runId) {
-        // 2. Execute calculation on backend
-        showToast('Calculating gross, attendance deductions, and net pay...', 'info');
+        showToast('Calculating attendance deductions and salary breakdown...', 'info');
         await payrollApi.calculatePayrollRun(runId);
       }
 
-      showToast(`✓ Payroll for ${MONTH_NAMES[selectedMonth - 1]} successfully calculated!`, 'success');
+      showToast(`✓ Payroll for ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear} calculated successfully!`, 'success');
+      setBatchModalOpen(false);
       await loadPayrollRuns();
     } catch (err) {
-      const msg = err.response?.data?.message || 'Failed to process payroll run';
+      const msg = err.response?.data?.message || err.message || 'Failed to process payroll run';
       showToast(msg, 'error');
     } finally {
       setProcessingRun(false);
     }
   };
 
-  // Submit & Approve Run
-  const handleApprovePayrollRun = async (runId) => {
-    setApprovingRun(true);
+  // Recalculate an existing run
+  const handleRecalculateRun = async (runId) => {
+    setProcessingRun(true);
     try {
-      // 1. Submit for approval if in DRAFT or CALCULATED
+      showToast('Recalculating run...', 'info');
+      await payrollApi.calculatePayrollRun(runId);
+      showToast('✓ Payroll recalculated successfully!', 'success');
+      await loadPayrollRuns();
+      if (selectedRun?._id === runId) {
+        const res = await payrollApi.getPayrollLineItems(runId);
+        setLineItems(toList(res));
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to recalculate', 'error');
+    } finally {
+      setProcessingRun(false);
+    }
+  };
+
+  // Approve Run
+  const handleApprovePayrollRun = async (runId) => {
+    setApprovingRunId(runId);
+    try {
       await payrollApi.submitPayrollForApproval(runId).catch(() => {});
-      
-      // 2. Approve run on backend
       await payrollApi.decidePayrollRun(runId, {
         decision: 'APPROVED',
         comments: 'Verified and approved by HR Administration',
       });
-
-      showToast('✓ Payroll Run Approved and Finalized!', 'success');
+      showToast('✓ Payroll run approved successfully!', 'success');
       await loadPayrollRuns();
     } catch (err) {
       showToast(err.response?.data?.message || 'Approval completed', 'info');
       await loadPayrollRuns();
     } finally {
-      setApprovingRun(false);
+      setApprovingRunId(null);
+    }
+  };
+
+  // Delete Draft Run
+  const handleDeleteRun = async (runId) => {
+    if (!window.confirm('Are you sure you want to delete this payroll run? This will remove all associated line items.')) return;
+    setDeletingRunId(runId);
+    try {
+      await payrollApi.deletePayrollRun(runId);
+      showToast('✓ Payroll run deleted', 'success');
+      await loadPayrollRuns();
+      if (selectedRun?._id === runId) {
+        setSelectedRun(null);
+        setLineItems([]);
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to delete run', 'error');
+    } finally {
+      setDeletingRunId(null);
     }
   };
 
@@ -206,7 +282,7 @@ export const PayrollPayslips = () => {
     setGeneratingPayslipRunId(runId);
     try {
       const res = await payrollApi.generatePayslipsForRun(runId);
-      showToast(res?.message || '✓ Payslips successfully generated!', 'success');
+      showToast(res?.message || '✓ Payslips generated successfully!', 'success');
       await loadPayslips();
       setActiveTab('payslips');
     } catch (err) {
@@ -226,11 +302,17 @@ export const PayrollPayslips = () => {
       const meRes = await payrollApi.getMyPayslips().catch(() => ({ data: [] }));
       let allPayslips = toList(meRes);
 
-      // Use ref to read runs without adding it as a dependency
-      const currentRuns = runsRef.current;
-      if (isManagerOrAdmin && currentRuns.length > 0) {
+      let targetRuns = runsRef.current;
+      if (targetRuns.length === 0) {
+        const runsRes = await payrollApi.getPayrollRuns().catch(() => ({ data: [] }));
+        targetRuns = toList(runsRes);
+        setRuns(targetRuns);
+        runsRef.current = targetRuns;
+      }
+
+      if (isManagerOrAdmin && targetRuns.length > 0) {
         const runPayslips = await Promise.allSettled(
-          currentRuns.slice(0, 5).map((r) => payrollApi.getPayslipsForRun(r._id))
+          targetRuns.map((r) => payrollApi.getPayslipsForRun(r._id))
         );
         runPayslips.forEach((p) => {
           if (p.status === 'fulfilled') {
@@ -251,7 +333,59 @@ export const PayrollPayslips = () => {
     } finally {
       setLoadingPayslips(false);
     }
-  }, [isManagerOrAdmin]); // removed `runs` dep — use runsRef instead
+  }, [isManagerOrAdmin]);
+
+  // Open Payslip Viewer with Full Line Item Breakdown
+  const handleOpenPayslipViewer = async (payslip, optionalLineItem = null) => {
+    setViewingPayslip(payslip);
+    const lineItemId = payslip?.payrollLineItem?._id || payslip?.payrollLineItem || optionalLineItem?._id;
+
+    if (optionalLineItem && optionalLineItem.earningLines) {
+      setViewingLineItem(optionalLineItem);
+      return;
+    }
+
+    if (lineItemId) {
+      setLoadingLineItemDetails(true);
+      try {
+        const res = await payrollApi.getSingleLineItem(lineItemId);
+        const itemData = res?.data || res;
+        setViewingLineItem(itemData);
+      } catch (err) {
+        console.warn('Could not fetch single line item details:', err);
+        setViewingLineItem(optionalLineItem || payslip?.payrollLineItem || null);
+      } finally {
+        setLoadingLineItemDetails(false);
+      }
+    } else {
+      setViewingLineItem(null);
+    }
+  };
+
+  // Download payslip file
+  const handleDownloadPayslip = async (payslipId) => {
+    try {
+      showToast('Retrieving payslip file...', 'info');
+      const res = await payrollApi.downloadPayslip(payslipId);
+      const fileUrl = res?.data?.fileUrl || res?.fileUrl;
+
+      if (fileUrl) {
+        if (fileUrl.startsWith('data:')) {
+          const win = window.open();
+          win.document.write(
+            `<iframe src="${fileUrl}" frameborder="0" style="border:0; top:0; left:0; bottom:0; right:0; width:100%; height:100%;" allowfullscreen></iframe>`
+          );
+        } else {
+          window.open(fileUrl, '_blank');
+        }
+        showToast('✓ Payslip opened/downloaded', 'success');
+      } else {
+        window.print();
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Error downloading payslip', 'error');
+    }
+  };
 
   // --------------------------------------------------------------------------
   // 3. BACKEND API: Salary Structures
@@ -272,26 +406,35 @@ export const PayrollPayslips = () => {
   const handleCreateSalaryStructure = async (e) => {
     e.preventDefault();
     if (!newStructure.name.trim()) {
-      showToast('Structure package name is required', 'warning');
+      showToast('Structure name is required', 'warning');
+      return;
+    }
+    const companyId = newStructure.company || selectedCompanyId || companies[0]?._id;
+    if (!companyId) {
+      showToast('Company is required for salary structure', 'warning');
       return;
     }
 
-    const companyId = companies[0]?._id || user?.company?._id || user?.company;
     setCreatingStructure(true);
     try {
+      const basic = Number(newStructure.basicSalary) || 0;
+      const hra = Number(newStructure.hra) || 0;
+      const special = Number(newStructure.specialAllowance) || 0;
+      const gross = Number(newStructure.grossMonthlyAmount) || (basic + hra + special);
+
       await payrollApi.createSalaryStructure({
         company: companyId,
-        name: newStructure.name,
-        grossMonthlyAmount: Number(newStructure.grossMonthlyAmount) || (Number(newStructure.basicSalary) + Number(newStructure.hra) + Number(newStructure.specialAllowance)),
+        name: newStructure.name.trim(),
+        grossMonthlyAmount: gross,
         overtimeMultiplier: Number(newStructure.overtimeMultiplier) || 1.5,
         earningComponents: [
-          { name: 'Basic Salary', type: 'FIXED', value: Number(newStructure.basicSalary) },
-          { name: 'House Rent Allowance (HRA)', type: 'FIXED', value: Number(newStructure.hra) },
-          { name: 'Special Allowance', type: 'FIXED', value: Number(newStructure.specialAllowance) },
+          { name: 'Basic Salary', type: 'FIXED', value: basic },
+          { name: 'House Rent Allowance (HRA)', type: 'FIXED', value: hra },
+          { name: 'Special Allowance', type: 'FIXED', value: special },
         ],
         deductionComponents: [
-          { name: 'Provident Fund (PF)', type: 'STATUTORY', statutoryType: 'PF', value: Number(newStructure.pfRate) },
-          { name: 'Professional Tax (PT)', type: 'STATUTORY', statutoryType: 'PROFESSIONAL_TAX', value: Number(newStructure.professionalTax) },
+          { name: 'Provident Fund (PF)', type: 'STATUTORY', statutoryType: 'PF', value: Number(newStructure.pfRate) || 12 },
+          { name: 'Professional Tax (PT)', type: 'STATUTORY', statutoryType: 'PROFESSIONAL_TAX', value: Number(newStructure.professionalTax) || 200 },
         ],
         isActive: true,
       });
@@ -299,6 +442,7 @@ export const PayrollPayslips = () => {
       showToast('✓ Salary Structure created successfully!', 'success');
       setStructureModalOpen(false);
       setNewStructure({
+        company: companyId,
         name: '',
         basicSalary: 30000,
         hra: 12000,
@@ -316,6 +460,20 @@ export const PayrollPayslips = () => {
     }
   };
 
+  const handleDeleteStructure = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this salary structure?')) return;
+    setDeletingStructureId(id);
+    try {
+      await payrollApi.deleteSalaryStructure(id);
+      showToast('✓ Salary Structure deleted', 'success');
+      await loadSalaryStructures();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Cannot delete assigned structure', 'error');
+    } finally {
+      setDeletingStructureId(null);
+    }
+  };
+
   // Initial Load on Tab Change
   useEffect(() => {
     if (activeTab === 'runs') {
@@ -325,22 +483,52 @@ export const PayrollPayslips = () => {
     } else if (activeTab === 'structures') {
       loadSalaryStructures();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]); // Only re-run when tab actually changes — callbacks are stable now
+  }, [activeTab, loadPayrollRuns, loadPayslips, loadSalaryStructures]);
 
-  // Overall KPIs
+  // Dynamic KPI Aggregations from Live Data
   const totalGrossSum = runs.reduce((acc, r) => acc + (r.summary?.totalGross || 0), 0);
   const totalNetSum = runs.reduce((acc, r) => acc + (r.summary?.totalNetPay || 0), 0);
-  const totalEmpsProcessed = runs.reduce((acc, r) => acc + (r.summary?.calculatedCount || 0), 0);
+  const totalDeductionsSum = runs.reduce((acc, r) => acc + (r.summary?.totalDeductions || 0), 0);
+  const totalStaffCount = runs.reduce((acc, r) => acc + (r.summary?.calculatedCount || 0), 0);
 
-  // Print Payslip
-  const handlePrintPayslip = () => {
-    window.print();
-  };
+  // Filtered runs for search
+  const filteredRuns = useMemo(() => {
+    if (!runSearchQuery.trim()) return runs;
+    const q = runSearchQuery.toLowerCase();
+    return runs.filter((r) => {
+      const compName = r.company?.name?.toLowerCase() || '';
+      const branchName = r.branch?.name?.toLowerCase() || '';
+      const status = r.status?.toLowerCase() || '';
+      return compName.includes(q) || branchName.includes(q) || status.includes(q);
+    });
+  }, [runs, runSearchQuery]);
+
+  // Filtered payslips for search
+  const filteredPayslips = useMemo(() => {
+    if (!payslipSearchQuery.trim()) return payslipsList;
+    const q = payslipSearchQuery.toLowerCase();
+    return payslipsList.filter((ps) => {
+      const name = (ps.employee?.basicInfo?.fullName || ps.employee?.name || '').toLowerCase();
+      const code = (ps.employee?.basicInfo?.employeeCode || ps.employee?.employeeCode || '').toLowerCase();
+      return name.includes(q) || code.includes(q);
+    });
+  }, [payslipsList, payslipSearchQuery]);
+
+  // Active Company details for payslip header
+  const activeCompany = useMemo(() => {
+    if (viewingLineItem?.payrollRun?.company) {
+      const cId = viewingLineItem.payrollRun.company._id || viewingLineItem.payrollRun.company;
+      return companies.find((c) => c._id === cId) || viewingLineItem.payrollRun.company;
+    }
+    if (selectedRun?.company) {
+      return companies.find((c) => c._id === selectedRun.company?._id) || selectedRun.company;
+    }
+    return companies[0] || user?.company || null;
+  }, [viewingLineItem, selectedRun, companies, user]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: 'Inter, system-ui, sans-serif' }}>
-      
+
       {/* 1. Header Bar */}
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -350,7 +538,7 @@ export const PayrollPayslips = () => {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{ background: '#f0fdf4', padding: 7, borderRadius: 8, color: '#16a34a', display: 'flex' }}>
-              <DollarSign size={20} />
+              <DollarSign size={22} />
             </div>
             <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#0f172a' }}>
               Payroll &amp; Payslips
@@ -361,7 +549,7 @@ export const PayrollPayslips = () => {
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <Button
             variant="secondary"
             icon={RefreshCw}
@@ -378,10 +566,9 @@ export const PayrollPayslips = () => {
             <Button
               variant="primary"
               icon={Plus}
-              loading={processingRun}
-              onClick={handleInitiatePayrollRun}
+              onClick={() => setBatchModalOpen(true)}
             >
-              Process {MONTH_NAMES[selectedMonth - 1]} Payroll
+              Process Payroll Batch
             </Button>
           )}
 
@@ -397,12 +584,14 @@ export const PayrollPayslips = () => {
         </div>
       </div>
 
-      {/* 2. Simple KPI Summary Cards */}
+      {/* 2. KPI Summary Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
         <div style={{ background: '#fff', padding: '14px 18px', borderRadius: 10, border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ background: '#16a34a15', color: '#16a34a', padding: 10, borderRadius: 8 }}><DollarSign size={20} /></div>
+          <div style={{ background: '#16a34a15', color: '#16a34a', padding: 10, borderRadius: 8 }}>
+            <DollarSign size={20} />
+          </div>
           <div>
-            <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#0f172a' }}>
+            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a' }}>
               ₹{totalNetSum.toLocaleString('en-IN')}
             </div>
             <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Total Net Outlay</div>
@@ -410,40 +599,46 @@ export const PayrollPayslips = () => {
         </div>
 
         <div style={{ background: '#fff', padding: '14px 18px', borderRadius: 10, border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ background: '#0284c715', color: '#0284c7', padding: 10, borderRadius: 8 }}><Users size={20} /></div>
+          <div style={{ background: '#dc262615', color: '#dc2626', padding: 10, borderRadius: 8 }}>
+            <FileSpreadsheet size={20} />
+          </div>
           <div>
-            <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#0f172a' }}>
-              {runs.length} Runs
+            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#dc2626' }}>
+              -₹{totalDeductionsSum.toLocaleString('en-IN')}
             </div>
-            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Monthly Batches</div>
+            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Total Deductions (Attn/PF/PT)</div>
           </div>
         </div>
 
         <div style={{ background: '#fff', padding: '14px 18px', borderRadius: 10, border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ background: '#8b5cf615', color: '#8b5cf6', padding: 10, borderRadius: 8 }}><FileText size={20} /></div>
+          <div style={{ background: '#0284c715', color: '#0284c7', padding: 10, borderRadius: 8 }}>
+            <Users size={20} />
+          </div>
           <div>
-            <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#0f172a' }}>
+            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a' }}>
+              {runs.length} Runs
+            </div>
+            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Batches ({totalStaffCount} Line Items)</div>
+          </div>
+        </div>
+
+        <div style={{ background: '#fff', padding: '14px 18px', borderRadius: 10, border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ background: '#8b5cf615', color: '#8b5cf6', padding: 10, borderRadius: 8 }}>
+            <FileText size={20} />
+          </div>
+          <div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a' }}>
               {payslipsList.length} Payslips
             </div>
             <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Generated Digital Slips</div>
           </div>
         </div>
-
-        <div style={{ background: '#fff', padding: '14px 18px', borderRadius: 10, border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ background: '#f59e0b15', color: '#f59e0b', padding: 10, borderRadius: 8 }}><ShieldCheck size={20} /></div>
-          <div>
-            <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#0f172a' }}>
-              {structures.length} Packages
-            </div>
-            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Configured Structures</div>
-          </div>
-        </div>
       </div>
 
-      {/* 3. Simple Tab Switcher */}
+      {/* 3. Navigation Tabs */}
       <div style={{
         display: 'flex', gap: 6, background: '#fff', padding: '6px',
-        borderRadius: 10, border: '1px solid var(--border-color, #e2e8f0)', width: 'fit-content'
+        borderRadius: 10, border: '1px solid #e2e8f0', width: 'fit-content'
       }}>
         <button
           onClick={() => setActiveTab('runs')}
@@ -452,7 +647,7 @@ export const PayrollPayslips = () => {
             borderRadius: 7, border: 'none', fontSize: '0.84rem', fontWeight: 600,
             cursor: 'pointer', transition: 'all 0.15s',
             background: activeTab === 'runs' ? 'var(--primary)' : 'transparent',
-            color: activeTab === 'runs' ? '#fff' : 'var(--text-muted, #64748b)',
+            color: activeTab === 'runs' ? '#fff' : '#64748b',
           }}
         >
           <DollarSign size={15} /> Payroll Runs ({runs.length})
@@ -465,7 +660,7 @@ export const PayrollPayslips = () => {
             borderRadius: 7, border: 'none', fontSize: '0.84rem', fontWeight: 600,
             cursor: 'pointer', transition: 'all 0.15s',
             background: activeTab === 'payslips' ? 'var(--primary)' : 'transparent',
-            color: activeTab === 'payslips' ? '#fff' : 'var(--text-muted, #64748b)',
+            color: activeTab === 'payslips' ? '#fff' : '#64748b',
           }}
         >
           <FileText size={15} /> Payslips ({payslipsList.length})
@@ -478,7 +673,7 @@ export const PayrollPayslips = () => {
             borderRadius: 7, border: 'none', fontSize: '0.84rem', fontWeight: 600,
             cursor: 'pointer', transition: 'all 0.15s',
             background: activeTab === 'structures' ? 'var(--primary)' : 'transparent',
-            color: activeTab === 'structures' ? '#fff' : 'var(--text-muted, #64748b)',
+            color: activeTab === 'structures' ? '#fff' : '#64748b',
           }}
         >
           <Building2 size={15} /> Salary Structures ({structures.length})
@@ -486,73 +681,51 @@ export const PayrollPayslips = () => {
       </div>
 
       {/* ================================================================== */}
-      {/* TAB 1: PAYROLL RUNS */}
+      {/* TAB 1: PAYROLL RUNS & BREAKDOWN */}
       {/* ================================================================== */}
       {activeTab === 'runs' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          
-          {/* Period Selector Bar */}
-          {isManagerOrAdmin && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 12, background: '#f8fafc',
-              padding: '10px 16px', borderRadius: 8, border: '1px solid #e2e8f0', flexWrap: 'wrap'
-            }}>
-              <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#475569' }}>Select Pay Period:</span>
-              <select
-                value={selectedMonth}
-                onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem' }}
-              >
-                {MONTH_NAMES.map((name, i) => (
-                  <option key={i + 1} value={i + 1}>{name}</option>
-                ))}
-              </select>
 
-              <select
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(Number(e.target.value))}
-                style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem' }}
-              >
-                {[now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1].map((y) => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
-              </select>
-
-              <Button
-                variant="primary"
-                size="sm"
-                icon={Plus}
-                loading={processingRun}
-                onClick={handleInitiatePayrollRun}
-                style={{ marginLeft: 'auto' }}
-              >
-                Process {MONTH_NAMES[selectedMonth - 1]} Batch
-              </Button>
-            </div>
-          )}
-
-          {/* Runs Table */}
+          {/* Runs Table Card */}
           <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-            <div style={{ padding: '12px 18px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>
-                Payroll Runs History
-              </h3>
-              <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
-                {runs.length} Monthly Runs Registered
-              </span>
+            <div style={{ padding: '12px 18px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>
+                  Payroll Runs History
+                </h3>
+                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                  Click any row to inspect employee salary calculation breakdown
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ position: 'relative', width: 220 }}>
+                  <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: '#94a3b8' }} />
+                  <input
+                    type="text"
+                    placeholder="Search company, branch, status..."
+                    value={runSearchQuery}
+                    onChange={(e) => setRunSearchQuery(e.target.value)}
+                    style={{
+                      width: '100%', padding: '6px 10px 6px 30px', borderRadius: 6,
+                      border: '1px solid #cbd5e1', fontSize: '0.78rem', boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+              </div>
             </div>
 
             {loadingRuns ? (
               <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
                 <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 8px' }} />
-                <div>Loading live payroll runs...</div>
+                <div>Loading live payroll runs from backend...</div>
               </div>
-            ) : runs.length === 0 ? (
+            ) : filteredRuns.length === 0 ? (
               <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
                 <AlertCircle size={32} color="#94a3b8" style={{ margin: '0 auto 8px' }} />
-                <div style={{ fontWeight: 600 }}>No payroll runs created yet</div>
+                <div style={{ fontWeight: 600 }}>No payroll runs found</div>
                 <div style={{ fontSize: '0.8rem', marginTop: 4 }}>
-                  Click &ldquo;Process Payroll&rdquo; above to calculate salary for this month.
+                  {isManagerOrAdmin ? 'Click "Process Payroll Batch" to create and calculate a payroll run.' : 'No payroll runs have been published yet.'}
                 </div>
               </div>
             ) : (
@@ -561,20 +734,23 @@ export const PayrollPayslips = () => {
                   <thead>
                     <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', textAlign: 'left' }}>
                       <th style={{ padding: '10px 16px' }}>Pay Period</th>
+                      <th style={{ padding: '10px 16px' }}>Company &amp; Branch</th>
                       <th style={{ padding: '10px 16px' }}>Status</th>
                       <th style={{ padding: '10px 16px' }}>Gross Outlay</th>
-                      <th style={{ padding: '10px 16px' }}>Total Deductions</th>
-                      <th style={{ padding: '10px 16px' }}>Net Salary</th>
-                      <th style={{ padding: '10px 16px' }}>Employees</th>
+                      <th style={{ padding: '10px 16px' }}>Deductions</th>
+                      <th style={{ padding: '10px 16px' }}>Net Payable</th>
+                      <th style={{ padding: '10px 16px' }}>Staff</th>
                       <th style={{ padding: '10px 16px', textAlign: 'right' }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {runs.map((r) => {
+                    {filteredRuns.map((r) => {
                       const isSelected = selectedRun?._id === r._id;
                       const fromDate = r.payPeriodFrom ? new Date(r.payPeriodFrom).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }) : '—';
                       const status = r.status || 'DRAFT';
                       const isApproved = status === 'APPROVED';
+                      const compName = r.company?.name || r.company?.code || 'Corporate';
+                      const branchName = r.branch?.name || 'All Branches';
 
                       return (
                         <tr
@@ -591,7 +767,11 @@ export const PayrollPayslips = () => {
                             {fromDate}
                           </td>
                           <td style={{ padding: '12px 16px' }}>
-                            <Badge variant={isApproved ? 'success' : status === 'CALCULATED' ? 'primary' : 'secondary'}>
+                            <div style={{ fontWeight: 600, color: '#1e293b' }}>{compName}</div>
+                            <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{branchName}</div>
+                          </td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <Badge variant={isApproved ? 'success' : status === 'CALCULATED' ? 'primary' : status === 'SUBMITTED' ? 'warning' : 'secondary'}>
                               {status}
                             </Badge>
                           </td>
@@ -608,15 +788,26 @@ export const PayrollPayslips = () => {
                             {r.summary?.calculatedCount || (r.lineItems?.length || 1)} Staff
                           </td>
                           <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                              {!isApproved && (
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  loading={processingRun}
+                                  onClick={(e) => { e.stopPropagation(); handleRecalculateRun(r._id); }}
+                                  title="Recalculate salary line items"
+                                >
+                                  Recalculate
+                                </Button>
+                              )}
                               {!isApproved && isManagerOrAdmin && (
                                 <Button
                                   variant="primary"
                                   size="sm"
-                                  loading={approvingRun}
+                                  loading={approvingRunId === r._id}
                                   onClick={(e) => { e.stopPropagation(); handleApprovePayrollRun(r._id); }}
                                 >
-                                  Approve Run
+                                  Approve
                                 </Button>
                               )}
                               {isApproved && (
@@ -629,6 +820,16 @@ export const PayrollPayslips = () => {
                                   Generate Payslips
                                 </Button>
                               )}
+                              {!isApproved && isManagerOrAdmin && (
+                                <Button
+                                  variant="danger"
+                                  size="sm"
+                                  icon={Trash2}
+                                  loading={deletingRunId === r._id}
+                                  onClick={(e) => { e.stopPropagation(); handleDeleteRun(r._id); }}
+                                  title="Delete draft run"
+                                />
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -640,17 +841,20 @@ export const PayrollPayslips = () => {
             )}
           </div>
 
-          {/* Selected Run Line Items */}
+          {/* Selected Run Line Items Breakdown */}
           {selectedRun && (
             <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-              <div style={{ padding: '12px 18px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc' }}>
+              <div style={{ padding: '12px 18px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', flexWrap: 'wrap', gap: 10 }}>
                 <div>
                   <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 700, color: '#0f172a' }}>
-                    Employee Breakdown for {new Date(selectedRun.payPeriodFrom).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
+                    Employee Breakdown &bull; {selectedRun.payPeriodFrom ? new Date(selectedRun.payPeriodFrom).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }) : 'Pay Period'}
                   </h4>
                   <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                    Status: <strong>{selectedRun.status}</strong> &bull; Net Total: <strong>₹{(selectedRun.summary?.totalNetPay || 0).toLocaleString('en-IN')}</strong>
+                    Company: <strong>{selectedRun.company?.name || 'Main'}</strong> &bull; Status: <strong>{selectedRun.status}</strong> &bull; Net Outlay: <strong>₹{(selectedRun.summary?.totalNetPay || 0).toLocaleString('en-IN')}</strong>
                   </span>
+                </div>
+                <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569' }}>
+                  {lineItems.length} Records Calculated
                 </div>
               </div>
 
@@ -661,7 +865,7 @@ export const PayrollPayslips = () => {
                 </div>
               ) : lineItems.length === 0 ? (
                 <div style={{ padding: 24, textAlign: 'center', color: '#64748b', fontSize: '0.82rem' }}>
-                  No breakdown items found for this run.
+                  No breakdown items found for this run. Click &ldquo;Recalculate&rdquo; above.
                 </div>
               ) : (
                 <div style={{ overflowX: 'auto' }}>
@@ -672,35 +876,65 @@ export const PayrollPayslips = () => {
                         <th style={{ padding: '9px 14px' }}>Department</th>
                         <th style={{ padding: '9px 14px' }}>Work Days</th>
                         <th style={{ padding: '9px 14px' }}>Gross Salary</th>
-                        <th style={{ padding: '9px 14px' }}>Deductions (Attn/PF/PT)</th>
+                        <th style={{ padding: '9px 14px' }}>Attn Deduction</th>
+                        <th style={{ padding: '9px 14px' }}>Statutory (PF/PT)</th>
                         <th style={{ padding: '9px 14px' }}>Net Payable</th>
+                        <th style={{ padding: '9px 14px', textAlign: 'right' }}>Slip</th>
                       </tr>
                     </thead>
                     <tbody>
                       {lineItems.map((item) => {
-                        const empName = item.employee?.basicInfo?.fullName || item.employee?.name || 'Employee';
+                        const empName = item.employee?.basicInfo?.fullName || item.employee?.name || user?.name || 'Staff Member';
                         const empCode = item.employee?.basicInfo?.employeeCode || item.employee?.employeeCode || 'EMP';
-                        const dept = item.employee?.employmentInfo?.department?.name || item.employee?.department?.name || 'Operations';
+                        const dept = item.employee?.employmentInfo?.department?.name || item.employee?.department?.name || 'General Operations';
+                        const desig = item.employee?.employmentInfo?.designation?.name || item.employee?.designation?.name || 'Staff';
+
+                        const pfAmount = item.statutoryDeductionLines?.find((d) => d.name?.includes('PF'))?.amount || 0;
+                        const ptAmount = item.statutoryDeductionLines?.find((d) => d.name?.includes('PT') || d.name?.includes('Tax'))?.amount || 0;
+                        const statSum = pfAmount + ptAmount;
 
                         return (
                           <tr key={item._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                             <td style={{ padding: '10px 14px' }}>
                               <div style={{ fontWeight: 600, color: '#0f172a' }}>{empName}</div>
-                              <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{empCode}</div>
+                              <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{empCode} &bull; {desig}</div>
                             </td>
                             <td style={{ padding: '10px 14px', color: '#475569' }}>{dept}</td>
                             <td style={{ padding: '10px 14px' }}>
-                              <span style={{ color: '#16a34a', fontWeight: 600 }}>{item.presentDays || 0} Present</span>
+                              <span style={{ color: '#16a34a', fontWeight: 600 }}>{item.presentDays ?? 0} Present</span>
                               <span style={{ color: '#64748b', fontSize: '0.72rem' }}> / {item.totalWorkingDays || 30} Days</span>
+                              {item.absentDays > 0 && (
+                                <div style={{ color: '#dc2626', fontSize: '0.7rem' }}>{item.absentDays} Absent</div>
+                              )}
                             </td>
                             <td style={{ padding: '10px 14px', fontWeight: 600 }}>
                               ₹{(item.grossEarnings || 0).toLocaleString('en-IN')}
                             </td>
-                            <td style={{ padding: '10px 14px', color: '#dc2626' }}>
-                              -₹{(item.totalDeductions || 0).toLocaleString('en-IN')}
+                            <td style={{ padding: '10px 14px', color: item.attendanceDeductionAmount > 0 ? '#dc2626' : '#64748b' }}>
+                              -₹{(item.attendanceDeductionAmount || 0).toLocaleString('en-IN')}
+                            </td>
+                            <td style={{ padding: '10px 14px', color: statSum > 0 ? '#dc2626' : '#64748b' }}>
+                              -₹{statSum.toLocaleString('en-IN')}
                             </td>
                             <td style={{ padding: '10px 14px', fontWeight: 700, color: '#16a34a', fontSize: '0.9rem' }}>
                               ₹{(item.netPay || 0).toLocaleString('en-IN')}
+                            </td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                icon={Eye}
+                                onClick={() => handleOpenPayslipViewer({
+                                  _id: item._id,
+                                  payrollRun: selectedRun,
+                                  payrollLineItem: item,
+                                  employee: item.employee,
+                                  payPeriodFrom: selectedRun.payPeriodFrom,
+                                  payPeriodTo: selectedRun.payPeriodTo,
+                                }, item)}
+                              >
+                                View Slip
+                              </Button>
                             </td>
                           </tr>
                         );
@@ -715,22 +949,39 @@ export const PayrollPayslips = () => {
       )}
 
       {/* ================================================================== */}
-      {/* TAB 2: PAYSLIPS */}
+      {/* TAB 2: DIGITAL PAYSLIPS */}
       {/* ================================================================== */}
       {activeTab === 'payslips' && (
         <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-          <div style={{ padding: '14px 18px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ padding: '14px 18px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
             <div>
               <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>
                 Digital Salary Payslips
               </h3>
               <p style={{ margin: '2px 0 0', fontSize: '0.76rem', color: '#64748b' }}>
-                Generated from verified backend payroll runs. View or print high-resolution copies.
+                Generated from verified backend payroll runs. View, print, or download electronic copies.
               </p>
             </div>
-            <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--primary)', background: 'var(--primary-light)', padding: '4px 10px', borderRadius: 20 }}>
-              {payslipsList.length} Payslips Available
-            </span>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ position: 'relative', width: 220 }}>
+                <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: '#94a3b8' }} />
+                <input
+                  type="text"
+                  placeholder="Search employee name or code..."
+                  value={payslipSearchQuery}
+                  onChange={(e) => setPayslipSearchQuery(e.target.value)}
+                  style={{
+                    width: '100%', padding: '6px 10px 6px 30px', borderRadius: 6,
+                    border: '1px solid #cbd5e1', fontSize: '0.78rem', boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--primary)', background: '#eff6ff', padding: '4px 10px', borderRadius: 20 }}>
+                {filteredPayslips.length} Payslips Available
+              </span>
+            </div>
           </div>
 
           {loadingPayslips ? (
@@ -738,12 +989,12 @@ export const PayrollPayslips = () => {
               <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 8px' }} />
               <div>Loading live payslips...</div>
             </div>
-          ) : payslipsList.length === 0 ? (
+          ) : filteredPayslips.length === 0 ? (
             <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
               <FileText size={32} color="#94a3b8" style={{ margin: '0 auto 8px' }} />
               <div style={{ fontWeight: 600 }}>No payslips generated yet</div>
               <div style={{ fontSize: '0.8rem', marginTop: 4 }}>
-                Approve a payroll run and click &ldquo;Generate Payslips&rdquo; in the Payroll Runs tab.
+                Approve an active payroll run and click &ldquo;Generate Payslips&rdquo; in the Payroll Runs tab.
               </div>
             </div>
           ) : (
@@ -761,13 +1012,13 @@ export const PayrollPayslips = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {payslipsList.map((ps) => {
+                  {filteredPayslips.map((ps) => {
                     const empName = ps.employee?.basicInfo?.fullName || ps.employee?.name || user?.name || 'Employee';
-                    const empCode = ps.employee?.basicInfo?.employeeCode || ps.employee?.employeeCode || 'EMP-3667';
-                    const periodStr = ps.payPeriodFrom ? new Date(ps.payPeriodFrom).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }) : 'September 2026';
-                    const gross = ps.payrollLineItem?.grossEarnings || 45000;
-                    const deductions = ps.payrollLineItem?.totalDeductions || 42575;
-                    const netPay = ps.payrollLineItem?.netPay || 2425;
+                    const empCode = ps.employee?.basicInfo?.employeeCode || ps.employee?.employeeCode || 'EMP';
+                    const periodStr = ps.payPeriodFrom ? new Date(ps.payPeriodFrom).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }) : 'Pay Period';
+                    const gross = ps.payrollLineItem?.grossEarnings || 0;
+                    const deductions = ps.payrollLineItem?.totalDeductions || 0;
+                    const netPay = ps.payrollLineItem?.netPay || 0;
 
                     return (
                       <tr key={ps._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
@@ -787,14 +1038,23 @@ export const PayrollPayslips = () => {
                           <Badge variant="success">GENERATED</Badge>
                         </td>
                         <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            icon={Eye}
-                            onClick={() => setViewingPayslip(ps)}
-                          >
-                            View Payslip
-                          </Button>
+                          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              icon={Eye}
+                              onClick={() => handleOpenPayslipViewer(ps)}
+                            >
+                              View Slip
+                            </Button>
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              icon={Download}
+                              onClick={() => handleDownloadPayslip(ps._id)}
+                              title="Download payslip file"
+                            />
+                          </div>
                         </td>
                       </tr>
                     );
@@ -830,14 +1090,14 @@ export const PayrollPayslips = () => {
           {loadingStructures ? (
             <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
               <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 8px' }} />
-              <div>Loading salary structures...</div>
+              <div>Loading salary structures from backend...</div>
             </div>
           ) : structures.length === 0 ? (
             <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
               <AlertCircle size={32} color="#94a3b8" style={{ margin: '0 auto 8px' }} />
               <div style={{ fontWeight: 600 }}>No salary structures configured</div>
               <div style={{ fontSize: '0.8rem', marginTop: 4 }}>
-                Click &ldquo;New Structure&rdquo; to define a salary package.
+                Click &ldquo;New Structure&rdquo; to define a salary package for your organization.
               </div>
             </div>
           ) : (
@@ -848,15 +1108,17 @@ export const PayrollPayslips = () => {
                     <th style={{ padding: '10px 16px' }}>Structure Name</th>
                     <th style={{ padding: '10px 16px' }}>Monthly Gross</th>
                     <th style={{ padding: '10px 16px' }}>Basic Salary</th>
-                    <th style={{ padding: '10px 16px' }}>Allowances (HRA / Special)</th>
+                    <th style={{ padding: '10px 16px' }}>Allowances</th>
                     <th style={{ padding: '10px 16px' }}>Statutory Deductions</th>
                     <th style={{ padding: '10px 16px' }}>Status</th>
+                    <th style={{ padding: '10px 16px', textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {structures.map((s) => {
                     const basic = s.earningComponents?.find((c) => c.name?.toLowerCase().includes('basic'))?.value || 0;
                     const others = (s.earningComponents || []).filter((c) => !c.name?.toLowerCase().includes('basic')).map((c) => `${c.name}: ₹${c.value}`).join(', ');
+                    const statutory = (s.deductionComponents || []).map((d) => `${d.name} (${d.value}${d.statutoryType === 'PF' ? '%' : '₹'})`).join(' • ') || 'None';
 
                     return (
                       <tr key={s._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
@@ -874,13 +1136,25 @@ export const PayrollPayslips = () => {
                         </td>
                         <td style={{ padding: '12px 16px' }}>
                           <span style={{ background: '#fee2e2', color: '#dc2626', padding: '2px 7px', borderRadius: 4, fontSize: '0.72rem', fontWeight: 600 }}>
-                            PF 12% &bull; PT ₹200
+                            {statutory}
                           </span>
                         </td>
                         <td style={{ padding: '12px 16px' }}>
                           <Badge variant={s.isActive !== false ? 'success' : 'secondary'}>
                             {s.isActive !== false ? 'ACTIVE' : 'INACTIVE'}
                           </Badge>
+                        </td>
+                        <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                          {isManagerOrAdmin && (
+                            <Button
+                              variant="danger"
+                              size="sm"
+                              icon={Trash2}
+                              loading={deletingStructureId === s._id}
+                              onClick={() => handleDeleteStructure(s._id)}
+                              title="Delete structure"
+                            />
+                          )}
                         </td>
                       </tr>
                     );
@@ -893,138 +1167,275 @@ export const PayrollPayslips = () => {
       )}
 
       {/* ================================================================== */}
-      {/* 4. CLEAN PAYSLIP VIEWER MODAL */}
+      {/* 4. MODAL: PROCESS PAYROLL BATCH (DYNAMIC COMPANY & BRANCH) */}
+      {/* ================================================================== */}
+      {batchModalOpen && (
+        <Modal
+          isOpen={true}
+          onClose={() => setBatchModalOpen(false)}
+          title="Process Monthly Payroll Batch"
+          maxWidth="520px"
+        >
+          <form onSubmit={handleProcessPayroll} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div>
+              <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                Company *
+              </label>
+              <select
+                value={selectedCompanyId}
+                onChange={(e) => {
+                  setSelectedCompanyId(e.target.value);
+                  setSelectedBranchId('');
+                }}
+                required
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+              >
+                {companies.map((c) => (
+                  <option key={c._id} value={c._id}>{c.name} ({c.code || 'CORP'})</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                Branch (Optional)
+              </label>
+              <select
+                value={selectedBranchId}
+                onChange={(e) => setSelectedBranchId(e.target.value)}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+              >
+                <option value="">All Branches in Company</option>
+                {filteredBranches.map((b) => (
+                  <option key={b._id} value={b._id}>{b.name} ({b.code || 'BR'})</option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Month *</label>
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                >
+                  {MONTH_NAMES.map((name, i) => (
+                    <option key={i + 1} value={i + 1}>{name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Year *</label>
+                <select
+                  value={selectedYear}
+                  onChange={(e) => setSelectedYear(Number(e.target.value))}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                >
+                  {[now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1].map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div style={{ background: '#f8fafc', padding: 12, borderRadius: 6, border: '1px solid #e2e8f0', fontSize: '0.78rem', color: '#475569' }}>
+              <strong>Execution Note:</strong> This will create a fresh draft run for {MONTH_NAMES[selectedMonth - 1]} {selectedYear} on the backend, pull attendance data for active staff, apply statutory deductions (PF &amp; PT), and calculate final net pay.
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+              <Button variant="secondary" onClick={() => setBatchModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="primary" type="submit" loading={processingRun}>
+                Calculate &amp; Run Batch
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ================================================================== */}
+      {/* 5. MODAL: CLEAN DYNAMIC PAYSLIP VIEWER */}
       {/* ================================================================== */}
       {viewingPayslip && (
         <Modal
           isOpen={true}
-          onClose={() => setViewingPayslip(null)}
+          onClose={() => { setViewingPayslip(null); setViewingLineItem(null); }}
           title="Digital Salary Payslip"
-          maxWidth="720px"
+          maxWidth="740px"
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {/* Action Bar */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <Button variant="primary" icon={Printer} onClick={handlePrintPayslip}>
+              <Button variant="secondary" icon={Printer} onClick={() => window.print()}>
                 Print / Save PDF
               </Button>
+              {viewingPayslip._id && (
+                <Button variant="primary" icon={Download} onClick={() => handleDownloadPayslip(viewingPayslip._id)}>
+                  Download File
+                </Button>
+              )}
             </div>
 
-            {/* Printable Payslip Card */}
-            <div id="printable-payslip" style={{
-              background: '#fff', border: '1px solid #cbd5e1', borderRadius: 8,
-              padding: 24, display: 'flex', flexDirection: 'column', gap: 16
-            }}>
-              {/* Company Header */}
-              <div style={{ borderBottom: '2px solid var(--primary)', paddingBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <div style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--primary)' }}>
-                    TIE TECHNOLOGIES PVT LTD
-                  </div>
-                  <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
-                    5th Floor, Trade Center, Ahmedabad, Gujarat &bull; contact@tietechnologies.com
-                  </div>
-                  <div style={{ fontSize: '0.86rem', fontWeight: 700, marginTop: 4, color: '#0f172a' }}>
-                    Salary Slip for {viewingPayslip.payPeriodFrom ? new Date(viewingPayslip.payPeriodFrom).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }) : 'September 2026'}
-                  </div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <Badge variant="success">CONFIRMED PAID</Badge>
-                  <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4 }}>
-                    Date: {new Date().toLocaleDateString('en-IN')}
-                  </div>
-                </div>
+            {loadingLineItemDetails ? (
+              <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
+                <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 8px' }} />
+                <div>Loading itemized salary details...</div>
               </div>
-
-              {/* Employee Meta Grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10, background: '#f8fafc', padding: 12, borderRadius: 6, fontSize: '0.78rem' }}>
-                <div><strong>Employee Name:</strong> {viewingPayslip.employee?.basicInfo?.fullName || viewingPayslip.employee?.name || user?.name}</div>
-                <div><strong>Employee Code:</strong> {viewingPayslip.employee?.basicInfo?.employeeCode || viewingPayslip.employee?.employeeCode || 'EMP-3667'}</div>
-                <div><strong>Department:</strong> Management &amp; Technical Operations</div>
-                <div><strong>Designation:</strong> Staff Lead</div>
-                <div><strong>Pay Mode:</strong> Direct Bank Transfer</div>
-                <div><strong>Status:</strong> Approved &amp; Processed</div>
-              </div>
-
-              {/* Earnings & Deductions Tables */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                {/* Earnings */}
-                <div style={{ border: '1px solid #e2e8f0', borderRadius: 6, overflow: 'hidden' }}>
-                  <div style={{ background: '#f0fdf4', padding: '8px 12px', fontWeight: 700, fontSize: '0.82rem', color: '#166534' }}>
-                    Earnings
-                  </div>
-                  <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8, fontSize: '0.8rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Basic Salary:</span>
-                      <strong>₹25,000</strong>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>House Rent Allowance (HRA):</span>
-                      <strong>₹12,000</strong>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Special Allowance:</span>
-                      <strong>₹8,000</strong>
-                    </div>
-                    <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 6, display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#166534' }}>
-                      <span>Total Gross:</span>
-                      <span>₹{(viewingPayslip.payrollLineItem?.grossEarnings || 45000).toLocaleString('en-IN')}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Deductions */}
-                <div style={{ border: '1px solid #e2e8f0', borderRadius: 6, overflow: 'hidden' }}>
-                  <div style={{ background: '#fef2f2', padding: '8px 12px', fontWeight: 700, fontSize: '0.82rem', color: '#991b1b' }}>
-                    Deductions
-                  </div>
-                  <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8, fontSize: '0.8rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Attendance / Shortfall:</span>
-                      <span>₹39,375</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Provident Fund (PF):</span>
-                      <span>₹3,000</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Professional Tax (PT):</span>
-                      <span>₹200</span>
-                    </div>
-                    <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 6, display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#dc2626' }}>
-                      <span>Total Deductions:</span>
-                      <span>₹{(viewingPayslip.payrollLineItem?.totalDeductions || 42575).toLocaleString('en-IN')}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Net Pay Callout */}
-              <div style={{
-                background: 'var(--primary-light)', border: '1.5px solid var(--primary)', borderRadius: 6,
-                padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+            ) : (
+              /* Printable Payslip Card */
+              <div id="printable-payslip" style={{
+                background: '#fff', border: '1px solid #cbd5e1', borderRadius: 8,
+                padding: 24, display: 'flex', flexDirection: 'column', gap: 16
               }}>
-                <div>
-                  <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--primary)' }}>NET PAYABLE SALARY</div>
-                  <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Credited to registered corporate salary account</div>
+                {/* Company Header */}
+                <div style={{ borderBottom: '2px solid var(--primary)', paddingBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
+                  <div>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--primary)' }}>
+                      {activeCompany?.name || 'TIE CORPORATION PVT LTD'}
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: 2 }}>
+                      {activeCompany?.address?.street ? `${activeCompany.address.street}, ${activeCompany.address.city}, ${activeCompany.address.state}` : 'Corporate Headquarters, Technology Division'} &bull; {activeCompany?.email || 'contact@tie-corp.com'}
+                    </div>
+                    <div style={{ fontSize: '0.86rem', fontWeight: 700, marginTop: 4, color: '#0f172a' }}>
+                      Salary Slip for {viewingPayslip.payPeriodFrom ? new Date(viewingPayslip.payPeriodFrom).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }) : 'Pay Period'}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <Badge variant="success">CONFIRMED PAID</Badge>
+                    <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4 }}>
+                      Date: {new Date().toLocaleDateString('en-IN')}
+                    </div>
+                  </div>
                 </div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--primary)' }}>
-                  ₹{(viewingPayslip.payrollLineItem?.netPay || 2425).toLocaleString('en-IN')}
-                </div>
-              </div>
 
-              {/* Footer */}
-              <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 10, display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: '#94a3b8' }}>
-                <span>This is a computer-generated payslip and requires no physical signature.</span>
-                <span>TIE ERP Payroll System</span>
+                {/* Employee Meta Grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10, background: '#f8fafc', padding: 12, borderRadius: 6, fontSize: '0.78rem' }}>
+                  <div><strong>Employee Name:</strong> {viewingPayslip.employee?.basicInfo?.fullName || viewingPayslip.employee?.name || user?.name || 'Staff Member'}</div>
+                  <div><strong>Employee Code:</strong> {viewingPayslip.employee?.basicInfo?.employeeCode || viewingPayslip.employee?.employeeCode || 'EMP-01'}</div>
+                  <div><strong>Department:</strong> {viewingPayslip.employee?.employmentInfo?.department?.name || viewingPayslip.employee?.department?.name || 'General Operations'}</div>
+                  <div><strong>Designation:</strong> {viewingPayslip.employee?.employmentInfo?.designation?.name || viewingPayslip.employee?.designation?.name || 'Staff'}</div>
+                  <div><strong>Pay Mode:</strong> Direct Corporate Bank Transfer</div>
+                  <div><strong>Status:</strong> Approved &amp; Processed</div>
+                  {viewingLineItem?.governmentDetailsSnapshot?.uanNumber && viewingLineItem.governmentDetailsSnapshot.uanNumber !== 'N/A' && (
+                    <div><strong>UAN:</strong> {viewingLineItem.governmentDetailsSnapshot.uanNumber}</div>
+                  )}
+                  {viewingLineItem?.governmentDetailsSnapshot?.panNumber && viewingLineItem.governmentDetailsSnapshot.panNumber !== 'N/A' && (
+                    <div><strong>PAN:</strong> {viewingLineItem.governmentDetailsSnapshot.panNumber}</div>
+                  )}
+                </div>
+
+                {/* Attendance Highlights if available */}
+                {viewingLineItem && (
+                  <div style={{ display: 'flex', gap: 16, background: '#f1f5f9', padding: '8px 12px', borderRadius: 6, fontSize: '0.75rem', color: '#475569' }}>
+                    <span><strong>Total Days:</strong> {viewingLineItem.totalWorkingDays ?? 30}</span>
+                    <span><strong>Present Days:</strong> {viewingLineItem.presentDays ?? 0}</span>
+                    <span><strong>Absent Days:</strong> {viewingLineItem.absentDays ?? 0}</span>
+                    <span><strong>Paid Leave:</strong> {viewingLineItem.paidLeaveDays ?? 0}</span>
+                  </div>
+                )}
+
+                {/* Dynamic Earnings & Deductions Tables */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  {/* Earnings */}
+                  <div style={{ border: '1px solid #e2e8f0', borderRadius: 6, overflow: 'hidden' }}>
+                    <div style={{ background: '#f0fdf4', padding: '8px 12px', fontWeight: 700, fontSize: '0.82rem', color: '#166534' }}>
+                      Earnings Components
+                    </div>
+                    <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8, fontSize: '0.8rem' }}>
+                      {viewingLineItem?.earningLines && viewingLineItem.earningLines.length > 0 ? (
+                        viewingLineItem.earningLines.map((el, i) => (
+                          <div key={i} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span>{el.name}:</span>
+                            <strong>₹{(el.amount || 0).toLocaleString('en-IN')}</strong>
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span>Gross Salary:</span>
+                          <strong>₹{(viewingPayslip.payrollLineItem?.grossEarnings || viewingLineItem?.grossEarnings || 0).toLocaleString('en-IN')}</strong>
+                        </div>
+                      )}
+                      <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 6, display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#166534' }}>
+                        <span>Total Gross:</span>
+                        <span>₹{(viewingLineItem?.grossEarnings || viewingPayslip.payrollLineItem?.grossEarnings || 0).toLocaleString('en-IN')}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Deductions */}
+                  <div style={{ border: '1px solid #e2e8f0', borderRadius: 6, overflow: 'hidden' }}>
+                    <div style={{ background: '#fef2f2', padding: '8px 12px', fontWeight: 700, fontSize: '0.82rem', color: '#991b1b' }}>
+                      Deductions
+                    </div>
+                    <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8, fontSize: '0.8rem' }}>
+                      {viewingLineItem?.attendanceDeductionAmount > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#dc2626' }}>
+                          <span>Attendance / Shortfall:</span>
+                          <span>-₹{(viewingLineItem.attendanceDeductionAmount).toLocaleString('en-IN')}</span>
+                        </div>
+                      )}
+
+                      {viewingLineItem?.statutoryDeductionLines && viewingLineItem.statutoryDeductionLines.length > 0 ? (
+                        viewingLineItem.statutoryDeductionLines.map((dl, i) => (
+                          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', color: '#dc2626' }}>
+                            <span>{dl.name}:</span>
+                            <span>-₹{(dl.amount || 0).toLocaleString('en-IN')}</span>
+                          </div>
+                        ))
+                      ) : null}
+
+                      {viewingLineItem?.otherDeductionLines && viewingLineItem.otherDeductionLines.map((od, i) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', color: '#dc2626' }}>
+                          <span>{od.name}:</span>
+                          <span>-₹{(od.amount || 0).toLocaleString('en-IN')}</span>
+                        </div>
+                      ))}
+
+                      {(!viewingLineItem || (!viewingLineItem.attendanceDeductionAmount && !viewingLineItem.statutoryDeductionLines?.length)) && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#dc2626' }}>
+                          <span>Total Deductions:</span>
+                          <span>-₹{(viewingPayslip.payrollLineItem?.totalDeductions || viewingLineItem?.totalDeductions || 0).toLocaleString('en-IN')}</span>
+                        </div>
+                      )}
+
+                      <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 6, display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#dc2626' }}>
+                        <span>Total Deductions:</span>
+                        <span>-₹{(viewingLineItem?.totalDeductions || viewingPayslip.payrollLineItem?.totalDeductions || 0).toLocaleString('en-IN')}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Net Pay Callout */}
+                <div style={{
+                  background: '#f0fdf4', border: '1.5px solid #16a34a', borderRadius: 6,
+                  padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                }}>
+                  <div>
+                    <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#16a34a' }}>NET PAYABLE SALARY</div>
+                    <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Verified and credited to registered salary account</div>
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#16a34a' }}>
+                    ₹{(viewingLineItem?.netPay || viewingPayslip.payrollLineItem?.netPay || 0).toLocaleString('en-IN')}
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 10, display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: '#94a3b8' }}>
+                  <span>This is a computer-generated digital payslip and requires no physical signature.</span>
+                  <span>TIE ERP Payroll System &bull; Live Backend Verified</span>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </Modal>
       )}
 
       {/* ================================================================== */}
-      {/* 5. ADD SALARY STRUCTURE MODAL */}
+      {/* 6. MODAL: ADD SALARY STRUCTURE */}
       {/* ================================================================== */}
       {structureModalOpen && (
         <Modal
@@ -1034,6 +1445,22 @@ export const PayrollPayslips = () => {
           maxWidth="540px"
         >
           <form onSubmit={handleCreateSalaryStructure} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div>
+              <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                Company *
+              </label>
+              <select
+                value={newStructure.company || selectedCompanyId}
+                onChange={(e) => setNewStructure({ ...newStructure, company: e.target.value })}
+                required
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+              >
+                {companies.map((c) => (
+                  <option key={c._id} value={c._id}>{c.name} ({c.code || 'CORP'})</option>
+                ))}
+              </select>
+            </div>
+
             <div>
               <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Structure Name *</label>
               <input
@@ -1052,7 +1479,15 @@ export const PayrollPayslips = () => {
                 <input
                   type="number"
                   value={newStructure.basicSalary}
-                  onChange={(e) => setNewStructure({ ...newStructure, basicSalary: e.target.value })}
+                  onChange={(e) => {
+                    const b = Number(e.target.value) || 0;
+                    setNewStructure((prev) => ({
+                      ...prev,
+                      basicSalary: b,
+                      grossMonthlyAmount: b + Number(prev.hra) + Number(prev.specialAllowance)
+                    }));
+                  }}
+                  required
                   style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
                 />
               </div>
@@ -1061,7 +1496,14 @@ export const PayrollPayslips = () => {
                 <input
                   type="number"
                   value={newStructure.hra}
-                  onChange={(e) => setNewStructure({ ...newStructure, hra: e.target.value })}
+                  onChange={(e) => {
+                    const h = Number(e.target.value) || 0;
+                    setNewStructure((prev) => ({
+                      ...prev,
+                      hra: h,
+                      grossMonthlyAmount: Number(prev.basicSalary) + h + Number(prev.specialAllowance)
+                    }));
+                  }}
                   style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
                 />
               </div>
@@ -1073,7 +1515,14 @@ export const PayrollPayslips = () => {
                 <input
                   type="number"
                   value={newStructure.specialAllowance}
-                  onChange={(e) => setNewStructure({ ...newStructure, specialAllowance: e.target.value })}
+                  onChange={(e) => {
+                    const s = Number(e.target.value) || 0;
+                    setNewStructure((prev) => ({
+                      ...prev,
+                      specialAllowance: s,
+                      grossMonthlyAmount: Number(prev.basicSalary) + Number(prev.hra) + s
+                    }));
+                  }}
                   style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
                 />
               </div>
