@@ -153,8 +153,21 @@ export const assetsLoansApi = {
 
   // GET /reimbursements/claims (All Claims admin)
   getAllClaims: async (params) => {
-    const res = await apiClient.get('/reimbursements/claims', { params });
-    return res.data;
+    try {
+      const res = await apiClient.get('/reimbursements/claims', { params });
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 404 || err.response?.status === 400) {
+        try {
+          const fbRes = await apiClient.get('/reimbursements/claims/pending-approval', { params });
+          return fbRes.data;
+        } catch {
+          const meRes = await apiClient.get('/reimbursements/claims/me', { params });
+          return meRes.data;
+        }
+      }
+      throw err;
+    }
   },
 
   // GET /reimbursements/claims/:id
@@ -236,8 +249,21 @@ export const assetsLoansApi = {
 
   // GET /loans/requests
   getAllLoans: async (params) => {
-    const res = await apiClient.get('/loans/requests', { params });
-    return res.data;
+    try {
+      const res = await apiClient.get('/loans/requests', { params });
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 404 || err.response?.status === 400) {
+        try {
+          const fbRes = await apiClient.get('/loans/requests/pending-approval', { params });
+          return fbRes.data;
+        } catch {
+          const meRes = await apiClient.get('/loans/requests/me', { params });
+          return meRes.data;
+        }
+      }
+      throw err;
+    }
   },
 
   // GET /loans/requests/pending-approval

@@ -1,12 +1,22 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 
 export const ModuleSubNav = ({ items }) => {
+  const { canAccessModule, isSuperAdmin } = useAuth();
   if (!items || !items.length) return null;
+
+  const visibleItems = items.filter((tab) => {
+    if (isSuperAdmin) return true;
+    if (!tab.module) return true;
+    return canAccessModule(tab.module);
+  });
+
+  if (visibleItems.length === 0) return null;
 
   return (
     <div className="module-subnav" role="navigation" aria-label="Module Sub-navigation">
-      {items.map((tab) => {
+      {visibleItems.map((tab) => {
         const Icon = tab.icon;
         return (
           <NavLink

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+﻿import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import authApi from '../api/authApi';
 import userApi from '../api/userApi';
 import masterApi from '../api/masterApi';
@@ -21,9 +21,13 @@ const defaultAuthValue = {
   isAccountant: false,
   isEmployee: false,
   allRoles: [],
+  backendMenu: [],
+  dashboardWidgets: [],
   hasRole: () => false,
   hasPermission: () => false,
   canAccessModule: () => false,
+  hasBackendMenu: () => false,
+  hasWidget: () => false,
   login: async () => {},
   logout: async () => {},
   refreshSession: async () => {},
@@ -31,6 +35,57 @@ const defaultAuthValue = {
   refreshRoles: async () => [],
   updateProfile: async () => {},
   changePassword: async () => {},
+};
+
+const MODULE_TO_MENU_KEYS = {
+  dashboard: ['dashboard'],
+  employees: ['hrms', 'hrms.employees', '/hrms/employees', '/employees'],
+  attendance: ['hrms', 'hrms.attendance', 'project.attendance', '/hrms/attendance', '/attendance'],
+  leaves: ['hrms', 'hrms.leaves', 'leaves', '/hrms/leaves', '/leaves'],
+  payroll: ['hrms', 'hrms.payroll', 'accounting', 'payroll', '/hrms/payroll', '/accounting', '/payroll'],
+  recruitment: ['hrms', 'crm', 'crm.leads', '/recruitment'],
+  'assets-claims': ['hrms', 'hrms.assets', 'accounting', 'inventory', '/assets-claims', '/accounting'],
+  assets: ['hrms', 'hrms.assets', 'accounting', 'inventory', '/assets-claims'],
+  claims: ['hrms', 'hrms.assets', 'accounting', '/assets-claims'],
+  performance: ['hrms', 'hrms.kra', '/performance'],
+  lifecycle: ['hrms', 'hrms.employees', '/lifecycle', '/employees'],
+  reports: ['reports', 'hrms', '/reports'],
+  projects: ['project', 'installation-qc', 'noc-amc', '/project', '/operations/projects'],
+  'site-logs': ['project', 'installation-qc', '/operations/site-logs'],
+  tasks: ['project', 'project.tasks', '/project/tasks', '/operations/tasks'],
+  companies: ['admin', 'admin.settings', '/admin', '/masters/companies'],
+  branches: ['admin', 'admin.settings', '/admin', '/masters/branches'],
+  departments: ['admin', 'admin.settings', '/admin', '/masters/departments'],
+  designations: ['admin', 'admin.settings', '/admin', '/masters/designations'],
+  roles: ['admin', 'admin.roles', '/admin/roles', '/masters/roles'],
+  users: ['admin', 'admin.users', '/admin/users', '/masters/users'],
+  masters: ['admin', 'admin.settings', 'admin.roles', 'admin.users', '/admin'],
+};
+
+export const checkBackendMenuAccess = (menuList, moduleKey) => {
+  if (!Array.isArray(menuList) || menuList.length === 0) return false;
+  const targetKeys = MODULE_TO_MENU_KEYS[moduleKey] || [moduleKey];
+  for (const item of menuList) {
+    if (!item) continue;
+    const itemKey = item.key?.toLowerCase();
+    const itemRoute = item.route?.toLowerCase();
+    for (const tk of targetKeys) {
+      const tkLower = tk.toLowerCase();
+      if (itemKey === tkLower || itemRoute === tkLower) return true;
+    }
+    if (Array.isArray(item.children) && item.children.length > 0) {
+      for (const child of item.children) {
+        if (!child) continue;
+        const childKey = child.key?.toLowerCase();
+        const childRoute = child.route?.toLowerCase();
+        for (const tk of targetKeys) {
+          const tkLower = tk.toLowerCase();
+          if (childKey === tkLower || childRoute === tkLower) return true;
+        }
+      }
+    }
+  }
+  return false;
 };
 
 const AuthContext = createContext(defaultAuthValue);
@@ -42,20 +97,92 @@ export const AuthProvider = ({ children }) => {
     try {
       const saved = localStorage.getItem('tie_roles');
       return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
+    } catch { return []; }
   });
 
-  // Helper to extract role name string
-  const getRoleIdentifier = (u) => {
-    if (!u || !u.role) return '';
-    if (typeof u.role === 'string') return u.role.toLowerCase();
-    const str = u.role.name || u.role.displayName || u.role.slug || (u.role._id ? String(u.role._id) : '');
-    return String(str || '').toLowerCase();
+  // ─── Multi-Role Helpers ────────────────────────────────────────────────────
+
+  const getRoleIdentifiers = (u) => {
+    if (!u) return [];
+    if (Array.isArray(u.roles) && u.roles.length > 0) {
+      return u.roles.map((r) => {
+        if (typeof r === 'string') return r.toLowerCase();
+        return String(r.name || r.displayName || r.slug || r._id || '').toLowerCase();
+      });
+    }
+    if (u.role) {
+      const r = u.role;
+      const str = typeof r === 'string' ? r : (r.name || r.displayName || r.slug || String(r._id || ''));
+      return [str.toLowerCase()];
+    }
+    return [];
   };
 
-  // Helper to extract designation / job title string
+  const getRoleIdentifier = (u) => getRoleIdentifiers(u)[0] || '';
+
+  const getMergedPermissions = (u, rolesList = []) => {
+    const merged = {};
+    const roles = Array.isArray(u?.roles) && u.roles.length > 0 ? u.roles : (u?.role ? [u.role] : []);
+    for (const roleRef of roles) {
+      let roleObj = typeof roleRef === 'object' && roleRef !== null ? roleRef : null;
+      if (!roleObj && typeof roleRef === 'string' && rolesList.length > 0) {
+        roleObj = rolesList.find((r) => r._id === roleRef || r.name === roleRef);
+      }
+      const perms = roleObj?.permissions;
+      if (perms && typeof perms === 'object' && !Array.isArray(perms)) {
+        for (const [key, val] of Object.entries(perms)) {
+          if (merged[key] === undefined) {
+            merged[key] = val;
+          } else if (typeof val === 'object' && val !== null && typeof merged[key] === 'object') {
+            merged[key] = { ...merged[key], ...val };
+          } else {
+            merged[key] = merged[key] === true || val === true ? true : merged[key];
+          }
+        }
+      }
+    }
+    const directPerms = u?.permissions;
+    if (directPerms && typeof directPerms === 'object' && !Array.isArray(directPerms)) {
+      for (const [key, val] of Object.entries(directPerms)) {
+        if (merged[key] === undefined) merged[key] = val;
+      }
+    }
+    return merged;
+  };
+
+  const getMergedMenu = (u) => {
+    const seen = new Set();
+    const merged = [];
+    const roles = Array.isArray(u?.roles) && u.roles.length > 0 ? u.roles : (u?.role ? [u.role] : []);
+    for (const roleRef of roles) {
+      const roleObj = typeof roleRef === 'object' && roleRef !== null ? roleRef : null;
+      if (!roleObj) continue;
+      const menu = Array.isArray(roleObj.menu) ? roleObj.menu : [];
+      for (const item of menu) {
+        const key = item?.key || item?.route || JSON.stringify(item);
+        if (!seen.has(key)) { seen.add(key); merged.push(item); }
+      }
+    }
+    if (merged.length === 0 && Array.isArray(u?.menu)) return u.menu;
+    return merged;
+  };
+
+  const getMergedWidgets = (u) => {
+    const seen = new Set();
+    const roles = Array.isArray(u?.roles) && u.roles.length > 0 ? u.roles : (u?.role ? [u.role] : []);
+    for (const roleRef of roles) {
+      const roleObj = typeof roleRef === 'object' && roleRef !== null ? roleRef : null;
+      if (!roleObj) continue;
+      const widgets = Array.isArray(roleObj.dashboardWidgets) ? roleObj.dashboardWidgets : [];
+      widgets.forEach((w) => seen.add(w));
+    }
+    if (seen.size === 0) {
+      const fallback = u?.role?.dashboardWidgets || u?.dashboardWidgets || [];
+      fallback.forEach((w) => seen.add(w));
+    }
+    return [...seen];
+  };
+
   const getDesignationIdentifier = (u) => {
     if (!u) return '';
     const d = u.designation || u.employee?.employmentInfo?.designation || u.employee?.designation;
@@ -68,20 +195,7 @@ export const AuthProvider = ({ children }) => {
 
   const rolesLoadedRef = useRef(false);
 
-  // Fetch all system roles from backend masterApi (Super Admin only)
   const refreshRoles = useCallback(async () => {
-    const savedUser = localStorage.getItem('tie_user');
-    let userIsSA = false;
-    if (savedUser) {
-      try {
-        const parsed = JSON.parse(savedUser);
-        const rId = getRoleIdentifier(parsed);
-        userIsSA = rId === 'super_admin' || rId.includes('super_admin') || parsed?.isSuperAdmin === true;
-      } catch {}
-    }
-    if (!userIsSA) {
-      return [];
-    }
     try {
       const res = await masterApi.getRoles();
       const list = res?.data || res?.roles || (Array.isArray(res) ? res : []);
@@ -97,32 +211,19 @@ export const AuthProvider = ({ children }) => {
     return [];
   }, []);
 
-  // Step 2: Fetch and verify current logged-in user profile with complete roles & permissions
   const fetchUserProfile = useCallback(async () => {
     const token = localStorage.getItem('tie_access_token');
     if (!token) return null;
-
     try {
-      // 1. Fetch user profile from /auth/me
       const res = await userApi.getProfile();
       let userData = res?.data || res?.user || res;
-
       if (userData && (userData._id || userData.email)) {
-        const userRoleId = getRoleIdentifier(userData);
-        const userIsSA =
-          userRoleId === 'super_admin' ||
-          userRoleId.includes('super_admin') ||
-          userData?.role?.isSuperAdmin === true ||
-          userData?.isSuperAdmin === true;
-
-        // 2. Collect latest system roles ONLY for Super Admin (once per session)
         let rolesToUse = [];
         try {
           const cached = localStorage.getItem('tie_roles');
           if (cached) rolesToUse = JSON.parse(cached);
         } catch {}
-
-        if (userIsSA && !rolesLoadedRef.current) {
+        if (!rolesLoadedRef.current || rolesToUse.length === 0) {
           try {
             const rolesRes = await masterApi.getRoles();
             const fetchedRoles = rolesRes?.data || rolesRes?.roles || (Array.isArray(rolesRes) ? rolesRes : null);
@@ -135,72 +236,89 @@ export const AuthProvider = ({ children }) => {
           } catch {}
         }
 
-        // 3. Resolve employee details if designation is not present on userData
+        // Normalize user.roles to array of fully-resolved role objects
+        let normalizedRoles = [];
+        if (Array.isArray(userData.roles) && userData.roles.length > 0) {
+          for (const roleRef of userData.roles) {
+            if (typeof roleRef === 'object' && roleRef !== null && roleRef.permissions) {
+              normalizedRoles.push(roleRef);
+            } else {
+              const roleId = typeof roleRef === 'string' ? roleRef : (roleRef._id || roleRef.name);
+              let found = roleId && rolesToUse.length > 0
+                ? rolesToUse.find((r) => r._id === roleId || String(r._id) === String(roleId) || r.name === roleId || r.displayName?.toLowerCase() === String(roleId).toLowerCase())
+                : null;
+              if (found) {
+                normalizedRoles.push(found);
+              } else if (typeof roleRef === 'object' && roleRef !== null) {
+                normalizedRoles.push(roleRef);
+                if (roleId && typeof roleId === 'string' && roleId.length === 24) {
+                  try {
+                    const singleRoleRes = await masterApi.getRoleById(roleId);
+                    const roleData = singleRoleRes?.data || singleRoleRes?.role || singleRoleRes;
+                    if (roleData && roleData.permissions) normalizedRoles[normalizedRoles.length - 1] = roleData;
+                  } catch {}
+                }
+              }
+            }
+          }
+        }
+
+        if (normalizedRoles.length === 0) {
+          const singleRole = userData.role;
+          if (singleRole) {
+            if (typeof singleRole === 'object' && singleRole !== null && singleRole.permissions) {
+              normalizedRoles.push(singleRole);
+            } else {
+              const roleId = typeof singleRole === 'string' ? singleRole : singleRole._id;
+              let found = roleId && rolesToUse.length > 0
+                ? rolesToUse.find((r) => r._id === roleId || String(r._id) === String(roleId) || r.name === roleId || r.displayName?.toLowerCase() === String(roleId).toLowerCase())
+                : null;
+              if (found) {
+                normalizedRoles.push(found);
+              } else if (typeof singleRole === 'object' && singleRole !== null) {
+                normalizedRoles.push(singleRole);
+              }
+              if (!found && roleId && typeof roleId === 'string' && roleId.length === 24) {
+                try {
+                  const singleRoleRes = await masterApi.getRoleById(roleId);
+                  const roleData = singleRoleRes?.data || singleRoleRes?.role || singleRoleRes;
+                  if (roleData && roleData.permissions) {
+                    if (normalizedRoles.length === 0) normalizedRoles.push(roleData);
+                    else normalizedRoles[0] = roleData;
+                  }
+                } catch {}
+              }
+            }
+          }
+        }
+
+        if (normalizedRoles.length > 0) {
+          userData.roles = normalizedRoles;
+          userData.role = normalizedRoles[0];
+          userData.permissions = getMergedPermissions(userData, rolesToUse);
+        }
+
         if (!userData.designation && userData.employee && typeof userData.employee === 'object') {
           userData.designation = userData.employee.employmentInfo?.designation || userData.employee.designation;
         }
-
-        const isOrgAdmin = userIsSA || userRoleId === 'hr_admin' || userRoleId === 'director' || userRoleId === 'branch_manager';
+        const userRoleIds = getRoleIdentifiers(userData);
+        const isOrgAdmin =
+          userRoleIds.some((rid) => rid.includes('super_admin') || rid === 'director' || rid.includes('hr_admin') || rid.includes('branch_manager')) ||
+          normalizedRoles.some((r) => r.isSuperAdmin);
         if (!userData.designation && (!userData.employee || typeof userData.employee === 'string') && isOrgAdmin) {
           try {
             const empRes = await employeeApi.getEmployees({ search: userData.email, limit: 5 });
             const empList = empRes?.data?.employees || empRes?.data || empRes?.employees || [];
             if (Array.isArray(empList)) {
               const matched = empList.find(
-                (e) =>
-                  (e.basicInfo?.email || e.email)?.toLowerCase() === userData.email?.toLowerCase() ||
-                  e._id === userData.employee ||
-                  e.user === userData._id
+                (e) => (e.basicInfo?.email || e.email)?.toLowerCase() === userData.email?.toLowerCase() ||
+                  e._id === userData.employee || e.user === userData._id
               );
-              if (matched) {
-                userData.employee = matched;
-                userData.designation = matched.employmentInfo?.designation || matched.designation;
-              }
+              if (matched) { userData.employee = matched; userData.designation = matched.employmentInfo?.designation || matched.designation; }
             }
-          } catch {
-            // Non-critical fallback
-          }
+          } catch {}
         }
 
-        // 4. Resolve exact RBAC role and its permissions matrix from rolesToUse
-        const roleIdStr = typeof userData.role === 'string' ? userData.role : userData.role?._id || userData.role?.name;
-        const desigStr = getDesignationIdentifier(userData);
-        const isUserAcc =
-          (roleIdStr && (String(roleIdStr).toLowerCase().includes('account') || String(roleIdStr).toLowerCase().includes('finance'))) ||
-          (desigStr && (desigStr.includes('account') || desigStr.includes('finance')));
-
-        if (Array.isArray(rolesToUse) && rolesToUse.length > 0) {
-          let matchedRole = null;
-          // If user designation or role indicates Accountant, match to Accountant role from backend
-          if (isUserAcc) {
-            matchedRole = rolesToUse.find(
-              (r) =>
-                r.name === 'accountant' ||
-                r.name?.includes('account') ||
-                r.displayName?.toLowerCase().includes('account')
-            );
-          }
-
-          // Otherwise match by ID or name
-          if (!matchedRole && roleIdStr) {
-            matchedRole = rolesToUse.find(
-              (r) =>
-                r._id === roleIdStr ||
-                r.name === roleIdStr ||
-                r.displayName?.toLowerCase() === String(roleIdStr).toLowerCase()
-            );
-          }
-
-          if (matchedRole) {
-            // Merge configured role permissions into user object
-            userData.role = matchedRole;
-            if (matchedRole.permissions && (!userData.permissions || Object.keys(userData.permissions).length === 0)) {
-              userData.permissions = matchedRole.permissions;
-            }
-          }
-        }
-
-        // 5. Cache employee registered selfie if available
         const empId = typeof userData.employee === 'string' ? userData.employee : userData.employee?._id;
         const empCode = userData.employee?.basicInfo?.employeeCode || userData.employeeCode;
         const photo = userData.employee?.basicInfo?.photo || userData.employee?.photo || userData.photo;
@@ -214,7 +332,6 @@ export const AuthProvider = ({ children }) => {
           }).catch(() => {});
         }
 
-        // 6. Cache user in state and localStorage
         setUser(userData);
         localStorage.setItem('tie_user', JSON.stringify(userData));
         return userData;
@@ -231,98 +348,56 @@ export const AuthProvider = ({ children }) => {
         console.warn('Profile fetch failed (non-401), using cached session:', err.message || err);
         const savedUser = localStorage.getItem('tie_user');
         if (savedUser) {
-          try {
-            const cached = JSON.parse(savedUser);
-            setUser(cached);
-            return cached;
-          } catch (e) {
-            console.error('Failed to parse cached user:', e);
-          }
+          try { const cached = JSON.parse(savedUser); setUser(cached); return cached; }
+          catch (e) { console.error('Failed to parse cached user:', e); }
         }
       }
     }
     return null;
   }, []);
 
-  // Initialize from localStorage and verify with /users/profile (or /auth/me) ONCE on mount
   useEffect(() => {
     const initializeAuth = async () => {
       const token = localStorage.getItem('tie_access_token');
       const savedUser = localStorage.getItem('tie_user');
-
       if (token) {
-        if (savedUser) {
-          try {
-            setUser(JSON.parse(savedUser));
-          } catch (e) {
-            console.error('Failed to parse cached user:', e);
-          }
-        }
+        if (savedUser) { try { setUser(JSON.parse(savedUser)); } catch (e) { console.error('Failed to parse cached user:', e); } }
         await fetchUserProfile();
       }
       setLoading(false);
     };
-
     initializeAuth();
   }, []);
 
-  // Step 1: User Login
   const login = async (email, password) => {
     const response = await authApi.login({ email, password });
-
     const accessToken = response?.data?.accessToken || response?.accessToken;
     const refreshToken = response?.data?.refreshToken || response?.refreshToken;
     let loggedUser = response?.data?.user || response?.user;
-
+    if (accessToken) localStorage.setItem('tie_access_token', accessToken);
+    if (refreshToken) localStorage.setItem('tie_refresh_token', refreshToken);
+    if (loggedUser) { setUser(loggedUser); localStorage.setItem('tie_user', JSON.stringify(loggedUser)); }
     if (accessToken) {
-      localStorage.setItem('tie_access_token', accessToken);
+      try { const freshProfile = await fetchUserProfile(); if (freshProfile) loggedUser = freshProfile; }
+      catch {}
     }
-    if (refreshToken) {
-      localStorage.setItem('tie_refresh_token', refreshToken);
-    }
-
-    if (loggedUser) {
-      setUser(loggedUser);
-      localStorage.setItem('tie_user', JSON.stringify(loggedUser));
-    }
-
-    // Load full profile and role permissions
-    if (accessToken) {
-      try {
-        const freshProfile = await fetchUserProfile();
-        if (freshProfile) {
-          loggedUser = freshProfile;
-        }
-      } catch {
-        // Fallback to returned login user
-      }
-    }
-
     return response;
   };
 
-  // Step 4: Access Token Refresh helper
   const refreshSession = async () => {
     const refreshToken = localStorage.getItem('tie_refresh_token');
     if (!refreshToken) throw new Error('No refresh token available');
     const res = await authApi.refreshToken(refreshToken);
     const newAccessToken = res?.data?.accessToken || res?.accessToken;
-    if (newAccessToken) {
-      localStorage.setItem('tie_access_token', newAccessToken);
-    }
+    if (newAccessToken) localStorage.setItem('tie_access_token', newAccessToken);
     return newAccessToken;
   };
 
-  // Step 7: User Logout
   const logout = useCallback(async () => {
     const refreshToken = localStorage.getItem('tie_refresh_token');
-    try {
-      if (refreshToken) {
-        await authApi.logout(refreshToken);
-      }
-    } catch (e) {
-      console.warn('Logout API error:', e);
-    } finally {
+    try { if (refreshToken) await authApi.logout(refreshToken); }
+    catch (e) { console.warn('Logout API error:', e); }
+    finally {
       localStorage.removeItem('tie_access_token');
       localStorage.removeItem('tie_refresh_token');
       localStorage.removeItem('tie_user');
@@ -331,7 +406,6 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
-  // Self Profile Updates
   const updateProfile = async (data) => {
     const userId = user?._id || user?.id;
     const res = await userApi.updateProfile(data, userId);
@@ -344,111 +418,102 @@ export const AuthProvider = ({ children }) => {
     return await userApi.changePassword(passwords, userId);
   };
 
-  // RBAC Helpers & Role / Designation Scoping
+  // ─── Computed RBAC Flags (checked across ALL roles) ───────────────────────
+
   const roleId = getRoleIdentifier(user);
+  const roleIds = getRoleIdentifiers(user);
   const desigId = getDesignationIdentifier(user);
 
   const isSuperAdmin =
-    roleId === 'super_admin' ||
-    roleId.includes('super_admin') ||
-    roleId.includes('super admin') ||
+    (Array.isArray(user?.roles) ? user.roles : []).some((r) => r?.isSuperAdmin === true) ||
     user?.role?.isSuperAdmin === true ||
-    user?.isSuperAdmin === true;
+    user?.isSuperAdmin === true ||
+    roleIds.some((rid) => rid.includes('super_admin') || rid.includes('super admin'));
 
-  const isDirector = roleId === 'director' || roleId.includes('director') || desigId.includes('director');
+  const isDirector = roleIds.some((rid) => rid === 'director' || rid.includes('director')) || desigId.includes('director');
 
   const isHrAdmin =
-    roleId === 'hr_admin' ||
-    roleId.includes('hr_admin') ||
-    roleId.includes('hr admin') ||
-    roleId.includes('human resource') ||
-    desigId.includes('hr') ||
-    desigId.includes('human resource');
+    roleIds.some((rid) => rid === 'hr_admin' || rid.includes('hr_admin') || rid.includes('hr admin') || rid.includes('human resource')) ||
+    desigId.includes('hr') || desigId.includes('human resource');
 
   const isBranchManager =
-    roleId === 'branch_manager' ||
-    roleId.includes('branch_manager') ||
-    roleId.includes('branch manager') ||
+    roleIds.some((rid) => rid === 'branch_manager' || rid.includes('branch_manager') || rid.includes('branch manager')) ||
     desigId.includes('branch manager');
 
   const isProjectExecutive =
-    roleId === 'project_executive' ||
-    roleId.includes('project_executive') ||
-    roleId.includes('project executive') ||
+    roleIds.some((rid) => rid === 'project_executive' || rid.includes('project_executive') || rid.includes('project executive')) ||
     desigId.includes('project executive');
 
   const isAccountant =
-    roleId === 'accountant' ||
-    roleId === 'finance_head' ||
-    roleId.includes('account') ||
-    roleId.includes('finance') ||
-    desigId.includes('account') ||
-    desigId.includes('finance');
+    roleIds.some((rid) => rid === 'accountant' || rid === 'finance_head' || rid.includes('account') || rid.includes('finance')) ||
+    desigId.includes('account') || desigId.includes('finance');
 
-  const isEmployee =
-    roleId === 'employee' ||
-    (!isSuperAdmin && !isDirector && !isHrAdmin && !isBranchManager && !isProjectExecutive && !isAccountant);
+  const isEmployee = !isSuperAdmin && !isDirector && !isHrAdmin && !isBranchManager && !isProjectExecutive && !isAccountant;
 
   const hasRole = useCallback(
     (roles) => {
       if (isSuperAdmin) return true;
       if (!user) return false;
       const list = Array.isArray(roles) ? roles : [roles];
-      const currentRole = getRoleIdentifier(user);
       const currentDesig = getDesignationIdentifier(user);
       return list.some((r) => {
         const target = r.toLowerCase();
-        return (
-          currentRole === target ||
-          currentRole.includes(target) ||
-          currentDesig === target ||
-          currentDesig.includes(target)
-        );
+        return roleIds.some((rid) => rid === target || rid.includes(target)) ||
+          currentDesig === target || currentDesig.includes(target);
       });
     },
-    [isSuperAdmin, user]
+    [isSuperAdmin, user, roleIds]
   );
 
-  // Deep helper to inspect if an action (e.g. 'view', 'create') or flag is granted in an arbitrary nested structure
-  const checkLeafPermission = (node, action = 'view') => {
-    if (node === true) return true;
-    if (node === false) return false;
-    if (!node || typeof node !== 'object') return false;
+  // ─── Permission Evaluation Helpers ────────────────────────────────────────
 
-    if (node[action] === true || node['*'] === true || node.all === true) return true;
-    if (node[action] === false) return false;
-
-    for (const val of Object.values(node)) {
-      if (val === true && action === 'view') return true;
-      if (typeof val === 'object' && val !== null) {
-        if (checkLeafPermission(val, action)) return true;
-      }
+  const isActionGranted = (permEntry, action = 'view') => {
+    if (permEntry === true) return true;
+    if (permEntry === false) return false;
+    if (!permEntry || typeof permEntry !== 'object') return false;
+    if (permEntry[action] === true) return true;
+    if (permEntry[action] === false && action !== 'view') return false;
+    if (permEntry['*'] === true || permEntry.all === true) return true;
+    if (action === 'view') {
+      if (permEntry.view === false) return false;
+      if (permEntry.view === true) return true;
+      return Object.values(permEntry).some(Boolean);
     }
     return false;
+  };
+
+  const MODULE_PERMISSIONS_MAP = {
+    employees: { subKeys: ['hrms.employeeMaster', 'hrms.employees', 'employeeMaster', 'employees', 'hrmEmployees'], parentKeys: ['hrms'] },
+    attendance: { subKeys: ['hrms.attendance', 'project.attendance', 'attendance', 'attendanceManagement'], parentKeys: ['hrms', 'project'] },
+    leaves: { subKeys: ['hrms.leaveManagement', 'hrms.leaves', 'leaveManagement', 'leaves'], parentKeys: ['hrms', 'leaves'] },
+    payroll: { subKeys: ['hrms.payrollManagement', 'hrms.payroll', 'payrollManagement', 'payroll', 'accounting.invoices', 'accounting.ledger', 'accounting.payments'], parentKeys: ['hrms', 'accounting', 'accountingFinance', 'payroll'] },
+    recruitment: { subKeys: ['crm.leadManagement', 'crm.leads', 'crm.quotations', 'recruitment', 'recruitmentMaster'], parentKeys: ['crm', 'hrms'] },
+    'assets-claims': { subKeys: ['hrms.assetCustody', 'hrms.assets', 'assetCustody', 'assets-claims', 'assetsClaims', 'claims', 'reimbursements'], parentKeys: ['hrms', 'accounting', 'accountingFinance', 'inventory', 'reimbursements'] },
+    assets: { subKeys: ['hrms.assetCustody', 'hrms.assets', 'assetCustody', 'assets', 'assetsClaims'], parentKeys: ['hrms', 'accounting', 'accountingFinance', 'inventory'] },
+    claims: { subKeys: ['hrms.assetCustody', 'hrms.assets', 'assetCustody', 'claims', 'assetsClaims', 'reimbursements'], parentKeys: ['hrms', 'accounting', 'accountingFinance', 'reimbursements'] },
+    performance: { subKeys: ['hrms.kraManagement', 'hrms.kra', 'kraManagement', 'performance'], parentKeys: ['hrms'] },
+    lifecycle: { subKeys: ['hrms.employeeMaster', 'hrms.employees', 'lifecycle', 'employees'], parentKeys: ['hrms'] },
+    reports: { subKeys: ['hrms.hrmsReports', 'hrmsReports', 'administration.reportCenter', 'reportCenter', 'reports'], parentKeys: ['reports', 'hrms', 'admin', 'administration'] },
+    projects: { subKeys: ['projectManagement.projectCreation', 'projectCreation', 'projects', 'projectManagement.projectSite', 'project.tasks', 'project.drawings', 'installation-qc.checklists'], parentKeys: ['project', 'projectManagement', 'installation-qc', 'installationQC', 'noc-amc', 'operations'] },
+    'site-logs': { subKeys: ['projectManagement.issueManagement', 'issueManagement', 'siteLogs', 'site-logs', 'projectManagement.siteLog', 'installationQC.installationWorkflow', 'installation-qc.checklists'], parentKeys: ['project', 'projectManagement', 'installation-qc', 'installationQC', 'operations'] },
+    tasks: { subKeys: ['projectManagement.taskManagement', 'taskManagement', 'tasks', 'projectManagement.taskMilestone', 'project.tasks', 'project.design-tasks'], parentKeys: ['project', 'projectManagement', 'operations'] },
+    companies: { subKeys: ['administration.multiBranchCompany', 'multiBranchCompany', 'companies', 'admin.settings'], parentKeys: ['admin', 'administration'] },
+    branches: { subKeys: ['administration.multiBranchCompany', 'multiBranchCompany', 'branches', 'admin.settings'], parentKeys: ['admin', 'administration'] },
+    departments: { subKeys: ['administration.systemSettings', 'systemSettings', 'departments', 'admin.settings'], parentKeys: ['admin', 'administration'] },
+    designations: { subKeys: ['administration.systemSettings', 'systemSettings', 'designations', 'admin.settings'], parentKeys: ['admin', 'administration'] },
+    roles: { subKeys: ['administration.rolePermissionManagement', 'rolePermissionManagement', 'roles', 'admin.roles'], parentKeys: ['admin', 'administration'] },
+    users: { subKeys: ['administration.rolePermissionManagement', 'rolePermissionManagement', 'users', 'admin.users'], parentKeys: ['admin', 'administration'] },
+    masters: { subKeys: ['administration.multiBranchCompany', 'administration.systemSettings', 'administration.rolePermissionManagement', 'admin.roles', 'admin.users', 'admin.settings', 'masters'], parentKeys: ['admin', 'administration'] },
+    hrm: { isGroup: true, groupChildren: ['recruitment', 'employees', 'attendance', 'leaves', 'payroll', 'assets-claims', 'performance', 'reports'], parentKeys: ['hrms', 'hrm'] },
+    operations: { isGroup: true, groupChildren: ['projects', 'site-logs', 'tasks'], parentKeys: ['project', 'projectManagement', 'installation-qc', 'operations'] },
   };
 
   const hasPermission = useCallback(
     (permissionKey) => {
       if (isSuperAdmin) return true;
       if (!user) return false;
-
-      const roleObj = typeof user.role === 'object' && user.role !== null ? user.role : null;
-      let perms = roleObj?.permissions || user.permissions;
-
-      // Fallback: check accountant role permissions if user is accountant
-      if ((!perms || Object.keys(perms).length === 0) && isAccountant && allRoles.length > 0) {
-        const accRole = allRoles.find(
-          (r) =>
-            r.name === 'accountant' ||
-            r.name?.includes('account') ||
-            r.displayName?.toLowerCase().includes('account')
-        );
-        if (accRole?.permissions) perms = accRole.permissions;
-      }
-
-      if (!perms) return false;
-
-      // 1. Array format: ['employees.view', 'payroll.view', ...]
+      let perms = getMergedPermissions(user, allRoles);
+      if (!perms || Object.keys(perms).length === 0) return false;
       if (Array.isArray(perms)) {
         if (perms.includes('*') || perms.includes('all')) return true;
         return perms.some((p) => {
@@ -464,298 +529,125 @@ export const AuthProvider = ({ children }) => {
           return false;
         });
       }
-
-      // 2. Object map format
       if (typeof perms === 'object') {
         if (perms['*'] === true || perms.all === true) return true;
         if (perms[permissionKey] === true) return true;
         if (perms[permissionKey] === false) return false;
-
+        if (typeof perms[permissionKey] === 'object' && perms[permissionKey] !== null) {
+          return Object.values(perms[permissionKey]).some(Boolean);
+        }
         const parts = permissionKey.split('.');
-        const [mod, act = 'view'] = parts;
-
-        if (perms[mod]) {
-          if (perms[mod] === true) return true;
-          if (perms[mod] === false) return false;
-          if (typeof perms[mod] === 'object' && checkLeafPermission(perms[mod], act)) {
-            return true;
+        if (parts.length === 2) {
+          const [mod, act] = parts;
+          const config = MODULE_PERMISSIONS_MAP[mod];
+          const candidateKeys = [...(config?.subKeys || []), mod, ...(config?.parentKeys || [])];
+          for (const ck of candidateKeys) {
+            if (perms[ck] !== undefined && isActionGranted(perms[ck], act)) return true;
           }
+        } else if (parts.length === 3) {
+          const [group, mod, act] = parts;
+          const dotKey = `${group}.${mod}`;
+          if (perms[dotKey] !== undefined && isActionGranted(perms[dotKey], act)) return true;
+          if (perms[group] !== undefined && isActionGranted(perms[group], act)) return true;
         }
       }
-
       return false;
     },
-    [isSuperAdmin, user, isAccountant, allRoles]
+    [isSuperAdmin, user, allRoles]
   );
 
-  // Check if a navigation group or functional module should be visible/accessible
-  // STRICTLY RESPECTS permissions matrix configured in Roles & Permissions (/masters/roles)
   const canAccessModule = useCallback(
     (moduleKey) => {
       if (isSuperAdmin) return true;
       if (!user) return false;
-
-      // 1. Resolve role object and its permissions
-      const roleObj = typeof user.role === 'object' && user.role !== null ? user.role : null;
-      let perms = roleObj?.permissions || user.permissions || {};
-
-      // If user is accountant and perms are not yet populated on user.role, retrieve from allRoles
-      if ((!perms || Object.keys(perms).length === 0) && isAccountant && allRoles.length > 0) {
-        const accRole = allRoles.find(
-          (r) =>
-            r.name === 'accountant' ||
-            r.name?.includes('account') ||
-            r.displayName?.toLowerCase().includes('account')
-        );
-        if (accRole?.permissions) {
-          perms = accRole.permissions;
-        }
+      if (moduleKey === 'dashboard') return true;
+      const config = MODULE_PERMISSIONS_MAP[moduleKey];
+      if (config?.isGroup && Array.isArray(config.groupChildren)) {
+        return config.groupChildren.some((child) => canAccessModule(child));
       }
-
-      const hasConfiguredPerms = perms && typeof perms === 'object' && Object.keys(perms).length > 0;
-
-      // Helper to evaluate permission key against configured perms matrix
-      const evalPerm = (primaryKey, aliases = []) => {
-        if (!hasConfiguredPerms) return null;
-        const keys = [primaryKey, ...aliases];
-
-        for (const k of keys) {
-          if (perms[k] === false) return false;
-          if (perms[k] === true) return true;
-          if (typeof perms[k] === 'object' && perms[k] !== null) {
-            if (perms[k].view === false) return false;
-            if (Object.values(perms[k]).some(Boolean)) return true;
+      const bMenu = getMergedMenu(user);
+      const perms = getMergedPermissions(user, allRoles);
+      const hasBackendMenuConfig = Array.isArray(bMenu) && bMenu.length > 0;
+      const hasConfiguredPerms = perms && typeof perms === 'object' && !Array.isArray(perms) && Object.keys(perms).length > 0;
+      if (hasBackendMenuConfig && checkBackendMenuAccess(bMenu, moduleKey)) return true;
+      if (hasConfiguredPerms) {
+        if (config?.subKeys) {
+          for (const sk of config.subKeys) {
+            if (perms[sk] !== undefined && isActionGranted(perms[sk], 'view')) return true;
           }
         }
-
-        // Fuzzy match: check if any perms key contains module identifier
-        const pLower = primaryKey.toLowerCase();
+        if (perms[moduleKey] !== undefined && isActionGranted(perms[moduleKey], 'view')) return true;
+        if (config?.parentKeys) {
+          for (const pk of config.parentKeys) {
+            if (perms[pk] !== undefined && isActionGranted(perms[pk], 'view')) return true;
+          }
+        }
+        const mLower = moduleKey.toLowerCase();
         for (const [pk, pval] of Object.entries(perms)) {
-          const lk = pk.toLowerCase();
-          if (lk === pLower || (pLower.length > 4 && lk.includes(pLower)) || (lk.length > 4 && pLower.includes(lk))) {
-            if (pval === false) return false;
-            if (pval === true) return true;
-            if (typeof pval === 'object' && pval !== null) {
-              if (pval.view === false) return false;
-              if (Object.values(pval).some(Boolean)) return true;
-            }
+          const pkLower = pk.toLowerCase();
+          if (pkLower === mLower || pkLower.endsWith(`.${mLower}`) || (mLower.length > 4 && pkLower.includes(mLower))) {
+            if (isActionGranted(pval, 'view')) return true;
           }
         }
-
-        return null;
-      };
-
-      switch (moduleKey) {
-        case 'dashboard':
-          return true;
-
-        // HRM Submodules
-        case 'employees': {
-          if (isAccountant || isEmployee) return false;
-          if (!isSuperAdmin && !isHrAdmin && !isDirector && !isBranchManager) return false;
-          const explicit = evalPerm('employees', ['hrmEmployees', 'hrms.employeeMaster']);
-          if (explicit !== null) return explicit;
-          if (hasConfiguredPerms) return false;
-          return hasRole(['hr_admin', 'director', 'branch_manager']);
-        }
-
-        case 'attendance': {
-          // Self-service attendance & face punch available to all active staff
-          return true;
-        }
-
-        case 'leaves': {
-          // Self-service leaves & holiday calendar available to all active staff
-          return true;
-        }
-
-        case 'payroll': {
-          if (isAccountant) return true;
-          const explicit = evalPerm('payroll', ['hrms.payrollManagement', 'accountingFinance']);
-          if (explicit !== null) return explicit;
-          if (hasConfiguredPerms) return false;
-          return hasRole(['accountant', 'finance_head', 'hr_admin', 'director']);
-        }
-
-        case 'recruitment': {
-          if (isAccountant || isEmployee) return false;
-          if (!isSuperAdmin && !isHrAdmin && !isDirector) return false;
-          const explicit = evalPerm('recruitment', ['recruitmentMaster']);
-          if (explicit !== null) return explicit;
-          if (hasConfiguredPerms) return false;
-          return hasRole(['hr_admin', 'director']);
-        }
-
-        case 'assets':
-        case 'assets-claims':
-        case 'claims': {
-          if (isAccountant) return true;
-          const explicit = evalPerm('assets', ['assetsClaims', 'claims', 'hrms.assetCustody']);
-          if (explicit !== null) return explicit;
-          if (hasConfiguredPerms) return false;
-          return hasRole(['accountant', 'finance_head', 'hr_admin', 'director', 'inventory_manager']);
-        }
-
-        case 'performance': {
-          if (isAccountant || isEmployee) return false;
-          if (!isSuperAdmin && !isHrAdmin && !isDirector && !isBranchManager) return false;
-          const explicit = evalPerm('performance', ['hrms.kraManagement']);
-          if (explicit !== null) return explicit;
-          if (hasConfiguredPerms) return false;
-          return hasRole(['hr_admin', 'director', 'branch_manager']);
-        }
-
-        case 'lifecycle': {
-          if (isAccountant || isEmployee) return false;
-          return canAccessModule('employees') || hasRole(['hr_admin', 'director']);
-        }
-
-        case 'reports': {
-          if (isAccountant) return true;
-          const explicit = evalPerm('reports', ['hrms.hrmsReports', 'administration.reportCenter']);
-          if (explicit !== null) return explicit;
-          if (hasConfiguredPerms) return false;
-          return hasRole(['accountant', 'finance_head', 'hr_admin', 'director', 'branch_manager']);
-        }
-
-        case 'hrm':
-          return (
-            canAccessModule('employees') ||
-            canAccessModule('attendance') ||
-            canAccessModule('leaves') ||
-            canAccessModule('payroll') ||
-            canAccessModule('recruitment') ||
-            canAccessModule('assets-claims') ||
-            canAccessModule('performance') ||
-            canAccessModule('reports')
-          );
-
-        // Operations Submodules
-        case 'projects': {
-          if (isAccountant || isEmployee) return false;
-          const explicit = evalPerm('projects', ['operations', 'projectManagement.projectCreation', 'projectManagement.projectSite']);
-          if (explicit !== null) return explicit;
-          if (hasConfiguredPerms) return false;
-          return hasRole(['branch_manager', 'project_executive', 'designer', 'director']);
-        }
-
-        case 'site-logs': {
-          if (isAccountant || isEmployee) return false;
-          const explicit = evalPerm('projects', ['operations', 'siteLogs', 'projectManagement.siteLog', 'projectManagement.issueManagement']);
-          if (explicit !== null) return explicit;
-          if (hasConfiguredPerms) return false;
-          return hasRole(['branch_manager', 'project_executive', 'designer', 'director']);
-        }
-
-        case 'tasks': {
-          if (isAccountant || isEmployee) return false;
-          const explicit = evalPerm('projects', ['operations', 'tasks', 'projectManagement.taskManagement', 'projectManagement.taskMilestone']);
-          if (explicit !== null) return explicit;
-          if (hasConfiguredPerms) return false;
-          return hasRole(['branch_manager', 'project_executive', 'designer', 'director']);
-        }
-
-        case 'operations':
-          return (
-            canAccessModule('projects') ||
-            canAccessModule('site-logs') ||
-            canAccessModule('tasks')
-          );
-
-        // Organization Masters Submodules
-        case 'companies':
-        case 'branches':
-        case 'departments':
-        case 'designations':
-        case 'roles':
-        case 'users':
-        case 'masters': {
-          if (isAccountant || isEmployee) return false;
-          if (!isSuperAdmin && !isDirector) return false;
-          const explicit = evalPerm('masters', [
-            'administration.multiBranchCompany',
-            'roles',
-            'users',
-            'administration.rolePermissionManagement',
-            'administration.systemSettings',
-          ]);
-          if (explicit !== null) return explicit;
-          if (hasConfiguredPerms) return false;
-          return hasRole(['super_admin', 'director']);
-        }
-
-        default:
-          if (hasConfiguredPerms) {
-            const exp = evalPerm(moduleKey);
-            return exp === true;
-          }
-          return false;
       }
+      if (hasBackendMenuConfig || hasConfiguredPerms) return false;
+      if (isDirector) return true;
+      if (isHrAdmin) return ['hrm', 'employees', 'attendance', 'leaves', 'payroll', 'recruitment', 'performance', 'reports', 'assets-claims'].includes(moduleKey);
+      if (isBranchManager) return ['hrm', 'attendance', 'leaves', 'operations', 'projects', 'tasks', 'employees'].includes(moduleKey);
+      if (isProjectExecutive) return ['operations', 'projects', 'site-logs', 'tasks', 'attendance', 'leaves'].includes(moduleKey);
+      if (isAccountant) return ['payroll', 'assets-claims', 'assets', 'claims', 'reports', 'attendance', 'leaves', 'hrm'].includes(moduleKey);
+      if (isEmployee) return ['attendance', 'leaves'].includes(moduleKey);
+      return false;
     },
-    [isSuperAdmin, user, isAccountant, allRoles, hasRole]
+    [isSuperAdmin, user, allRoles, isDirector, isHrAdmin, isBranchManager, isProjectExecutive, isAccountant, isEmployee]
   );
 
-  // Active user role or designation label
+  // ─── Derived State ─────────────────────────────────────────────────────────
+
   const userRole = useMemo(() => {
     if (isSuperAdmin) return 'Super Admin';
     const desig = user?.designation || user?.employee?.employmentInfo?.designation;
     const desigName = typeof desig === 'string' ? desig : desig?.name || desig?.title;
     if (desigName) return desigName;
+    if (Array.isArray(user?.roles) && user.roles.length > 1) {
+      const names = user.roles.map((r) => (typeof r === 'object' ? r.displayName || r.name : r)).filter(Boolean);
+      return names.join(', ');
+    }
     return user?.role?.displayName || user?.role?.name || (isAccountant ? 'Accountant' : 'Employee');
   }, [isSuperAdmin, user, isAccountant]);
 
+  const backendMenu = useMemo(() => getMergedMenu(user), [user]);
+  const dashboardWidgets = useMemo(() => getMergedWidgets(user), [user]);
+
+  const hasWidget = useCallback(
+    (widgetId) => {
+      if (isSuperAdmin) return true;
+      if (!dashboardWidgets || dashboardWidgets.length === 0) return true;
+      return dashboardWidgets.includes(widgetId);
+    },
+    [isSuperAdmin, dashboardWidgets]
+  );
+
+  const hasBackendMenu = useCallback(
+    (keyOrRoute) => {
+      if (isSuperAdmin) return true;
+      return checkBackendMenuAccess(backendMenu, keyOrRoute);
+    },
+    [isSuperAdmin, backendMenu]
+  );
+
   const value = useMemo(
     () => ({
-      user,
-      loading,
-      isAuthenticated: !!user,
-      roleId,
-      userRole,
-      company: user?.company,
-      branch: user?.branch || user?.branchId,
-      isSuperAdmin,
-      isDirector,
-      isHrAdmin,
-      isBranchManager,
-      isProjectExecutive,
-      isAccountant,
-      isEmployee,
-      allRoles,
-      hasRole,
-      hasPermission,
-      canAccessModule,
-      login,
-      logout,
-      refreshSession,
-      fetchUserProfile,
-      refreshRoles,
-      updateProfile,
-      changePassword,
+      user, loading, isAuthenticated: !!user, roleId, userRole,
+      company: user?.company, branch: user?.branch || user?.branchId,
+      isSuperAdmin, isDirector, isHrAdmin, isBranchManager, isProjectExecutive, isAccountant, isEmployee,
+      allRoles, backendMenu, dashboardWidgets,
+      hasRole, hasPermission, canAccessModule, hasBackendMenu, hasWidget,
+      login, logout, refreshSession, fetchUserProfile, refreshRoles, updateProfile, changePassword,
     }),
-    [
-      user,
-      loading,
-      roleId,
-      userRole,
-      isSuperAdmin,
-      isDirector,
-      isHrAdmin,
-      isBranchManager,
-      isProjectExecutive,
-      isAccountant,
-      isEmployee,
-      allRoles,
-      hasRole,
-      hasPermission,
-      canAccessModule,
-      login,
-      logout,
-      refreshSession,
-      fetchUserProfile,
-      refreshRoles,
-      updateProfile,
-      changePassword,
-    ]
+    [user, loading, roleId, userRole, isSuperAdmin, isDirector, isHrAdmin, isBranchManager, isProjectExecutive,
+     isAccountant, isEmployee, allRoles, backendMenu, dashboardWidgets, hasRole, hasPermission, canAccessModule,
+     hasBackendMenu, hasWidget, login, logout, refreshSession, fetchUserProfile, refreshRoles, updateProfile, changePassword]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

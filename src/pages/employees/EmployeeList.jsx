@@ -49,22 +49,11 @@ import Badge from '../../components/common/Badge';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import Modal from '../../components/common/Modal';
 import CameraCapture from '../../components/common/CameraCapture';
+import { extractApiData } from '../../utils/apiUtils';
 
 // Designations are dynamically retrieved from backend master API
 
-const extractArray = (res, key) => {
-  if (!res) return [];
-  if (Array.isArray(res)) return res;
-  if (Array.isArray(res.data)) return res.data;
-  if (key && Array.isArray(res[key])) return res[key];
-  if (key && Array.isArray(res.data?.[key])) return res.data[key];
-  if (typeof res === 'object') {
-    for (const val of Object.values(res)) {
-      if (Array.isArray(val)) return val;
-    }
-  }
-  return [];
-};
+const extractArray = (res, key) => extractApiData(res, key, 'data');
 
 const formatDepartment = (dept) => {
   if (!dept) return '-';
@@ -380,6 +369,23 @@ export const EmployeeList = () => {
   const [editFormData, setEditFormData] = useState({});
   const [savingSection, setSavingSection] = useState(false);
 
+  // Scoped branches for the currently viewed employee's company
+  const currentEmpCompanyId =
+    currentEmployeeDetail?.company?._id ||
+    currentEmployeeDetail?.company ||
+    currentEmployeeDetail?.employmentInfo?.branch?.company?._id ||
+    currentEmployeeDetail?.employmentInfo?.branch?.company ||
+    '';
+
+  const scopedBranchesForDetail = useMemo(() => {
+    if (!currentEmpCompanyId) return branches;
+    const filtered = branches.filter((b) => {
+      const bComp = b.company?._id || b.company;
+      return !bComp || String(bComp) === String(currentEmpCompanyId);
+    });
+    return filtered.length > 0 ? filtered : branches;
+  }, [branches, currentEmpCompanyId]);
+
   // Documents State
   const [employeeDocs, setEmployeeDocs] = useState([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
@@ -566,14 +572,14 @@ export const EmployeeList = () => {
         workType: selectedWorkType || undefined,
       };
       const res = await employeeApi.getEmployees(params);
-      const list = Array.isArray(res)
-        ? res
-        : (Array.isArray(res?.data) ? res.data : (res?.employees || res?.data?.employees || []));
+      const list = extractApiData(res, 'employees', 'data');
 
       // Immediately show employees without blocking network on parallel face calls
       setEmployees(list);
       const count = res?.total || res?.totalCount || res?.count || (Array.isArray(list) ? list.length : 0);
       setTotalCount(count);
+      const calculatedPages = Math.max(1, Math.ceil((count || list.length) / 10));
+      setTotalPages(res?.totalPages || calculatedPages);
 
       // Asynchronously enrich face status in background using batched calls
       const empIds = list.map((e) => e._id || e.id).filter(Boolean);
@@ -993,14 +999,23 @@ export const EmployeeList = () => {
       const matchedDept = departments.find((d) => d._id === rawDept || d.name === rawDept);
       const deptId = matchedDept?._id || (/^[0-9a-fA-F]{24}$/.test(rawDept) ? rawDept : departments[0]?._id || '');
 
-      // Ensure branch is resolved to its ObjectId
+      // Ensure branch is resolved to its ObjectId belonging to employee's company
+      const validBranches = scopedBranchesForDetail.length > 0 ? scopedBranchesForDetail : branches;
       const rawBranch = em.branch?._id || em.branch || currentEmployeeDetail.branch?._id || currentEmployeeDetail.branch;
-      const matchedBranch = branches.find((b) => b._id === rawBranch || b.name === rawBranch);
-      const branchId = matchedBranch?._id || (/^[0-9a-fA-F]{24}$/.test(rawBranch) ? rawBranch : branches[0]?._id || '');
+      let matchedBranch = validBranches.find((b) => b._id === rawBranch);
+      if (!matchedBranch) {
+        matchedBranch = validBranches.find((b) => b.name === rawBranch);
+      }
+      const branchId = matchedBranch?._id || (validBranches.some((b) => String(b._id) === String(rawBranch)) ? rawBranch : validBranches[0]?._id || '');
+
+      // Ensure designation is resolved to its ObjectId
+      const rawDesig = em.designation?._id || em.designation || currentEmployeeDetail.designation?._id || currentEmployeeDetail.designation;
+      const matchedDesig = designations.find((d) => d._id === rawDesig || d.name === rawDesig || d.title === rawDesig);
+      const desigId = matchedDesig?._id || (/^[0-9a-fA-F]{24}$/.test(rawDesig) ? rawDesig : designations[0]?._id || '');
 
       setEditFormData({
         department: deptId,
-        designation: em.designation?._id || em.designation || currentEmployeeDetail.designation?._id || currentEmployeeDetail.designation || '',
+        designation: desigId,
         branch: branchId,
         employmentType: em.employmentType || currentEmployeeDetail.employmentType || 'FULL_TIME',
         workType: em.workType || currentEmployeeDetail.workType || 'OFFICE',
@@ -1093,14 +1108,23 @@ export const EmployeeList = () => {
         const matchedDept = departments.find((d) => d._id === rawDept || d.name === rawDept);
         const deptId = matchedDept?._id || (/^[0-9a-fA-F]{24}$/.test(rawDept) ? rawDept : departments[0]?._id);
 
-        // Resolve branch ObjectId
+        // Resolve designation ObjectId
+        const rawDesig = editFormData.designation || em.designation?._id || em.designation;
+        const matchedDesig = designations.find((d) => d._id === rawDesig || d.name === rawDesig || d.title === rawDesig);
+        const desigId = matchedDesig?._id || (/^[0-9a-fA-F]{24}$/.test(rawDesig) ? rawDesig : designations[0]?._id);
+
+        // Resolve branch ObjectId belonging to employee's company
+        const validBranches = scopedBranchesForDetail.length > 0 ? scopedBranchesForDetail : branches;
         const rawBranch = editFormData.branch || em.branch?._id || em.branch;
-        const matchedBranch = branches.find((b) => b._id === rawBranch || b.name === rawBranch);
-        const branchId = matchedBranch?._id || (/^[0-9a-fA-F]{24}$/.test(rawBranch) ? rawBranch : branches[0]?._id);
+        let matchedBranch = validBranches.find((b) => b._id === rawBranch);
+        if (!matchedBranch) {
+          matchedBranch = validBranches.find((b) => b.name === rawBranch);
+        }
+        const branchId = matchedBranch?._id || (validBranches.some((b) => String(b._id) === String(rawBranch)) ? rawBranch : validBranches[0]?._id);
 
         const payload = {
           department: deptId,
-          designation: editFormData.designation || em.designation || 'Staff',
+          designation: desigId || editFormData.designation || 'Staff',
           branch: branchId,
           employmentType: editFormData.employmentType || em.employmentType || 'FULL_TIME',
           workType: editFormData.workType || em.workType || 'OFFICE',
@@ -2871,7 +2895,7 @@ export const EmployeeList = () => {
                           label="Branch *"
                           value={editFormData.branch}
                           onChange={(e) => setEditFormData({ ...editFormData, branch: e.target.value })}
-                          options={branches.map((b) => ({ value: b._id, label: b.name }))}
+                          options={scopedBranchesForDetail.map((b) => ({ value: b._id, label: b.name }))}
                         />
                         <Select
                           label="Employment Type"

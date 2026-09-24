@@ -38,6 +38,7 @@ import Button from '../../components/common/Button';
 import Input from '../../components/common/Input';
 import Select from '../../components/common/Select';
 import Badge from '../../components/common/Badge';
+import { extractApiData } from '../../utils/apiUtils';
 
 export const LifecycleEvents = () => {
   const confirm = useConfirm();
@@ -148,9 +149,9 @@ export const LifecycleEvents = () => {
         masterApi.getBranches().catch(() => ({ data: [] })),
       ]);
       const empList = extractEmployeeList(eRes);
-      const desList = Array.isArray(desRes) ? desRes : desRes?.data || [];
-      const depList = Array.isArray(depRes) ? depRes : depRes?.data || [];
-      const bList = Array.isArray(bRes) ? bRes : bRes?.data || [];
+      const desList = extractApiData(desRes, 'designations', 'data');
+      const depList = extractApiData(depRes, 'departments', 'data');
+      const bList = extractApiData(bRes, 'branches', 'data');
 
       setEmployees(empList);
       setDesignations(desList);
@@ -178,7 +179,7 @@ export const LifecycleEvents = () => {
     setLoadingEvents(true);
     try {
       const res = await lifecycleApi.getAllLifecycleEvents();
-      const list = Array.isArray(res) ? res : res?.data || res?.events || [];
+      const list = extractApiData(res, 'events', 'lifecycleEvents', 'data');
       setEvents(list);
     } catch (err) {
       showToast('Failed to load lifecycle events', 'error');
@@ -191,7 +192,7 @@ export const LifecycleEvents = () => {
     setLoadingMyEvents(true);
     try {
       const res = await lifecycleApi.getMyLifecycleEvents();
-      const list = Array.isArray(res) ? res : res?.data || res?.events || [];
+      const list = extractApiData(res, 'events', 'lifecycleEvents', 'data');
       setMyEvents(list);
     } catch (err) {
       showToast('Failed to load personal transitions', 'error');

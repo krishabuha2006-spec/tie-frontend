@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import attendanceApi from '../../api/attendanceApi';
 import employeeApi from '../../api/employeeApi';
 import masterApi from '../../api/masterApi';
@@ -45,6 +45,7 @@ import Select from '../../components/common/Select';
 import Badge from '../../components/common/Badge';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { attendanceNav } from '../../routes/moduleNavConfig';
+import { extractApiData } from '../../utils/apiUtils';
 
 export const FieldAttendance = () => {
   const { isSuperAdmin, isHrAdmin, user } = useAuth();
@@ -237,17 +238,17 @@ export const FieldAttendance = () => {
       ]);
 
       if (bRes.status === 'fulfilled') {
-        setBranches(bRes.value?.data || bRes.value?.branches || []);
+        setBranches(extractApiData(bRes.value, 'branches', 'data'));
       }
 
       let allTasksList = [];
       if (tRes.status === 'fulfilled') {
-        allTasksList = tRes.value?.tasks || tRes.value?.data || (Array.isArray(tRes.value) ? tRes.value : []);
+        allTasksList = extractApiData(tRes.value, 'tasks', 'data');
         setTasks(allTasksList);
       }
 
       if (pRes.status === 'fulfilled') {
-        const pList = pRes.value?.projects || pRes.value?.data || (Array.isArray(pRes.value) ? pRes.value : []);
+        const pList = extractApiData(pRes.value, 'projects', 'data');
         // Fetch sites for each project so p.sites is populated!
         const projectsWithSites = await Promise.all(
           pList.map(async (p) => {
@@ -357,7 +358,7 @@ export const FieldAttendance = () => {
       if (filters.isOpen !== '') params.isOpen = filters.isOpen === 'true';
 
       const res = await attendanceApi.getAllFieldAttendance(params);
-      const list = Array.isArray(res) ? res : (Array.isArray(res?.records) ? res.records : (Array.isArray(res?.data) ? res.data : []));
+      const list = extractApiData(res, 'records', 'data');
       setRecords(list);
     } catch (err) {
       console.error(err);
@@ -373,7 +374,7 @@ export const FieldAttendance = () => {
     setLoadingHistory(true);
     try {
       const res = await attendanceApi.getEmployeeFieldAttendance(empId);
-      const list = Array.isArray(res) ? res : (Array.isArray(res?.records) ? res.records : (Array.isArray(res?.data) ? res.data : []));
+      const list = extractApiData(res, 'records', 'data');
       setEmployeeHistory(list);
     } catch (err) {
       console.error(err);
@@ -388,7 +389,7 @@ export const FieldAttendance = () => {
     setLoadingMyHistory(true);
     try {
       const res = await attendanceApi.getMyFieldAttendance();
-      const list = Array.isArray(res) ? res : (Array.isArray(res?.records) ? res.records : (Array.isArray(res?.data) ? res.data : []));
+      const list = extractApiData(res, 'records', 'data');
       setMyHistory(list);
     } catch (err) {
       console.error(err);

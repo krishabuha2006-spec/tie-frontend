@@ -17,6 +17,12 @@ export const projectTaskApi = {
     return res.data;
   },
 
+  // PUT /projects/:id — Update project details
+  updateProject: async (id, data) => {
+    const res = await apiClient.put(`/projects/${id}`, data);
+    return res.data;
+  },
+
   getProjectSites: async (projectId) => {
     const res = await apiClient.get(`/projects/${projectId}/sites`);
     return res.data;
@@ -66,6 +72,12 @@ export const projectTaskApi = {
     return res.data;
   },
 
+  // GET /site-logs/employees/:employeeId — Employee site log history
+  getEmployeeSiteLogs: async (employeeId, params) => {
+    const res = await apiClient.get(`/site-logs/employees/${employeeId}`, { params });
+    return res.data;
+  },
+
   getSiteLogsByProject: async (projectId, params) => {
     const res = await apiClient.get(`/site-logs/reports/project/${projectId}`, { params });
     return res.data;
@@ -102,6 +114,12 @@ export const projectTaskApi = {
     return res.data;
   },
 
+  // GET /tasks/employees/:employeeId
+  getEmployeeTasks: async (employeeId, params) => {
+    const res = await apiClient.get(`/tasks/employees/${employeeId}`, { params });
+    return res.data;
+  },
+
   createTask: async (data) => {
     const res = await apiClient.post('/tasks', data);
     return res.data;
@@ -119,3 +137,4 @@ export const projectTaskApi = {
 };
 
 export default projectTaskApi;
+

@@ -18,6 +18,7 @@ import Modal from '../../components/common/Modal';
 import Button from '../../components/common/Button';
 import Input from '../../components/common/Input';
 import Select from '../../components/common/Select';
+import { extractApiData } from '../../utils/apiUtils';
 
 const CATEGORY_CONFIG = {
   ATTENDANCE: { color: '#6366f1', bg: '#6366f115', icon: Calendar, label: 'Attendance' },
@@ -143,7 +144,7 @@ export const ReportsAnalytics = () => {
         const attRes = await attendanceApi.getAllOfficeAttendance({ from: f.startDate, to: f.endDate }).catch(() =>
           attendanceApi.getMyOfficeAttendance({ from: f.startDate, to: f.endDate })
         );
-        const list = Array.isArray(attRes) ? attRes : attRes?.data || attRes?.attendance || [];
+        const list = extractApiData(attRes, 'records', 'data');
         if (list.length > 0) {
           const isLateReport = rKey.includes('late');
           const rows = list
@@ -175,7 +176,7 @@ export const ReportsAnalytics = () => {
         const leaveRes = await leaveHolidayApi.getLeaveRequests({ from: f.startDate, to: f.endDate }).catch(() =>
           leaveHolidayApi.getMyLeaves()
         );
-        const list = Array.isArray(leaveRes) ? leaveRes : leaveRes?.data || leaveRes?.requests || leaveRes?.leaves || [];
+        const list = extractApiData(leaveRes, 'leaveRequests', 'requests', 'data');
         if (list.length > 0) {
           const rows = list.map((item) => {
             const emp = item.employee || {};
@@ -278,7 +279,7 @@ export const ReportsAnalytics = () => {
     if (rKey.includes('task') || rKey.includes('site') || cat === 'OPERATIONS') {
       try {
         const taskRes = await projectTaskApi.getSiteTasks();
-        const list = Array.isArray(taskRes) ? taskRes : taskRes?.data || taskRes?.tasks || [];
+        const list = extractApiData(taskRes, 'tasks', 'data');
         if (list.length > 0) {
           const rows = list.map((item) => {
             const title = item.title || item.taskName || '—';
@@ -300,7 +301,7 @@ export const ReportsAnalytics = () => {
     // 7. Real Backend EMPLOYEES & ORGANIZATION DIRECTORY Data
     try {
       const empRes = await employeeApi.getEmployees({ limit: 100 });
-      const list = Array.isArray(empRes) ? empRes : empRes?.data?.employees || empRes?.data || empRes?.employees || [];
+      const list = extractApiData(empRes, 'employees', 'data');
       if (list.length > 0) {
         const rows = list.map((item) => {
           const code = item.employeeCode || item.basicInfo?.employeeCode || item.employmentInfo?.employeeCode || item.code || '—';
@@ -369,7 +370,7 @@ export const ReportsAnalytics = () => {
     setLoadingCatalog(true);
     try {
       const res = await reportsApi.getReportCatalog();
-      const raw = Array.isArray(res) ? res : res?.data || res?.catalog || [];
+      const raw = extractApiData(res, 'catalog', 'data');
       const normalized = raw.map((item, i) => ({
         ...item,
         reportKey: item.reportKey || item.key || item.code || ('report_' + i),

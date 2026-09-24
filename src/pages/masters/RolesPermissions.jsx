@@ -23,6 +23,7 @@ import Modal from '../../components/common/Modal';
 import Button from '../../components/common/Button';
 import Input from '../../components/common/Input';
 import Badge from '../../components/common/Badge';
+import { extractApiData } from '../../utils/apiUtils';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { mastersNav } from '../../routes/moduleNavConfig';
@@ -315,7 +316,7 @@ export const RolesPermissions = () => {
       ]);
 
       if (rolesRes.status === 'fulfilled') {
-        const list = rolesRes.value?.data || rolesRes.value?.roles || (Array.isArray(rolesRes.value) ? rolesRes.value : []);
+        const list = extractApiData(rolesRes.value, 'roles', 'data');
         setRoles(list);
         setPendingChanges({});
       } else {
@@ -545,7 +546,7 @@ export const RolesPermissions = () => {
       if (fetchUserProfile) await fetchUserProfile();
     } catch (err) {
       console.error(err);
-      showToast(err?.response?.data?.message || 'Failed to save permissions', 'error');
+      showToast(err?.response?.data?.message || err?.message || 'Failed to save permissions', 'error');
     } finally {
       setSavingRoleId(null);
     }
@@ -575,7 +576,7 @@ export const RolesPermissions = () => {
       if (fetchUserProfile) await fetchUserProfile();
     } catch (err) {
       console.error(err);
-      showToast(err?.response?.data?.message || 'Failed to save some permissions', 'error');
+      showToast(err?.response?.data?.message || err?.message || 'Failed to save some permissions', 'error');
     } finally {
       setSavingAll(false);
     }
@@ -608,7 +609,7 @@ export const RolesPermissions = () => {
       setRoleModalOpen(false);
       await loadRolesAndCatalog();
     } catch (err) {
-      showToast(err?.response?.data?.message || 'Failed to save role', 'error');
+      showToast(err?.response?.data?.message || err?.message || 'Failed to save role', 'error');
     } finally {
       setSubmittingRole(false);
     }
@@ -625,7 +626,7 @@ export const RolesPermissions = () => {
       setRoleToDelete(null);
       await loadRolesAndCatalog();
     } catch (err) {
-      showToast(err?.response?.data?.message || 'Failed to delete role', 'error');
+      showToast(err?.response?.data?.message || err?.message || 'Failed to delete role', 'error');
     } finally {
       setDeletingRole(false);
     }

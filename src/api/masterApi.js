@@ -1,4 +1,5 @@
 import apiClient from './client';
+import { roleApi } from './roleApi';
 
 export const masterApi = {
   // Companies
@@ -69,8 +70,19 @@ export const masterApi = {
     return res.data;
   },
   deleteBranch: async (id) => {
-    const res = await apiClient.delete(`/branches/${id}`);
-    return res.data;
+    try {
+      const res = await apiClient.delete(`/branches/${id}`);
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 409) {
+        const msg = err.response?.data?.message || 'Cannot delete branch. It has associated users or records. Reassign them first.';
+        const conflictErr = new Error(msg);
+        conflictErr.status = 409;
+        conflictErr.response = err.response;
+        throw conflictErr;
+      }
+      throw err;
+    }
   },
 
   // Departments
@@ -105,8 +117,19 @@ export const masterApi = {
     return res.data;
   },
   deleteDepartment: async (id) => {
-    const res = await apiClient.delete(`/departments/${id}`);
-    return res.data;
+    try {
+      const res = await apiClient.delete(`/departments/${id}`);
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 409) {
+        const msg = err.response?.data?.message || 'Cannot delete department. It has associated employees or designations. Reassign them first.';
+        const conflictErr = new Error(msg);
+        conflictErr.status = 409;
+        conflictErr.response = err.response;
+        throw conflictErr;
+      }
+      throw err;
+    }
   },
 
   // Designations
@@ -229,96 +252,30 @@ export const masterApi = {
 
   // DELETE /designations/:id — Safe delete (blocked if employees assigned)
   deleteDesignation: async (id) => {
-    const res = await apiClient.delete(`/designations/${id}`);
-    return res.data;
-  },
-
-
-  // Roles & Permissions
-  getRoles: async (params) => {
     try {
-      const res = await apiClient.get('/roles', { params });
+      const res = await apiClient.delete(`/designations/${id}`);
       return res.data;
     } catch (err) {
-      if (err.response?.status === 403) return { data: [], roles: [] };
-      throw err;
-    }
-  },
-  getRoleById: async (id) => {
-    const res = await apiClient.get(`/roles/${id}`);
-    return res.data;
-  },
-  createRole: async (data) => {
-    const res = await apiClient.post('/roles', data);
-    return res.data;
-  },
-  updateRole: async (id, data) => {
-    const res = await apiClient.put(`/roles/${id}`, data);
-    return res.data;
-  },
-  deleteRole: async (id) => {
-    const res = await apiClient.delete(`/roles/${id}`);
-    return res.data;
-  },
-  getPermissionCatalog: async () => {
-    try {
-      const res = await apiClient.get('/roles/permission-catalog');
-      return res.data;
-    } catch (err) {
-      if (err.response?.status === 403 || err.response?.status === 401) return { data: null };
-      throw err;
-    }
-  },
-  updateRolePermissions: async (id, permissions) => {
-    // Sanitize permissions to ensure all values are valid PermissionActions objects (never bare booleans)
-    const sanitized = {};
-    const ALL_ACTIONS = [
-      'view', 'create', 'edit', 'delete', 'approve', 'reject',
-      'export', 'print', 'download', 'uploadDocuments', 'assignTasks', 'viewReports'
-    ];
-
-    if (permissions && typeof permissions === 'object') {
-      for (const [k, v] of Object.entries(permissions)) {
-        if (!k || typeof k !== 'string') continue;
-        if (v === true) {
-          const actObj = {};
-          ALL_ACTIONS.forEach((a) => { actObj[a] = true; });
-          sanitized[k] = actObj;
-        } else if (v === false) {
-          const actObj = {};
-          ALL_ACTIONS.forEach((a) => { actObj[a] = false; });
-          sanitized[k] = actObj;
-        } else if (typeof v === 'object' && v !== null) {
-          const actObj = {};
-          ALL_ACTIONS.forEach((a) => {
-            actObj[a] = v[a] !== undefined ? Boolean(v[a]) : Object.values(v).some(Boolean);
-          });
-          sanitized[k] = actObj;
-        }
-      }
-    }
-
-    try {
-      const res = await apiClient.put(`/roles/${id}/permissions`, { permissions: sanitized }, { timeout: 30000 });
-      return res.data;
-    } catch (err) {
-      console.warn('updateRolePermissions primary payload failed, attempting resilient fallback:', err.message);
-      if (err.response?.status === 500 || err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        try {
-          const res2 = await apiClient.put(`/roles/${id}/permissions`, sanitized, { timeout: 15000 });
-          return res2.data;
-        } catch {
-          try {
-            const res3 = await apiClient.put(`/roles/${id}`, { permissions: sanitized }, { timeout: 15000 });
-            return res3.data;
-          } catch {
-            throw err;
-          }
-        }
+      if (err.response?.status === 409) {
+        const msg = err.response?.data?.message || 'Cannot delete designation. It has associated employees. Reassign them first.';
+        const conflictErr = new Error(msg);
+        conflictErr.status = 409;
+        conflictErr.response = err.response;
+        throw conflictErr;
       }
       throw err;
     }
   },
+
+
+  // Roles & Permissions (delegated to dedicated roleApi)
+  getRoles: (params) => roleApi.getRoles(params),
+  getRoleById: (id) => roleApi.getRoleById(id),
+  createRole: (data) => roleApi.createRole(data),
+  updateRole: (id, data) => roleApi.updateRole(id, data),
+  deleteRole: (id) => roleApi.deleteRole(id),
+  getPermissionCatalog: () => roleApi.getPermissionCatalog(),
+  updateRolePermissions: (id, permissions) => roleApi.updateRolePermissions(id, permissions),
 
   // Users
   getUsers: async (params) => {
@@ -338,8 +295,19 @@ export const masterApi = {
     return res.data;
   },
   deleteUser: async (id) => {
-    const res = await apiClient.delete(`/users/${id}`);
-    return res.data;
+    try {
+      const res = await apiClient.delete(`/users/${id}`);
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 409) {
+        const msg = err.response?.data?.message || 'Cannot delete user. They have associated records. Please deactivate them instead.';
+        const conflictErr = new Error(msg);
+        conflictErr.status = 409;
+        conflictErr.response = err.response;
+        throw conflictErr;
+      }
+      throw err;
+    }
   },
   updateUserStatus: async (id, isActive) => {
     try {
@@ -376,5 +344,6 @@ export const masterApi = {
   },
 };
 
+export { roleApi };
 export default masterApi;
 

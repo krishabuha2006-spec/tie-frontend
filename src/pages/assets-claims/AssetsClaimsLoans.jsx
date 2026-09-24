@@ -40,6 +40,7 @@ import Button from '../../components/common/Button';
 import Input from '../../components/common/Input';
 import Select from '../../components/common/Select';
 import Badge from '../../components/common/Badge';
+import { extractApiData } from '../../utils/apiUtils';
 
 export const AssetsClaimsLoans = () => {
   const { user, isSuperAdmin, isHrAdmin } = useAuth();
@@ -232,7 +233,7 @@ export const AssetsClaimsLoans = () => {
     setLoadingAssets(true);
     try {
       const res = await assetsLoansApi.getAssets();
-      const list = Array.isArray(res) ? res : res?.data || res?.assets || [];
+      const list = extractApiData(res, 'assets', 'data');
       setAssets(list);
     } catch (err) {
       showToast('Failed to load physical assets', 'error');
@@ -479,7 +480,7 @@ export const AssetsClaimsLoans = () => {
       } else {
         res = await assetsLoansApi.getAllClaims();
       }
-      const list = Array.isArray(res) ? res : res?.data || res?.claims || [];
+      const list = extractApiData(res, 'claims', 'data');
       setClaims(list);
     } catch (err) {
       showToast('Failed to load reimbursement claims', 'error');
@@ -640,7 +641,7 @@ export const AssetsClaimsLoans = () => {
       } else {
         res = await assetsLoansApi.getAllLoans();
       }
-      const list = Array.isArray(res) ? res : res?.data || res?.loans || [];
+      const list = extractApiData(res, 'loans', 'requests', 'data');
       setLoans(list);
     } catch (err) {
       showToast('Failed to load loan requests', 'error');

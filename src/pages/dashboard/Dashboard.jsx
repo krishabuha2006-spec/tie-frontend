@@ -41,6 +41,7 @@ import CameraCapture from '../../components/common/CameraCapture';
 import GeoLocationPicker from '../../components/common/GeoLocationPicker';
 import { calculateDistanceMeters, resolveBranchLocation } from '../../utils/geoUtils';
 import { compareFacePhotos, resolveRegisteredSelfie } from '../../utils/faceComparison';
+import { extractApiData } from '../../utils/apiUtils';
 
 export const Dashboard = () => {
   const {
@@ -56,6 +57,8 @@ export const Dashboard = () => {
     isProjectExecutive,
     isEmployee,
     canAccessModule,
+    hasWidget,
+    dashboardWidgets,
   } = useAuth();
 
   const isOrgAdmin = isSuperAdmin || isHrAdmin || isDirector || isBranchManager;
@@ -161,14 +164,14 @@ export const Dashboard = () => {
         const [empRes, attRes, leaveRes] = await Promise.allSettled(stage1Calls);
 
         const empDataVal = empRes.status === 'fulfilled' ? empRes.value : {};
-        const employeesList = empDataVal?.data || empDataVal?.employees || (Array.isArray(empDataVal) ? empDataVal : []);
+        const employeesList = extractApiData(empDataVal, 'employees');
         const totalEmps = empDataVal?.count ?? (empDataVal?.total || employeesList.length);
 
         const attDataVal = attRes.status === 'fulfilled' ? attRes.value : {};
-        const todayAttList = attDataVal?.data || (Array.isArray(attDataVal) ? attDataVal : []);
+        const todayAttList = extractApiData(attDataVal, 'attendance', 'records', 'sessions');
 
         const leaveDataVal = leaveRes.status === 'fulfilled' ? leaveRes.value : {};
-        const leavesList = leaveDataVal?.data || leaveDataVal?.leaves || (Array.isArray(leaveDataVal) ? leaveDataVal : []);
+        const leavesList = extractApiData(leaveDataVal, 'leaves', 'leaveRequests');
 
         setStats((prev) => ({
           ...prev,
@@ -186,7 +189,7 @@ export const Dashboard = () => {
         if (myEmpId) {
           try {
             const myAtt = await attendanceApi.getMyOfficeAttendance({ date: todayStr }).catch(() => null);
-            const myAttList = Array.isArray(myAtt) ? myAtt : myAtt?.data || myAtt?.records || [];
+            const myAttList = extractApiData(myAtt, 'records', 'sessions', 'attendance');
             const myRecord = myAttList.find((r) => {
               const d = r.date ? String(r.date).substring(0, 10) : '';
               const c = r.checkInTime ? String(r.checkInTime).substring(0, 10) : '';
@@ -222,13 +225,13 @@ export const Dashboard = () => {
         const [taskRes, projRes, assetsRes] = await Promise.allSettled(stage2Calls);
 
         const taskDataVal = taskRes.status === 'fulfilled' ? taskRes.value : {};
-        const tasksList = taskDataVal?.data || taskDataVal?.tasks || (Array.isArray(taskDataVal) ? taskDataVal : []);
+        const tasksList = extractApiData(taskDataVal, 'tasks');
 
         const projDataVal = projRes.status === 'fulfilled' ? projRes.value : {};
-        const projList = projDataVal?.data || projDataVal?.projects || (Array.isArray(projDataVal) ? projDataVal : []);
+        const projList = extractApiData(projDataVal, 'projects');
 
         const assetsDataVal = assetsRes.status === 'fulfilled' ? assetsRes.value : {};
-        const assetsList = assetsDataVal?.data || assetsDataVal?.assets || (Array.isArray(assetsDataVal) ? assetsDataVal : []);
+        const assetsList = extractApiData(assetsDataVal, 'assets', 'items');
 
         setStats((prev) => ({
           ...prev,
@@ -254,22 +257,23 @@ export const Dashboard = () => {
         const [jobRes, candRes, payrollRes, deptRes, branchRes, compRes] = await Promise.allSettled(stage3Calls);
 
         const jobDataVal = jobRes.status === 'fulfilled' ? jobRes.value : {};
-        const openJobsCount = jobDataVal?.total || jobDataVal?.count || (Array.isArray(jobDataVal?.data) ? jobDataVal.data.length : 0);
+        const jobsList = extractApiData(jobDataVal, 'jobs', 'openings');
+        const openJobsCount = jobDataVal?.total || jobDataVal?.count || jobsList.length;
 
         const candDataVal = candRes.status === 'fulfilled' ? candRes.value : {};
-        const candsList = candDataVal?.data || (Array.isArray(candDataVal) ? candDataVal : []);
+        const candsList = extractApiData(candDataVal, 'candidates');
 
         const payrollDataVal = payrollRes.status === 'fulfilled' ? payrollRes.value : {};
-        const payrollList = payrollDataVal?.data || (Array.isArray(payrollDataVal) ? payrollDataVal : []);
+        const payrollList = extractApiData(payrollDataVal, 'payrollRuns', 'payrolls', 'records');
 
         const deptDataVal = deptRes.status === 'fulfilled' ? deptRes.value : {};
-        const deptsList = deptDataVal?.data || deptDataVal?.departments || (Array.isArray(deptDataVal) ? deptDataVal : []);
+        const deptsList = extractApiData(deptDataVal, 'departments');
 
         const branchDataVal = branchRes.status === 'fulfilled' ? branchRes.value : {};
-        const branchesList = branchDataVal?.data || branchDataVal?.branches || (Array.isArray(branchDataVal) ? branchDataVal : []);
+        const branchesList = extractApiData(branchDataVal, 'branches');
 
         const compDataVal = compRes.status === 'fulfilled' ? compRes.value : {};
-        const compsList = compDataVal?.data || compDataVal?.companies || (Array.isArray(compDataVal) ? compDataVal : []);
+        const compsList = extractApiData(compDataVal, 'companies');
 
         setStats((prev) => ({
           ...prev,

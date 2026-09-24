@@ -26,6 +26,7 @@ import Select from '../../components/common/Select';
 import Badge from '../../components/common/Badge';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { recruitmentNav } from '../../routes/moduleNavConfig';
+import { extractApiData } from '../../utils/apiUtils';
 
 export const Candidates = () => {
   const navigate = useNavigate();
@@ -91,9 +92,9 @@ export const Candidates = () => {
         recruitmentApi.getLetterTemplates(),
       ]);
 
-      const cList = cRes?.data || cRes?.candidates || (Array.isArray(cRes) ? cRes : []);
-      const jList = jRes?.data || jRes?.jobs || jRes?.jobOpenings || (Array.isArray(jRes) ? jRes : []);
-      const tList = tRes?.data || tRes?.templates || tRes?.letterTemplates || (Array.isArray(tRes) ? tRes : []);
+      const cList = extractApiData(cRes, 'candidates', 'data');
+      const jList = extractApiData(jRes, 'jobs', 'jobOpenings', 'data');
+      const tList = extractApiData(tRes, 'templates', 'letterTemplates', 'data');
 
       setCandidates(cList);
       setJobOpenings(jList);

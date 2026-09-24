@@ -12,6 +12,7 @@ import {
 import Modal from '../../components/common/Modal';
 import Button from '../../components/common/Button';
 import Badge from '../../components/common/Badge';
+import { extractApiData } from '../../utils/apiUtils';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -70,15 +71,7 @@ export const PayrollPayslips = () => {
   });
 
   // Helper to extract array safely from various backend shapes
-  const toList = (res) => {
-    if (Array.isArray(res)) return res;
-    if (Array.isArray(res?.data)) return res.data;
-    if (Array.isArray(res?.runs)) return res.runs;
-    if (Array.isArray(res?.structures)) return res.structures;
-    if (Array.isArray(res?.payslips)) return res.payslips;
-    if (Array.isArray(res?.employees)) return res.employees;
-    return [];
-  };
+  const toList = (res) => extractApiData(res, 'runs', 'structures', 'payslips', 'employees', 'lineItems', 'data');
 
   // Load Masters
   useEffect(() => {

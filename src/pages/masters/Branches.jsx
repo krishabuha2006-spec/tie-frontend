@@ -13,6 +13,7 @@ import ConfirmDialog from '../../components/common/ConfirmDialog';
 import Badge from '../../components/common/Badge';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { mastersNav } from '../../routes/moduleNavConfig';
+import { extractApiData } from '../../utils/apiUtils';
 
 export const Branches = () => {
   const [branches, setBranches] = useState([]);
@@ -49,8 +50,8 @@ export const Branches = () => {
         masterApi.getBranches(),
         masterApi.getCompanies(),
       ]);
-      const branchList = Array.isArray(brRes) ? brRes : (Array.isArray(brRes?.data) ? brRes.data : (brRes?.branches || brRes?.data?.branches || []));
-      const compList = Array.isArray(compRes) ? compRes : (Array.isArray(compRes?.data) ? compRes.data : (compRes?.companies || compRes?.data?.companies || []));
+      const branchList = extractApiData(brRes, 'branches', 'data');
+      const compList = extractApiData(compRes, 'companies', 'data');
       setBranches(branchList);
       setCompanies(compList);
     } catch (err) {

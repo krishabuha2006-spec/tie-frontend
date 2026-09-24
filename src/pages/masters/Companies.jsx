@@ -11,6 +11,7 @@ import ConfirmDialog from '../../components/common/ConfirmDialog';
 import Badge from '../../components/common/Badge';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { mastersNav } from '../../routes/moduleNavConfig';
+import { extractApiData } from '../../utils/apiUtils';
 
 export const Companies = () => {
   const [companies, setCompanies] = useState([]);
@@ -42,9 +43,7 @@ export const Companies = () => {
     setLoading(true);
     try {
       const res = await masterApi.getCompanies();
-      const list = Array.isArray(res)
-        ? res
-        : (Array.isArray(res?.data) ? res.data : (res?.companies || res?.data?.companies || []));
+      const list = extractApiData(res, 'companies', 'data');
       setCompanies(list);
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to load companies from backend', 'error');
@@ -126,6 +125,7 @@ export const Companies = () => {
         state: formData.state,
         country: formData.country,
         postalCode: formData.postalCode,
+        pincode: formData.postalCode,
       },
     };
 

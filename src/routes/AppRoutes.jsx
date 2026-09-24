@@ -81,6 +81,25 @@ export const AppRoutes = () => {
         <Route path="hrm/recruitment" element={<Navigate to="/recruitment/jobs" replace />} />
         <Route path="hrm/assets-claims" element={<Navigate to="/assets-claims" replace />} />
 
+        {/* Backend Menu Aliases (/hrms/*, /admin/*, /project/*, /accounting) */}
+        <Route path="hrms" element={<Navigate to="/employees" replace />} />
+        <Route path="hrms/employees" element={<Navigate to="/employees" replace />} />
+        <Route path="hrms/attendance" element={<Navigate to="/attendance" replace />} />
+        <Route path="hrms/leaves" element={<Navigate to="/leaves" replace />} />
+        <Route path="hrms/payroll" element={<Navigate to="/payroll" replace />} />
+        <Route path="hrms/kra" element={<Navigate to="/performance" replace />} />
+        <Route path="hrms/assets" element={<Navigate to="/assets-claims" replace />} />
+        <Route path="hrm/kra" element={<Navigate to="/performance" replace />} />
+        <Route path="hrm/assets" element={<Navigate to="/assets-claims" replace />} />
+        <Route path="admin" element={<Navigate to="/masters/companies" replace />} />
+        <Route path="admin/roles" element={<Navigate to="/masters/roles" replace />} />
+        <Route path="admin/users" element={<Navigate to="/masters/users" replace />} />
+        <Route path="admin/settings" element={<Navigate to="/masters/companies" replace />} />
+        <Route path="project" element={<Navigate to="/operations/projects" replace />} />
+        <Route path="project/tasks" element={<Navigate to="/operations/tasks" replace />} />
+        <Route path="project/attendance" element={<Navigate to="/attendance/site" replace />} />
+        <Route path="accounting" element={<Navigate to="/payroll" replace />} />
+
         {/* Employees */}
         <Route
           path="employees"

@@ -27,6 +27,7 @@ import Button from '../../components/common/Button';
 import Input from '../../components/common/Input';
 import Select from '../../components/common/Select';
 import Badge from '../../components/common/Badge';
+import { extractApiData } from '../../utils/apiUtils';
 
 export const PerformanceReviews = () => {
   const confirm = useConfirm();
@@ -125,10 +126,10 @@ export const PerformanceReviews = () => {
         employeeApi.getEmployees({ limit: 100 }).catch(() => ({ data: [] })),
         performanceApi.getKraTemplates().catch(() => ({ data: [] })),
       ]);
-      const compList = Array.isArray(cRes) ? cRes : cRes?.data || [];
-      const deptList = Array.isArray(dRes) ? dRes : dRes?.data || [];
-      const empList = Array.isArray(eRes) ? eRes : eRes?.data || [];
-      const tpls = Array.isArray(tplRes) ? tplRes : tplRes?.data || tplRes?.templates || [];
+      const compList = extractApiData(cRes, 'companies', 'data');
+      const deptList = extractApiData(dRes, 'departments', 'data');
+      const empList = extractApiData(eRes, 'employees', 'data');
+      const tpls = extractApiData(tplRes, 'templates', 'kraTemplates', 'data');
 
       setCompanies(compList);
       setDepartments(deptList);
@@ -153,7 +154,7 @@ export const PerformanceReviews = () => {
     setLoadingReviews(true);
     try {
       const res = await performanceApi.getPendingManagerReviews();
-      const list = Array.isArray(res) ? res : res?.data || res?.reviews || [];
+      const list = extractApiData(res, 'reviews', 'data');
       setAllReviews(list);
     } catch (err) {
       showToast('Failed to load performance reviews', 'error');
@@ -201,7 +202,7 @@ export const PerformanceReviews = () => {
       } else {
         res = await performanceApi.getMyReviews();
       }
-      const list = Array.isArray(res) ? res : res?.data || res?.reviews || [];
+      const list = extractApiData(res, 'reviews', 'data');
       setMyReviews(list);
     } catch (err) {
       if (err.response?.status === 400) {
@@ -254,7 +255,7 @@ export const PerformanceReviews = () => {
     setLoadingManagerQueue(true);
     try {
       const res = await performanceApi.getPendingManagerReviews();
-      const list = Array.isArray(res) ? res : res?.data || res?.reviews || [];
+      const list = extractApiData(res, 'reviews', 'data');
       setManagerQueue(list);
     } catch (err) {
       showToast('Failed to load pending evaluations', 'error');
@@ -304,7 +305,7 @@ export const PerformanceReviews = () => {
     setLoadingTemplates(true);
     try {
       const res = await performanceApi.getKraTemplates();
-      const list = Array.isArray(res) ? res : res?.data || res?.templates || [];
+      const list = extractApiData(res, 'templates', 'kraTemplates', 'data');
       setKraTemplates(list);
     } catch (err) {
       showToast('Failed to load KRA templates', 'error');

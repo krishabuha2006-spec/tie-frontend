@@ -11,17 +11,10 @@ import ConfirmDialog from '../../components/common/ConfirmDialog';
 import Badge from '../../components/common/Badge';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { mastersNav } from '../../routes/moduleNavConfig';
+import { extractApiData } from '../../utils/apiUtils';
 
 /** Normalize any backend response shape into a plain array */
-const extractList = (res, ...keys) => {
-  if (Array.isArray(res)) return res;
-  for (const k of keys) {
-    if (res && Array.isArray(res[k])) return res[k];
-    if (res?.data && Array.isArray(res.data[k])) return res.data[k];
-  }
-  if (res && Array.isArray(res.data)) return res.data;
-  return [];
-};
+const extractList = (res, ...keys) => extractApiData(res, ...keys, 'data');
 
 const LEVEL_OPTIONS = Array.from({ length: 10 }, (_, i) => ({
   value: String(i + 1),

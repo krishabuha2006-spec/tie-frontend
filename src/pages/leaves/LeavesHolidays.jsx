@@ -34,6 +34,7 @@ import Button from '../../components/common/Button';
 import Input from '../../components/common/Input';
 import Select from '../../components/common/Select';
 import Badge from '../../components/common/Badge';
+import { extractApiData } from '../../utils/apiUtils';
 
 export const LeavesHolidays = () => {
   const confirm = useConfirm();
@@ -146,11 +147,7 @@ export const LeavesHolidays = () => {
       }
 
       if (cRes.status === 'fulfilled') {
-        const cList = Array.isArray(cRes.value)
-          ? cRes.value
-          : Array.isArray(cRes.value?.data)
-          ? cRes.value.data
-          : cRes.value?.companies || [];
+        const cList = extractApiData(cRes.value, 'companies', 'data');
         setCompanies(cList);
         if (cList.length > 0) {
           setHolidayForm((prev) => ({ ...prev, reference: cList[0]._id }));
@@ -160,11 +157,7 @@ export const LeavesHolidays = () => {
       }
 
       if (ltRes.status === 'fulfilled') {
-        const ltList = Array.isArray(ltRes.value)
-          ? ltRes.value
-          : Array.isArray(ltRes.value?.data)
-          ? ltRes.value.data
-          : ltRes.value?.leaveTypes || [];
+        const ltList = extractApiData(ltRes.value, 'leaveTypes', 'data');
         setLeaveTypes(ltList);
         if (ltList.length > 0) {
           setLeaveForm((prev) => ({ ...prev, leaveType: ltList[0]._id }));
@@ -181,11 +174,7 @@ export const LeavesHolidays = () => {
     setLoadingPending(true);
     try {
       const res = await leaveHolidayApi.getPendingLeaveApprovals();
-      const list = Array.isArray(res)
-        ? res
-        : Array.isArray(res?.data)
-        ? res.data
-        : res?.pendingRequests || res?.requests || [];
+      const list = extractApiData(res, 'pendingRequests', 'leaveRequests', 'requests', 'data');
       setPendingRequests(list);
     } catch {
       setPendingRequests([]);
@@ -199,11 +188,7 @@ export const LeavesHolidays = () => {
     setLoadingMyRequests(true);
     try {
       const res = await leaveHolidayApi.getMyLeaveRequests();
-      const list = Array.isArray(res)
-        ? res
-        : Array.isArray(res?.data)
-        ? res.data
-        : res?.requests || [];
+      const list = extractApiData(res, 'leaveRequests', 'requests', 'data');
       setMyRequests(list);
     } catch {
       setMyRequests([]);
@@ -217,11 +202,7 @@ export const LeavesHolidays = () => {
     setLoadingLeaveTypes(true);
     try {
       const res = await leaveHolidayApi.getLeaveTypes();
-      const list = Array.isArray(res)
-        ? res
-        : Array.isArray(res?.data)
-        ? res.data
-        : res?.leaveTypes || [];
+      const list = extractApiData(res, 'leaveTypes', 'data');
       setLeaveTypes(list);
     } catch {
       setLeaveTypes([]);
@@ -249,11 +230,7 @@ export const LeavesHolidays = () => {
     setLoadingHolidays(true);
     try {
       const res = await leaveHolidayApi.getHolidays();
-      const list = Array.isArray(res)
-        ? res
-        : Array.isArray(res?.data)
-        ? res.data
-        : res?.holidays || [];
+      const list = extractApiData(res, 'holidays', 'data');
       setHolidays(list);
     } catch {
       setHolidays([]);
@@ -267,11 +244,7 @@ export const LeavesHolidays = () => {
     setLoadingWeeklyOffs(true);
     try {
       const res = await leaveHolidayApi.getWeeklyOffConfigs();
-      const list = Array.isArray(res)
-        ? res
-        : Array.isArray(res?.data)
-        ? res.data
-        : res?.configs || [];
+      const list = extractApiData(res, 'configs', 'weeklyOffs', 'data');
       setWeeklyOffs(list);
     } catch {
       setWeeklyOffs([]);

@@ -11,6 +11,7 @@ import ConfirmDialog from '../../components/common/ConfirmDialog';
 import Badge from '../../components/common/Badge';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { mastersNav } from '../../routes/moduleNavConfig';
+import { extractApiData } from '../../utils/apiUtils';
 
 export const Departments = () => {
   const [departments, setDepartments] = useState([]);
@@ -38,8 +39,8 @@ export const Departments = () => {
         masterApi.getDepartments(),
         masterApi.getCompanies(),
       ]);
-      const deptList = Array.isArray(deptRes) ? deptRes : (Array.isArray(deptRes?.data) ? deptRes.data : (deptRes?.departments || deptRes?.data?.departments || []));
-      const compList = Array.isArray(compRes) ? compRes : (Array.isArray(compRes?.data) ? compRes.data : (compRes?.companies || compRes?.data?.companies || []));
+      const deptList = extractApiData(deptRes, 'departments', 'data');
+      const compList = extractApiData(compRes, 'companies', 'data');
       setDepartments(deptList);
       setCompanies(compList);
     } catch (err) {

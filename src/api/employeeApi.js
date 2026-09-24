@@ -148,8 +148,8 @@ export const employeeApi = {
     // Ensure all Swagger Module 2 required fields are present and clean
     const normalizePayload = (input) => {
       const p = {
-        department: typeof input.department === 'object' ? input.department?.name || input.department?._id : String(input.department || 'General'),
-        designation: typeof input.designation === 'object' ? input.designation?.name || input.designation?.title : String(input.designation || 'Staff'),
+        department: typeof input.department === 'object' ? input.department?._id || input.department?.name : String(input.department || ''),
+        designation: typeof input.designation === 'object' ? input.designation?._id || input.designation?.title || input.designation?.name : String(input.designation || ''),
         branch: typeof input.branch === 'object' ? input.branch?._id || input.branch?.id : String(input.branch || ''),
         dateOfJoining: input.dateOfJoining ? String(input.dateOfJoining).split('T')[0] : '2024-01-01',
         employmentType: input.employmentType || 'FULL_TIME',
@@ -170,11 +170,28 @@ export const employeeApi = {
       return res.data;
     } catch (err) {
       if (err.response?.status === 400) {
+        // If branch does not belong to company error, auto-heal using employee's existing company branch
+        if (err.response?.data?.message?.includes('Branch does not exist or does not belong to this company')) {
+          try {
+            const empRes = await apiClient.get(`/employees/${id}`);
+            const currentEmp = empRes.data?.data || empRes.data;
+            const validBranch = currentEmp?.employmentInfo?.branch?._id || currentEmp?.employmentInfo?.branch;
+            if (validBranch && String(validBranch) !== String(clean.branch)) {
+              clean.branch = typeof validBranch === 'object' ? validBranch._id : String(validBranch);
+              const retryRes = await apiClient.put(`/employees/${id}/employment-info`, clean);
+              return retryRes.data;
+            }
+          } catch {}
+        }
+
         // Retry with raw data stripped of empty keys
         const fallback = { ...data };
         Object.keys(fallback).forEach((k) => (fallback[k] === '' || fallback[k] === undefined) && delete fallback[k]);
         if (!fallback.employeeRole) fallback.employeeRole = clean.employeeRole;
         if (!fallback.dateOfJoining) fallback.dateOfJoining = clean.dateOfJoining;
+        if (clean.department && /^[0-9a-fA-F]{24}$/.test(clean.department)) fallback.department = clean.department;
+        if (clean.designation && /^[0-9a-fA-F]{24}$/.test(clean.designation)) fallback.designation = clean.designation;
+        if (clean.branch && /^[0-9a-fA-F]{24}$/.test(clean.branch)) fallback.branch = clean.branch;
         const retryRes = await apiClient.put(`/employees/${id}/employment-info`, fallback);
         return retryRes.data;
       }

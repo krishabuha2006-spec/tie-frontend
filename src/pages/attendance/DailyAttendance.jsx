@@ -34,6 +34,7 @@ import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { attendanceNav } from '../../routes/moduleNavConfig';
 import { calculateDistanceMeters, resolveBranchLocation } from '../../utils/geoUtils';
 import { compareFacePhotos, resolveRegisteredSelfie } from '../../utils/faceComparison';
+import { extractApiData } from '../../utils/apiUtils';
 
 const getEmpName = (emp) =>
   emp?.basicInfo?.fullName ||
@@ -410,19 +411,16 @@ export const DailyAttendance = () => {
 
       if (activeTab === 'OFFICE') {
         const res = attRes.status === 'fulfilled' ? attRes.value : null;
-        list = Array.isArray(res) ? res
-          : Array.isArray(res?.records) ? res.records
-          : Array.isArray(res?.data) ? res.data
-          : [];
+        list = extractApiData(res, 'records', 'data');
       } else {
         const settledSub = attRes.status === 'fulfilled' && Array.isArray(attRes.value) ? attRes.value : [];
         const fieldRes = settledSub[0];
         const siteRes = settledSub[1];
         const fieldList = fieldRes?.status === 'fulfilled'
-          ? (Array.isArray(fieldRes.value) ? fieldRes.value : Array.isArray(fieldRes.value?.records) ? fieldRes.value.records : Array.isArray(fieldRes.value?.data) ? fieldRes.value.data : [])
+          ? extractApiData(fieldRes.value, 'records', 'data')
           : [];
         const siteList = siteRes?.status === 'fulfilled'
-          ? (Array.isArray(siteRes.value) ? siteRes.value : Array.isArray(siteRes.value?.records) ? siteRes.value.records : Array.isArray(siteRes.value?.data) ? siteRes.value.data : [])
+          ? extractApiData(siteRes.value, 'records', 'data')
           : [];
         list = [
           ...fieldList.map((r) => ({ ...r, _subType: 'FIELD' })),

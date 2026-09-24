@@ -37,6 +37,7 @@ import Select from '../../components/common/Select';
 import Badge from '../../components/common/Badge';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { operationsNav } from '../../routes/moduleNavConfig';
+import { extractApiData } from '../../utils/apiUtils';
 
 export const ProjectsSites = () => {
   // Navigation Tabs
@@ -117,21 +118,11 @@ export const ProjectsSites = () => {
       ]);
 
       if (pRes.status === 'fulfilled') {
-        const pVal = pRes.value;
-        const pList = Array.isArray(pVal)
-          ? pVal
-          : Array.isArray(pVal?.data)
-          ? pVal.data
-          : pVal?.projects || [];
+        const pList = extractApiData(pRes.value, 'projects', 'data');
         setProjects(pList);
       }
       if (cRes.status === 'fulfilled') {
-        const cVal = cRes.value;
-        const cList = Array.isArray(cVal)
-          ? cVal
-          : Array.isArray(cVal?.data)
-          ? cVal.data
-          : cVal?.companies || [];
+        const cList = extractApiData(cRes.value, 'companies', 'data');
         setCompanies(cList);
       }
       if (eRes.status === 'fulfilled') {
@@ -156,13 +147,7 @@ export const ProjectsSites = () => {
       if (taskFilters.site) params.site = taskFilters.site;
 
       const res = await projectTaskApi.getSiteTasks(params);
-      const list = Array.isArray(res)
-        ? res
-        : Array.isArray(res?.tasks)
-        ? res.tasks
-        : Array.isArray(res?.data)
-        ? res.data
-        : [];
+      const list = extractApiData(res, 'tasks', 'data');
       setTasks(list);
     } catch (err) {
       console.error('Failed to load site tasks', err);

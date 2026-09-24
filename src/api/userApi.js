@@ -68,13 +68,20 @@ export const userApi = {
 
   // Super Admin: Create new user with schema-resilient payload variations
   createUser: async (userData) => {
-    // Attempt 1: Standard clean payload with canonical Mongoose fields
+    // Build the roles array (multi-role support)
+    const rolesArray = Array.isArray(userData.roles) && userData.roles.length > 0
+      ? userData.roles
+      : (userData.role ? [userData.role] : []);
+    const primaryRole = rolesArray[0] || userData.role;
+
+    // Attempt 1: Standard clean payload with canonical Mongoose fields (roles array + role for compat)
     try {
       const payload1 = {
         name: userData.name?.trim(),
         email: userData.email?.trim().toLowerCase(),
         password: userData.password,
-        role: userData.role,
+        role: primaryRole,
+        roles: rolesArray.length > 0 ? rolesArray : undefined,
         branch: userData.branch || userData.branchId || undefined,
         company: userData.company || userData.companyId || undefined,
         mobile: userData.mobile || userData.phone || undefined,
@@ -94,6 +101,7 @@ export const userApi = {
             email: userData.email?.trim().toLowerCase(),
             password: userData.password,
             role: userData.roleName,
+            roles: rolesArray.length > 0 ? rolesArray : undefined,
             branch: userData.branch || userData.branchId || undefined,
             company: userData.company || userData.companyId || undefined,
             isActive: userData.isActive !== false,
@@ -112,8 +120,9 @@ export const userApi = {
           name: userData.name?.trim(),
           email: userData.email?.trim().toLowerCase(),
           password: userData.password,
-          role: userData.role,
-          roleId: userData.role,
+          role: primaryRole,
+          roles: rolesArray.length > 0 ? rolesArray : undefined,
+          roleId: primaryRole,
           branchId: userData.branchId || userData.branch || undefined,
           companyId: userData.companyId || userData.company || undefined,
           isActive: userData.isActive !== false,
@@ -135,8 +144,19 @@ export const userApi = {
 
   // Super Admin: Delete user (DELETE /users/:id)
   deleteUser: async (id) => {
-    const res = await apiClient.delete(`/users/${id}`);
-    return res.data;
+    try {
+      const res = await apiClient.delete(`/users/${id}`);
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 409) {
+        const msg = err.response?.data?.message || 'Cannot delete user. They have associated records. Please deactivate them instead.';
+        const conflictErr = new Error(msg);
+        conflictErr.status = 409;
+        conflictErr.response = err.response;
+        throw conflictErr;
+      }
+      throw err;
+    }
   },
 
   // Super Admin: Toggle user activation status (PUT /api/users/:id/status)

@@ -129,6 +129,7 @@ export const Sidebar = ({ isMobileOpen, onCloseMobile }) => {
         { path: '/masters/departments', label: 'Departments', icon: Building2, module: 'departments' },
         { path: '/masters/designations', label: 'Designations', icon: Award, module: 'designations' },
         { path: '/masters/roles', label: 'Roles & RBAC', icon: ShieldCheck, module: 'roles' },
+
       ],
     },
   ];
@@ -234,6 +235,7 @@ export const Sidebar = ({ isMobileOpen, onCloseMobile }) => {
 
             // If user has no access to any sub-item in this group, hide the group
             if (visibleItems.length === 0) return null;
+            if (!isSuperAdmin && menu.module && !canAccessModule(menu.module)) return null;
 
             const GroupIcon = menu.icon;
             const isOpen = !!openMenus[menu.key];
