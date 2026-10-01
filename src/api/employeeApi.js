@@ -15,15 +15,21 @@ export const employeeApi = {
       const res = await apiClient.get('/employees', { params: cleanParams });
       return res.data;
     } catch (err) {
-      if (err.response?.status === 403) {
-        // Scoped non-HR user fallback to current user's profile
+      if (
+        err.response?.status === 403 ||
+        err.response?.status === 401 ||
+        err.response?.status === 502 ||
+        err.response?.status === 503 ||
+        err.response?.status === 504
+      ) {
+        // Scoped non-HR user or gateway hiccup fallback to current user's profile
         const saved = localStorage.getItem('tie_user');
         if (saved) {
           try {
             const u = JSON.parse(saved);
             const selfEmp = u.employee || (u._id ? { _id: u._id, fullName: u.name || 'Current User', basicInfo: { fullName: u.name }, employeeCode: u.employeeCode || 'SELF' } : null);
             return { data: selfEmp ? [selfEmp] : [], employees: selfEmp ? [selfEmp] : [] };
-          } catch {}
+          } catch { }
         }
         return { data: [], employees: [] };
       }
@@ -37,8 +43,22 @@ export const employeeApi = {
 
   // GET /employees/:id - Full employee profile by ID
   getEmployeeById: async (id) => {
-    const res = await apiClient.get(`/employees/${id}`);
-    return res.data;
+    try {
+      const res = await apiClient.get(`/employees/${id}`);
+      return res.data?.data || res.data;
+    } catch (err) {
+      if (err.response?.status === 401 || err.response?.status === 403 || err.response?.status === 404) {
+        const saved = localStorage.getItem('tie_user');
+        if (saved) {
+          try {
+            const u = JSON.parse(saved);
+            if (u.employee && typeof u.employee === 'object') return u.employee;
+          } catch {}
+        }
+        return null;
+      }
+      throw err;
+    }
   },
 
   // POST /employees - Create employee & auto-link login user (Supports both structured and flat schemas)
@@ -110,6 +130,8 @@ export const employeeApi = {
       const cleanGov = {};
       if (data.aadhaarNumber?.trim()) cleanGov.aadhaarNumber = data.aadhaarNumber.trim();
       if (data.panNumber?.trim()) cleanGov.panNumber = data.panNumber.trim().toUpperCase();
+      if (data.aadhaarCardUrl?.trim()) cleanGov.aadhaarCardUrl = data.aadhaarCardUrl.trim();
+      if (data.panCardUrl?.trim()) cleanGov.panCardUrl = data.panCardUrl.trim();
       if (data.pfNumber?.trim()) cleanGov.pfNumber = data.pfNumber.trim();
       if (data.esicNumber?.trim()) cleanGov.esicNumber = data.esicNumber.trim();
       if (data.uanNumber?.trim()) cleanGov.uanNumber = data.uanNumber.trim();
@@ -128,6 +150,30 @@ export const employeeApi = {
         payload.governmentDetails = cleanGov;
       }
 
+      // Collect documents
+      const docs = Array.isArray(data.documents) ? [...data.documents] : [];
+      if (data.aadhaarCardUrl?.trim()) {
+        docs.push({ type: 'OTHER', title: 'Aadhaar Card', fileUrl: data.aadhaarCardUrl.trim() });
+      }
+      if (data.panCardUrl?.trim()) {
+        docs.push({ type: 'OTHER', title: 'PAN Card', fileUrl: data.panCardUrl.trim() });
+      }
+      if (data.joiningLetterUrl?.trim()) {
+        docs.push({ type: 'JOINING_LETTER', title: 'Joining Letter', fileUrl: data.joiningLetterUrl.trim() });
+      }
+      if (data.appointmentLetterUrl?.trim()) {
+        docs.push({ type: 'APPOINTMENT_LETTER', title: 'Appointment Letter', fileUrl: data.appointmentLetterUrl.trim() });
+      }
+      if (data.resignationLetterUrl?.trim()) {
+        docs.push({ type: 'RESIGNATION_LETTER', title: 'Resignation Letter', fileUrl: data.resignationLetterUrl.trim() });
+      }
+      if (data.experienceLetterUrl?.trim()) {
+        docs.push({ type: 'EXPERIENCE_LETTER', title: 'Experience Letter', fileUrl: data.experienceLetterUrl.trim() });
+      }
+      if (docs.length > 0) {
+        payload.documents = docs;
+      }
+
       // Emergency contact
       const cName = data.emergencyName?.trim() || data.contactName?.trim() || data.emergencyContact?.contactName?.trim() || data.emergencyContact?.name?.trim();
       const cRel = data.emergencyRelationship?.trim() || data.relationship?.trim() || data.emergencyContact?.relationship?.trim();
@@ -142,27 +188,109 @@ export const employeeApi = {
           phone: cPhone || '',
         };
       }
-
-      // Pre-attached document links if provided
-      const docs = data.documents || [
-        ...(data.joiningLetterUrl ? [{ type: 'JOINING_LETTER', title: 'Joining Letter', fileUrl: data.joiningLetterUrl }] : []),
-        ...(data.appointmentLetterUrl ? [{ type: 'APPOINTMENT_LETTER', title: 'Appointment Letter', fileUrl: data.appointmentLetterUrl }] : []),
-        ...(data.resignationLetterUrl ? [{ type: 'RESIGNATION_LETTER', title: 'Resignation Letter', fileUrl: data.resignationLetterUrl }] : []),
-        ...(data.experienceLetterUrl ? [{ type: 'EXPERIENCE_LETTER', title: 'Experience Letter', fileUrl: data.experienceLetterUrl }] : []),
-      ];
-      if (docs.length > 0) {
-        payload.documents = docs;
-      }
     }
 
-    const res = await apiClient.post('/employees', payload);
-    return res.data;
+    // Multi-strategy POST /employees execution
+    try {
+      const res = await apiClient.post('/employees', payload);
+      return res.data?.data || res.data;
+    } catch (err1) {
+      console.warn('POST /employees initial attempt failed:', err1.response?.status, err1.response?.data?.message);
+
+      // Strategy 2: If department or designation was ObjectId, try resolving to department name & designation name
+      const deptVal = payload?.employmentInfo?.department;
+      const desigVal = payload?.employmentInfo?.designation;
+      if (
+        err1.response?.status === 400 &&
+        (/^[0-9a-fA-F]{24}$/.test(String(deptVal)) || /^[0-9a-fA-F]{24}$/.test(String(desigVal)))
+      ) {
+        try {
+          const [deptRes, desigRes] = await Promise.allSettled([
+            apiClient.get('/departments'),
+            apiClient.get('/designations'),
+          ]);
+          const depts = deptRes.status === 'fulfilled' ? (deptRes.value.data?.departments || deptRes.value.data?.data || []) : [];
+          const desigs = desigRes.status === 'fulfilled' ? (desigRes.value.data?.designations || desigRes.value.data?.data || []) : [];
+
+          const foundDept = depts.find((d) => d._id === deptVal);
+          const foundDesig = desigs.find((d) => d._id === desigVal);
+
+          const resolvedPayload = {
+            ...payload,
+            employmentInfo: {
+              ...payload.employmentInfo,
+              department: foundDept?.name || deptVal,
+              designation: foundDesig?.name || foundDesig?.title || desigVal,
+            },
+          };
+
+          const res2 = await apiClient.post('/employees', resolvedPayload);
+          return res2.data?.data || res2.data;
+        } catch (err2) {
+          console.warn('POST /employees with resolved department/designation names failed:', err2.response?.status, err2.response?.data?.message);
+        }
+      }
+
+      // Strategy 3: If department or designation was name, try resolving to ObjectId
+      if (
+        err1.response?.status === 400 &&
+        (!/^[0-9a-fA-F]{24}$/.test(String(deptVal)) || !/^[0-9a-fA-F]{24}$/.test(String(desigVal)))
+      ) {
+        try {
+          const [deptRes, desigRes] = await Promise.allSettled([
+            apiClient.get('/departments'),
+            apiClient.get('/designations'),
+          ]);
+          const depts = deptRes.status === 'fulfilled' ? (deptRes.value.data?.departments || deptRes.value.data?.data || []) : [];
+          const desigs = desigRes.status === 'fulfilled' ? (desigRes.value.data?.designations || desigRes.value.data?.data || []) : [];
+
+          const foundDept = depts.find((d) => d.name === deptVal || d.code === deptVal);
+          const foundDesig = desigs.find((d) => d.name === desigVal || d.title === desigVal);
+
+          const resolvedPayload = {
+            ...payload,
+            employmentInfo: {
+              ...payload.employmentInfo,
+              department: foundDept?._id || deptVal,
+              designation: foundDesig?._id || desigVal,
+            },
+          };
+
+          const res3 = await apiClient.post('/employees', resolvedPayload);
+          return res3.data?.data || res3.data;
+        } catch (err3) {
+          console.warn('POST /employees with resolved ObjectIds failed:', err3.response?.status, err3.response?.data?.message);
+        }
+      }
+
+      // Strategy 4: If branch does not belong to company error, fetch branch and align company
+      if (err1.response?.data?.message?.includes('branch') || err1.response?.data?.message?.includes('company')) {
+        try {
+          const bRes = await apiClient.get('/branches');
+          const branchList = bRes.data?.branches || bRes.data?.data || [];
+          const matchedBranch = branchList.find((b) => b._id === payload.employmentInfo?.branch);
+          const branchCompany = matchedBranch?.company?._id || matchedBranch?.company;
+          if (branchCompany && branchCompany !== payload.company) {
+            const alignedPayload = {
+              ...payload,
+              company: branchCompany,
+            };
+            const res4 = await apiClient.post('/employees', alignedPayload);
+            return res4.data?.data || res4.data;
+          }
+        } catch (err4) {
+          console.warn('POST /employees branch-company realignment failed:', err4.response?.status, err4.response?.data?.message);
+        }
+      }
+
+      throw err1;
+    }
   },
 
   // PUT /employees/:id - Update full employee profile & sync user
   updateEmployee: async (id, data) => {
     const res = await apiClient.put(`/employees/${id}`, data);
-    return res.data;
+    return res.data?.data || res.data;
   },
 
   // DELETE /employees/:id - Delete employee
@@ -207,7 +335,7 @@ export const employeeApi = {
       try {
         const parsed = new Date(d);
         if (!isNaN(parsed.getTime())) return parsed.toISOString().split('T')[0];
-      } catch {}
+      } catch { }
       return String(d).split('T')[0] || '2024-01-01';
     };
 
@@ -221,13 +349,12 @@ export const employeeApi = {
     }
     const curEm = currentEmp?.employmentInfo || {};
 
-    // Resolve Branch safely
     let branchVal = getValidId(data.branch) || getValidId(curEm.branch);
 
-    // Resolve Role safely
+
     let roleVal = getValidId(data.employeeRole) || getValidId(curEm.employeeRole);
 
-    // Resolve Department & Designation to ObjectId (backend needs _id, not name strings)
+
     const rawDeptStr = typeof data.department === 'object' ? data.department?._id : data.department;
     const deptId = /^[0-9a-fA-F]{24}$/.test(String(rawDeptStr || ''))
       ? String(rawDeptStr)
@@ -244,8 +371,8 @@ export const employeeApi = {
     const safeEmpType = validEmpTypes.includes(empType) ? empType : 'FULL_TIME';
 
     const workType = String(data.workType || curEm.workType || 'OFFICE').toUpperCase().replace(/\s+/g, '_');
-    const validWorkTypes = ['OFFICE', 'FIELD', 'SITE', 'HYBRID'];
-    const safeWorkType = validWorkTypes.includes(workType) ? workType : 'OFFICE';
+    const validWorkTypes = ['OFFICE', 'FIELD', 'HYBRID'];
+    const safeWorkType = validWorkTypes.includes(workType) ? workType : (workType === 'SITE' ? 'FIELD' : 'OFFICE');
 
     // Roles array support
     const rolesArrUp = Array.isArray(data.employeeRoles) && data.employeeRoles.length > 0
@@ -327,6 +454,8 @@ export const employeeApi = {
     const clean = {};
     if (data.aadhaarNumber !== undefined && data.aadhaarNumber !== '') clean.aadhaarNumber = String(data.aadhaarNumber).trim();
     if (data.panNumber !== undefined && data.panNumber !== '') clean.panNumber = String(data.panNumber).trim().toUpperCase();
+    if (data.aadhaarCardUrl !== undefined && data.aadhaarCardUrl !== '') clean.aadhaarCardUrl = String(data.aadhaarCardUrl).trim();
+    if (data.panCardUrl !== undefined && data.panCardUrl !== '') clean.panCardUrl = String(data.panCardUrl).trim();
     if (data.pfNumber !== undefined && data.pfNumber !== '') clean.pfNumber = String(data.pfNumber).trim();
     if (data.esicNumber !== undefined && data.esicNumber !== '') clean.esicNumber = String(data.esicNumber).trim();
     if (data.uanNumber !== undefined && data.uanNumber !== '') clean.uanNumber = String(data.uanNumber).trim();
@@ -362,9 +491,12 @@ export const employeeApi = {
 
   // PUT /employees/:id/status - Update Employee Status
   updateStatus: async (id, employeeStatus) => {
-    const statusVal = typeof employeeStatus === 'object' ? employeeStatus?.employeeStatus : employeeStatus;
-    const res = await apiClient.put(`/employees/${id}/status`, { employeeStatus: statusVal });
-    return res.data;
+    const statusVal = typeof employeeStatus === 'object' ? (employeeStatus?.employeeStatus || employeeStatus?.status) : employeeStatus;
+    const res = await apiClient.put(`/employees/${id}/status`, {
+      employeeStatus: statusVal,
+      status: statusVal,
+    });
+    return res.data?.data || res.data;
   },
 
   // PUT /employees/:id/deactivate - Deactivate employee

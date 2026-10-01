@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import ReactDOM from 'react-dom';
 import { ChevronDown, Check, Search } from 'lucide-react';
 
 export const Select = ({
@@ -16,14 +17,24 @@ export const Select = ({
   disabled = false,
   className = '',
   style,
-  placement = 'bottom',
+  placement = 'auto',
   openUpward: openUpwardProp,
   dropUp,
   ...props
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [coords, setCoords] = useState({
+    top: 0,
+    bottom: undefined,
+    left: 0,
+    width: 200,
+    maxHeight: 260,
+    openUpward: false,
+  });
+
   const containerRef = useRef(null);
+  const dropdownRef = useRef(null);
   const searchInputRef = useRef(null);
 
   const selectId = id || name;
@@ -48,13 +59,16 @@ export const Select = ({
     });
   }, [options]);
 
-  // Find currently selected option
+  // Find currently selected option (properly handles empty string options e.g. { value: '', label: 'All Departments' })
   const selectedOption = useMemo(() => {
-    if (value === undefined || value === null || value === '') return null;
-    return normalizedOptions.find((opt) => String(opt.value) === String(value)) || null;
+    if (value === undefined || value === null) return null;
+    const match = normalizedOptions.find((opt) => String(opt.value) === String(value));
+    if (match) return match;
+    if (value === '') return null;
+    return { value, label: String(value) };
   }, [normalizedOptions, value]);
 
-  // Filter options if search is used
+  // Filter options when search is active
   const filteredOptions = useMemo(() => {
     if (!searchTerm.trim()) return normalizedOptions;
     const term = searchTerm.toLowerCase();
@@ -70,61 +84,95 @@ export const Select = ({
     );
   }, [normalizedOptions]);
 
-  const [openUpward, setOpenUpward] = useState(false);
+  // Calculate viewport coordinates for the floating dropdown portal
+  const updateCoords = useCallback(() => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
 
-  const isOpeningUp = Boolean(
-    openUpwardProp ||
-    dropUp ||
-    placement === 'top' ||
-    (placement === 'auto' && openUpward)
-  );
+    const isUpward = Boolean(
+      openUpwardProp ||
+      dropUp ||
+      placement === 'top' ||
+      (placement !== 'bottom' && spaceBelow < 240 && spaceAbove > 180)
+    );
 
-  // Auto-flip upward if too close to bottom of screen or explicitly requested
+    const maxH = isUpward
+      ? Math.max(120, Math.min(260, spaceAbove - 16))
+      : Math.max(120, Math.min(260, spaceBelow - 16));
+
+    const popupWidth = Math.max(rect.width, 160);
+    let leftPos = rect.left;
+    if (leftPos + popupWidth > window.innerWidth - 8) {
+      leftPos = Math.max(8, window.innerWidth - popupWidth - 8);
+    }
+
+    setCoords({
+      openUpward: isUpward,
+      top: isUpward ? undefined : rect.bottom + 4,
+      bottom: isUpward ? window.innerHeight - rect.top + 4 : undefined,
+      left: leftPos,
+      width: popupWidth,
+      maxHeight: maxH,
+    });
+  }, [openUpwardProp, dropUp, placement]);
+
+  // Toggle Dropdown
+  const handleToggle = () => {
+    if (disabled) return;
+    if (!isOpen) {
+      updateCoords();
+      setIsOpen(true);
+    } else {
+      setIsOpen(false);
+      setSearchTerm('');
+    }
+  };
+
+  // Close on outside click, update position on scroll/resize
   useEffect(() => {
-    if (openUpwardProp || dropUp || placement === 'top') {
-      setOpenUpward(true);
-      return;
-    }
-    if (placement === 'bottom') {
-      setOpenUpward(false);
-      return;
-    }
-    if (isOpen && containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - rect.bottom;
-      const spaceAbove = rect.top;
-      if (spaceBelow < 280 && spaceAbove > 180) {
-        setOpenUpward(true);
-      } else {
-        setOpenUpward(false);
-      }
-    }
-  }, [isOpen, openUpwardProp, dropUp, placement]);
+    if (!isOpen) return;
 
-  // Close dropdown on outside click
-  useEffect(() => {
+    updateCoords();
+
     const handleClickOutside = (event) => {
-      if (containerRef.current && !containerRef.current.contains(event.target)) {
+      const inTrigger = containerRef.current && containerRef.current.contains(event.target);
+      const inDropdown = dropdownRef.current && dropdownRef.current.contains(event.target);
+      if (!inTrigger && !inDropdown) {
         setIsOpen(false);
         setSearchTerm('');
       }
     };
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      document.addEventListener('touchstart', handleClickOutside);
-    }
+
+    const handleScrollOrResize = (event) => {
+      // Don't close or disrupt if scrolling inside the options list itself
+      if (dropdownRef.current && dropdownRef.current.contains(event.target)) {
+        return;
+      }
+      updateCoords();
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    window.addEventListener('resize', handleScrollOrResize);
+    window.addEventListener('scroll', handleScrollOrResize, true);
+
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('touchstart', handleClickOutside);
+      window.removeEventListener('resize', handleScrollOrResize);
+      window.removeEventListener('scroll', handleScrollOrResize, true);
     };
-  }, [isOpen]);
+  }, [isOpen, updateCoords]);
 
-  // Focus search input when dropdown opens (if search is available)
+  // Auto-focus search input if options > 7
   useEffect(() => {
     if (isOpen && normalizedOptions.length > 7 && searchInputRef.current) {
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         searchInputRef.current?.focus();
       }, 50);
+      return () => clearTimeout(timer);
     }
   }, [isOpen, normalizedOptions.length]);
 
@@ -146,12 +194,15 @@ export const Select = ({
     if (disabled) return;
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      setIsOpen((prev) => !prev);
+      handleToggle();
     } else if (e.key === 'Escape') {
       setIsOpen(false);
       setSearchTerm('');
     }
   };
+
+  // Determine label to display
+  const displayLabel = selectedOption ? selectedOption.label : placeholder;
 
   return (
     <div
@@ -160,7 +211,6 @@ export const Select = ({
       style={{
         position: 'relative',
         width: '100%',
-        zIndex: isOpen ? 1000 : 1,
         ...style,
       }}
     >
@@ -168,54 +218,48 @@ export const Select = ({
         <label
           htmlFor={selectId}
           className="form-label"
-          style={{
-            display: 'block',
-            fontSize: '0.85rem',
-            fontWeight: 600,
-            color: 'var(--text-main, #1e293b)',
-            marginBottom: '6px',
-          }}
         >
           {cleanLabel}
           {isRequired && (
-            <span className="required" style={{ color: '#ef4444', fontWeight: 600, marginLeft: 4 }}>
+            <span className="required">
               *
             </span>
           )}
         </label>
       )}
 
-      {/* Hidden input to maintain native form validation / accessibility */}
+      {/* Hidden input to maintain form data binding without blocking HTML5 constraint validation */}
       <input
         type="hidden"
         id={selectId}
         name={name}
         value={value ?? ''}
-        required={required}
       />
 
       {/* Custom Theme-Styled Select Trigger */}
       <div
         tabIndex={disabled ? -1 : 0}
-        onClick={() => !disabled && setIsOpen((prev) => !prev)}
+        onClick={handleToggle}
         onKeyDown={handleKeyDown}
+        className={`custom-select-trigger ${isOpen ? 'open' : ''} ${error ? 'error' : ''} ${disabled ? 'disabled' : ''}`}
         style={{
           width: '100%',
+          height: '38px',
           minHeight: '38px',
           padding: '8px 12px',
-          backgroundColor: disabled ? '#f8fafc' : '#ffffff',
+          backgroundColor: disabled ? 'var(--bg-app, #f8fafc)' : '#ffffff',
           border: error
-            ? '1px solid #ef4444'
+            ? '1.5px solid var(--danger, #dc2626)'
             : isOpen
-            ? '1px solid var(--primary, #2e7b85)'
-            : '1px solid var(--border-dark, #cbd5e1)',
+            ? '1.5px solid var(--primary, #3f929a)'
+            : '1.5px solid var(--border-dark, #cbd5e1)',
           borderRadius: 'var(--radius-md, 8px)',
-          boxShadow: isOpen ? '0 0 0 3px var(--primary-ring, rgba(46, 123, 133, 0.18))' : 'none',
+          boxShadow: isOpen ? '0 0 0 3px var(--primary-ring, rgba(63, 146, 154, 0.2))' : 'none',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           cursor: disabled ? 'not-allowed' : 'pointer',
-          opacity: disabled ? 0.7 : 1,
+          opacity: disabled ? 0.65 : 1,
           transition: 'all 0.15s ease-in-out',
           userSelect: 'none',
           outline: 'none',
@@ -225,7 +269,7 @@ export const Select = ({
       >
         <span
           style={{
-            fontSize: '0.88rem',
+            fontSize: '0.875rem',
             color: selectedOption ? 'var(--text-main, #1e293b)' : 'var(--text-light, #94a3b8)',
             fontWeight: selectedOption ? 500 : 400,
             whiteSpace: 'nowrap',
@@ -234,13 +278,13 @@ export const Select = ({
             paddingRight: '8px',
           }}
         >
-          {selectedOption ? selectedOption.label : (value ? String(value) : placeholder)}
+          {displayLabel}
         </span>
 
         <ChevronDown
           size={16}
           style={{
-            color: isOpen ? 'var(--primary, #2e7b85)' : 'var(--text-muted, #64748b)',
+            color: isOpen ? 'var(--primary, #3f929a)' : 'var(--text-muted, #64748b)',
             transition: 'transform 0.2s ease, color 0.15s ease',
             transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
             flexShrink: 0,
@@ -248,28 +292,28 @@ export const Select = ({
         />
       </div>
 
-      {/* Custom Dropdown Popup Menu */}
-      {isOpen && !disabled && (
+      {/* Custom Dropdown Popup Menu rendered into body via Portal (Never gets clipped by parent cards, modals, or tables) */}
+      {isOpen && !disabled && typeof document !== 'undefined' && ReactDOM.createPortal(
         <div
+          ref={dropdownRef}
           style={{
-            position: 'absolute',
-            ...(isOpeningUp
-              ? { bottom: 'calc(100% + 6px)', top: 'auto' }
-              : { top: 'calc(100% + 6px)', bottom: 'auto' }),
-            left: 0,
-            right: 0,
+            position: 'fixed',
+            top: coords.openUpward ? undefined : coords.top,
+            bottom: coords.openUpward ? coords.bottom : undefined,
+            left: coords.left,
+            width: coords.width,
             backgroundColor: '#ffffff',
             border: '1px solid var(--primary-border, #bce1e6)',
             borderRadius: 'var(--radius-md, 8px)',
-            boxShadow: isOpeningUp
+            boxShadow: coords.openUpward
               ? '0 -10px 25px -5px rgba(46, 123, 133, 0.22), 0 -8px 10px -6px rgba(0, 0, 0, 0.08)'
               : '0 10px 25px -5px rgba(46, 123, 133, 0.22), 0 8px 10px -6px rgba(0, 0, 0, 0.08)',
-            zIndex: 9999,
-            maxHeight: '260px',
+            zIndex: 999999,
+            maxHeight: coords.maxHeight,
             overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
-            animation: isOpeningUp ? 'fadeInUpward 0.15s ease-out' : 'fadeInDropdown 0.15s ease-out',
+            animation: coords.openUpward ? 'fadeInUpward 0.15s ease-out' : 'fadeInDropdown 0.15s ease-out',
           }}
         >
           {/* Quick Search inside dropdown if more than 7 items */}
@@ -308,7 +352,7 @@ export const Select = ({
           <div
             style={{
               overflowY: 'auto',
-              maxHeight: '220px',
+              maxHeight: `${Math.max(80, coords.maxHeight - (normalizedOptions.length > 7 ? 45 : 10))}px`,
               padding: '4px 0',
             }}
           >
@@ -362,8 +406,8 @@ export const Select = ({
                     }}
                     onMouseEnter={(e) => {
                       if (!isSelected) {
-                        e.currentTarget.style.backgroundColor = 'var(--primary-light, #f0f7f8)';
-                        e.currentTarget.style.color = 'var(--primary, #2e7b85)';
+                        e.currentTarget.style.backgroundColor = 'var(--primary-light, #edf7f8)';
+                        e.currentTarget.style.color = 'var(--primary, #3f929a)';
                       }
                     }}
                     onMouseLeave={(e) => {
@@ -377,7 +421,7 @@ export const Select = ({
                       {opt.label}
                     </span>
                     {isSelected && (
-                      <Check size={16} color="var(--primary, #2e7b85)" style={{ flexShrink: 0, marginLeft: 8 }} />
+                      <Check size={16} color="var(--primary, #3f929a)" style={{ flexShrink: 0, marginLeft: 8 }} />
                     )}
                   </div>
                 );
@@ -395,7 +439,8 @@ export const Select = ({
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {error && <span className="form-error" style={{ display: 'block', marginTop: 4, fontSize: '0.78rem', color: '#ef4444' }}>{error}</span>}

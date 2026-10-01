@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import taskApi from '../../api/taskApi';
 import projectTaskApi from '../../api/projectTaskApi';
 import employeeApi from '../../api/employeeApi';
@@ -58,7 +58,18 @@ export const Tasks = () => {
     status: '',
     priority: '',
     assignedTo: '',
+    search: '',
   });
+
+  const filteredTasks = useMemo(() => {
+    if (!filters.search?.trim()) return tasks;
+    const term = filters.search.toLowerCase();
+    return tasks.filter((t) => {
+      const title = (t.taskName || t.title || '').toLowerCase();
+      const desc = (t.description || '').toLowerCase();
+      return title.includes(term) || desc.includes(term);
+    });
+  }, [tasks, filters.search]);
 
   // Tab 2: My Tasks (GET /tasks/me)
   const [myTasks, setMyTasks] = useState([]);
@@ -354,42 +365,118 @@ export const Tasks = () => {
     }
   };
 
+  // Resolve assigned employee (handles ID string, populated obj, or unassigned)
+  const resolveAssignedEmployee = (assignedTo) => {
+    if (!assignedTo) return null;
+    const id = typeof assignedTo === 'string' ? assignedTo : (assignedTo._id || assignedTo.id);
+    if (id && employees.length > 0) {
+      const match = employees.find(
+        (e) => (e._id || e.id) === id || e.user?._id === id || e.user === id
+      );
+      if (match) return match;
+    }
+    if (typeof assignedTo === 'object') {
+      const hasName =
+        assignedTo.basicInfo?.fullName ||
+        assignedTo.fullName ||
+        assignedTo.firstName ||
+        assignedTo.name ||
+        assignedTo.user?.name;
+      if (hasName) return assignedTo;
+    }
+    return null;
+  };
+
   // Columns for Tasks Tables
-  const columns = [
+  const columns = useMemo(() => [
     {
       header: 'Task Name & Scope',
       key: 'title',
       render: (r) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <CheckSquare size={18} color="#059669" />
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              backgroundColor: '#ecfdf5',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              color: '#059669',
+              marginTop: 2,
+            }}
+          >
+            <CheckSquare size={16} />
+          </div>
           <div>
             <div
-              style={{ fontWeight: 600, cursor: 'pointer', color: 'var(--primary)' }}
+              style={{ fontWeight: 600, cursor: 'pointer', color: 'var(--primary)', fontSize: '0.88rem' }}
               onClick={() => openDetails(r)}
+              title="Click to view task details"
             >
               {r.taskName || r.title || 'Untitled Task'}
             </div>
-            {r.description && (
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', maxWidth: 260 }}>
+            {r.description ? (
+              <div
+                style={{
+                  fontSize: '0.78rem',
+                  color: 'var(--text-muted)',
+                  marginTop: 2,
+                  maxWidth: 280,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
                 {r.description}
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       ),
     },
     {
-      header: 'Assigned Engineer',
+      header: 'Assigned Staff',
       key: 'assignedTo',
       render: (r) => {
-        const emp = r.assignedTo || {};
+        const emp = resolveAssignedEmployee(r.assignedTo);
+        if (!emp) {
+          return (
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+              Unassigned
+            </span>
+          );
+        }
         const name = getEmployeeName(emp);
         const code = getEmployeeCode(emp);
+        const initial = name && name !== 'Employee' ? name.charAt(0).toUpperCase() : 'U';
+
         return (
-          <div style={{ fontSize: '0.84rem' }}>
-            <div style={{ fontWeight: 600 }}>{name}</div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              {code !== '-' ? code : ''}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: '50%',
+                backgroundColor: 'var(--primary-light, #edf7f8)',
+                color: 'var(--primary, #3f929a)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                flexShrink: 0,
+              }}
+            >
+              {initial}
+            </div>
+            <div style={{ fontSize: '0.84rem' }}>
+              <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>{name}</div>
+              {code && code !== '-' && (
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>{code}</div>
+              )}
             </div>
           </div>
         );
@@ -399,54 +486,48 @@ export const Tasks = () => {
       header: 'Priority',
       key: 'priority',
       render: (r) => {
-        const p = r.priority || 'MEDIUM';
-        const v = p === 'URGENT' ? 'danger' : p === 'HIGH' ? 'warning' : 'neutral';
+        const p = (r.priority || 'MEDIUM').toUpperCase();
+        const v = p === 'URGENT' ? 'danger' : p === 'HIGH' ? 'warning' : p === 'LOW' ? 'neutral' : 'info';
         return <Badge variant={v}>{p}</Badge>;
       },
     },
     {
-      header: 'Lifecycle Status',
+      header: 'Status',
       key: 'status',
       render: (r) => {
-        const st = r.status || 'PENDING';
-        return (
-          <Badge
-            variant={
-              st === 'COMPLETED'
-                ? 'success'
-                : st === 'IN_PROGRESS'
-                ? 'info'
-                : st === 'CANCELLED'
-                ? 'danger'
-                : 'warning'
-            }
-          >
-            {st}
-          </Badge>
-        );
+        const st = (r.status || 'PENDING').toUpperCase();
+        const variant =
+          st === 'COMPLETED'
+            ? 'success'
+            : st === 'IN_PROGRESS'
+            ? 'info'
+            : st === 'CANCELLED' || st === 'OVERDUE'
+            ? 'danger'
+            : 'warning';
+        return <Badge variant={variant}>{st.replace('_', ' ')}</Badge>;
       },
     },
     {
       header: 'Due Date',
       key: 'dueDate',
       render: (r) => (
-        <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+        <span style={{ fontSize: '0.82rem', color: r.dueDate ? 'var(--text-main)' : 'var(--text-muted)' }}>
           {r.dueDate ? new Date(r.dueDate).toLocaleDateString() : '-'}
         </span>
       ),
     },
     {
-      header: 'Lifecycle Actions',
+      header: 'Actions',
       key: 'actions',
       render: (r) => (
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           {r.status === 'PENDING' && (
             <Button
               size="sm"
-              variant="light"
+              variant="secondary"
               icon={Play}
               onClick={() => handleStatusChange(r._id, 'IN_PROGRESS')}
-              style={{ fontSize: '0.74rem', padding: '3px 8px', color: '#0284c7' }}
+              style={{ fontSize: '0.76rem', padding: '4px 8px', color: '#0284c7' }}
               title="Start Working (Move to IN_PROGRESS)"
             >
               Start
@@ -455,10 +536,10 @@ export const Tasks = () => {
           {r.status === 'IN_PROGRESS' && (
             <Button
               size="sm"
-              variant="light"
+              variant="secondary"
               icon={Check}
               onClick={() => handleStatusChange(r._id, 'COMPLETED')}
-              style={{ fontSize: '0.74rem', padding: '3px 8px', color: '#059669' }}
+              style={{ fontSize: '0.76rem', padding: '4px 8px', color: '#059669' }}
               title="Mark Completed"
             >
               Done
@@ -466,10 +547,10 @@ export const Tasks = () => {
           )}
           <Button
             size="sm"
-            variant="light"
+            variant="ghost"
             icon={Eye}
             onClick={() => openDetails(r)}
-            style={{ fontSize: '0.74rem', padding: '3px 8px' }}
+            style={{ fontSize: '0.76rem', padding: '4px 8px', color: 'var(--primary)' }}
             title="View Details"
           >
             View
@@ -477,11 +558,11 @@ export const Tasks = () => {
           {r.status !== 'COMPLETED' && r.status !== 'CANCELLED' && (
             <Button
               size="sm"
-              variant="light"
+              variant="ghost"
               icon={Ban}
               onClick={() => openCancelModal(r)}
-              style={{ fontSize: '0.74rem', padding: '3px 8px', color: '#dc2626' }}
-              title="Cancel Task (PUT /tasks/:id/cancel)"
+              style={{ fontSize: '0.76rem', padding: '4px 8px', color: '#dc2626' }}
+              title="Cancel Task"
             >
               Cancel
             </Button>
@@ -489,7 +570,7 @@ export const Tasks = () => {
         </div>
       ),
     },
-  ];
+  ], [employees]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -503,18 +584,6 @@ export const Tasks = () => {
         <div style={{ display: 'flex', gap: 10 }}>
           <Button variant="primary" icon={Plus} onClick={openAddModal}>
             Create & Assign Task
-          </Button>
-          <Button
-            variant="light"
-            icon={RotateCcw}
-            onClick={() => {
-              if (activeTab === 'all_tasks') loadTasks();
-              else if (activeTab === 'my_tasks') loadMyTasks();
-              else if (activeTab === 'employee_tasks') loadEmployeeTasks(selectedEmployeeId);
-              else loadReports();
-            }}
-          >
-            Refresh
           </Button>
         </div>
       </div>
@@ -547,7 +616,7 @@ export const Tasks = () => {
           }}
         >
           <CheckSquare size={17} />
-          All Org Tasks ({tasks.length})
+          All Tasks ({tasks.length})
         </button>
 
         <button
@@ -610,64 +679,72 @@ export const Tasks = () => {
           }}
         >
           <TrendingUp size={17} />
-          Performance & Overdue Reports
+          Reports
         </button>
       </div>
 
-      {/* TAB 1: ALL ORG TASKS */}
+      {/* TAB 1: ALL TASKS */}
       {activeTab === 'all_tasks' && (
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {/* Filters Bar */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
-            <div style={{ minWidth: 160 }}>
-              <select
-                className="form-control"
+            <div style={{ flex: '1 1 220px', minWidth: 200 }}>
+              <Input
+                placeholder="Search tasks by name or description..."
+                icon={Search}
+                value={filters.search || ''}
+                onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+              />
+            </div>
+
+            <div style={{ width: 170 }}>
+              <Select
                 value={filters.status}
                 onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-                style={{ fontSize: '0.85rem' }}
-              >
-                <option value="">All Statuses</option>
-                <option value="PENDING">PENDING</option>
-                <option value="IN_PROGRESS">IN_PROGRESS</option>
-                <option value="COMPLETED">COMPLETED</option>
-                <option value="OVERDUE">OVERDUE</option>
-                <option value="CANCELLED">CANCELLED</option>
-              </select>
+                placeholder="All Statuses"
+                options={[
+                  { value: '', label: 'All Statuses' },
+                  { value: 'PENDING', label: 'PENDING' },
+                  { value: 'IN_PROGRESS', label: 'IN_PROGRESS' },
+                  { value: 'COMPLETED', label: 'COMPLETED' },
+                  { value: 'OVERDUE', label: 'OVERDUE' },
+                  { value: 'CANCELLED', label: 'CANCELLED' },
+                ]}
+              />
             </div>
 
-            <div style={{ minWidth: 160 }}>
-              <select
-                className="form-control"
+            <div style={{ width: 170 }}>
+              <Select
                 value={filters.priority}
                 onChange={(e) => setFilters({ ...filters, priority: e.target.value })}
-                style={{ fontSize: '0.85rem' }}
-              >
-                <option value="">All Priorities</option>
-                <option value="LOW">LOW</option>
-                <option value="MEDIUM">MEDIUM</option>
-                <option value="HIGH">HIGH</option>
-                <option value="URGENT">URGENT</option>
-              </select>
+                placeholder="All Priorities"
+                options={[
+                  { value: '', label: 'All Priorities' },
+                  { value: 'LOW', label: 'LOW' },
+                  { value: 'MEDIUM', label: 'MEDIUM' },
+                  { value: 'HIGH', label: 'HIGH' },
+                  { value: 'URGENT', label: 'URGENT' },
+                ]}
+              />
             </div>
 
-            <div style={{ minWidth: 200 }}>
-              <select
-                className="form-control"
+            <div style={{ width: 230 }}>
+              <Select
                 value={filters.assignedTo}
                 onChange={(e) => setFilters({ ...filters, assignedTo: e.target.value })}
-                style={{ fontSize: '0.85rem' }}
-              >
-                <option value="">All Assigned Staff</option>
-                {employees.map((emp) => (
-                  <option key={emp._id || emp.id} value={emp._id || emp.id}>
-                    {formatEmployeeOption(emp, false)}
-                  </option>
-                ))}
-              </select>
+                placeholder="All Assigned Staff"
+                options={[
+                  { value: '', label: 'All Assigned Staff' },
+                  ...employees.map((emp) => ({
+                    value: emp._id || emp.id,
+                    label: formatEmployeeOption(emp, false),
+                  })),
+                ]}
+              />
             </div>
           </div>
 
-          <Table columns={columns} data={tasks} loading={loadingTasks} emptyMessage="No tasks found matching criteria." />
+          <Table columns={columns} data={filteredTasks} loading={loadingTasks} emptyMessage="No tasks found matching criteria." />
         </div>
       )}
 
@@ -687,25 +764,20 @@ export const Tasks = () => {
       {/* TAB 3: EMPLOYEE TASKS */}
       {activeTab === 'employee_tasks' && (
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-            <div style={{ flex: 1, maxWidth: 320 }}>
-              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: 4 }}>
-                Select Employee:
-              </label>
-              <select
-                className="form-control"
+          <div style={{ display: 'flex', gap: 14, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 280px', maxWidth: 360 }}>
+              <Select
+                label="Select Employee"
                 value={selectedEmployeeId}
                 onChange={(e) => {
                   setSelectedEmployeeId(e.target.value);
                   loadEmployeeTasks(e.target.value);
                 }}
-              >
-                {employees.map((emp) => (
-                  <option key={emp._id || emp.id} value={emp._id || emp.id}>
-                    {formatEmployeeOption(emp, true)}
-                  </option>
-                ))}
-              </select>
+                options={employees.map((emp) => ({
+                  value: emp._id || emp.id,
+                  label: formatEmployeeOption(emp, true),
+                }))}
+              />
             </div>
             <Button
               variant="primary"
@@ -713,7 +785,7 @@ export const Tasks = () => {
               icon={Search}
               onClick={() => loadEmployeeTasks(selectedEmployeeId)}
               loading={loadingEmployeeTasks}
-              style={{ alignSelf: 'flex-end' }}
+              style={{ height: '38px', marginBottom: '0px' }}
             >
               Fetch Tasks
             </Button>
@@ -760,7 +832,7 @@ export const Tasks = () => {
             </div>
             <div className="card" style={{ textAlign: 'center' }}>
               <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>AVG COMPLETION DAYS</span>
-              <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#0284c7', marginTop: 4 }}>
+              <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--primary, #3f929a)', marginTop: 4 }}>
                 {completionReport?.avgDaysToComplete !== undefined ? `${completionReport.avgDaysToComplete} days` : '0 days'}
               </div>
             </div>
@@ -784,33 +856,30 @@ export const Tasks = () => {
           <div className="grid-2">
             <div className="form-group">
               <label className="form-label">Assign To Staff *</label>
-              <select
-                className="form-control"
+              <Select
                 value={formData.assignedTo}
                 onChange={(e) => setFormData({ ...formData, assignedTo: e.target.value })}
+                placeholder="Select Employee"
+                options={employees.map((emp) => ({
+                  value: emp._id || emp.id,
+                  label: formatEmployeeOption(emp, true),
+                }))}
                 required
-              >
-                <option value="">Select Employee</option>
-                {employees.map((emp) => (
-                  <option key={emp._id || emp.id} value={emp._id || emp.id}>
-                    {formatEmployeeOption(emp, true)}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
 
             <div className="form-group">
               <label className="form-label">Priority</label>
-              <select
-                className="form-control"
+              <Select
                 value={formData.priority}
                 onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-              >
-                <option value="LOW">LOW</option>
-                <option value="MEDIUM">MEDIUM</option>
-                <option value="HIGH">HIGH</option>
-                <option value="URGENT">URGENT</option>
-              </select>
+                options={[
+                  { value: 'LOW', label: 'LOW' },
+                  { value: 'MEDIUM', label: 'MEDIUM' },
+                  { value: 'HIGH', label: 'HIGH' },
+                  { value: 'URGENT', label: 'URGENT' },
+                ]}
+              />
             </div>
           </div>
 
@@ -824,18 +893,18 @@ export const Tasks = () => {
 
             <div className="form-group">
               <label className="form-label">Associated Project</label>
-              <select
-                className="form-control"
+              <Select
                 value={formData.project}
                 onChange={(e) => setFormData({ ...formData, project: e.target.value })}
-              >
-                <option value="">None / General Task</option>
-                {projects.map((p) => (
-                  <option key={p._id} value={p._id}>
-                    {p.name} ({p.code})
-                  </option>
-                ))}
-              </select>
+                placeholder="None / General Task"
+                options={[
+                  { value: '', label: 'None / General Task' },
+                  ...projects.map((p) => ({
+                    value: p._id,
+                    label: `${p.name} (${p.code})`,
+                  })),
+                ]}
+              />
             </div>
           </div>
 
@@ -948,16 +1017,16 @@ export const Tasks = () => {
                 <div className="grid-2">
                   <div className="form-group">
                     <label className="form-label">Priority</label>
-                    <select
-                      className="form-control"
+                    <Select
                       value={editFormData.priority}
                       onChange={(e) => setEditFormData({ ...editFormData, priority: e.target.value })}
-                    >
-                      <option value="LOW">LOW</option>
-                      <option value="MEDIUM">MEDIUM</option>
-                      <option value="HIGH">HIGH</option>
-                      <option value="URGENT">URGENT</option>
-                    </select>
+                      options={[
+                        { value: 'LOW', label: 'LOW' },
+                        { value: 'MEDIUM', label: 'MEDIUM' },
+                        { value: 'HIGH', label: 'HIGH' },
+                        { value: 'URGENT', label: 'URGENT' },
+                      ]}
+                    />
                   </div>
                   <Input
                     label="Due Date"

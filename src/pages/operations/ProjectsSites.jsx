@@ -27,7 +27,6 @@ import {
   Filter,
   CheckCircle2,
   AlertCircle,
-  RotateCcw,
 } from 'lucide-react';
 import Table from '../../components/common/Table';
 import Modal from '../../components/common/Modal';
@@ -74,6 +73,7 @@ export const ProjectsSites = () => {
   });
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [submittingTask, setSubmittingTask] = useState(false);
+  const [taskAvailableSites, setTaskAvailableSites] = useState([]);
   const [taskForm, setTaskForm] = useState({
     projectId: '',
     siteId: '',
@@ -320,13 +320,37 @@ export const ProjectsSites = () => {
     }
   };
 
+  // Load sites for selected project helper
+  const loadSitesForProject = async (pId) => {
+    if (!pId) {
+      setTaskAvailableSites([]);
+      return [];
+    }
+    try {
+      const res = await projectTaskApi.getProjectSites(pId);
+      const list = Array.isArray(res) ? res : (res?.data || res?.sites || []);
+      setTaskAvailableSites(list);
+      return list;
+    } catch {
+      setTaskAvailableSites([]);
+      return [];
+    }
+  };
+
   // Open Assign Task Modal
-  const openAssignTaskModal = (defaultProjId = '', defaultSiteId = '') => {
+  const openAssignTaskModal = async (defaultProjId = '', defaultSiteId = '') => {
     const proj = defaultProjId || projects[0]?._id || '';
+    let site = defaultSiteId || '';
+    if (proj) {
+      const sites = await loadSitesForProject(proj);
+      if (!site && sites.length > 0) {
+        site = sites[0]._id || sites[0].id;
+      }
+    }
     setTaskForm({
       projectId: proj,
-      siteId: defaultSiteId || '',
-      assignedTo: employees[0]?._id || '',
+      siteId: site,
+      assignedTo: employees[0]?._id || employees[0]?.id || '',
       title: '',
       description: '',
       priority: 'MEDIUM',
@@ -335,7 +359,7 @@ export const ProjectsSites = () => {
     setTaskModalOpen(true);
   };
 
-  // Submit Assign Task (POST /projects/tasks)
+  // Submit Assign Task (POST /projects/tasks with dual fallback)
   const handleAssignTaskSubmit = async (e) => {
     e.preventDefault();
     if (!taskForm.title.trim()) {
@@ -345,11 +369,16 @@ export const ProjectsSites = () => {
     setSubmittingTask(true);
     const payload = {
       project: taskForm.projectId || undefined,
+      projectId: taskForm.projectId || undefined,
       site: taskForm.siteId || undefined,
+      siteId: taskForm.siteId || undefined,
       assignedTo: taskForm.assignedTo || undefined,
+      employeeId: taskForm.assignedTo || undefined,
       title: taskForm.title.trim(),
+      taskName: taskForm.title.trim(),
       description: taskForm.description.trim() || undefined,
       priority: taskForm.priority,
+      dueDate: taskForm.deadline || undefined,
       deadline: taskForm.deadline || undefined,
       status: 'PENDING',
     };
@@ -373,18 +402,44 @@ export const ProjectsSites = () => {
       key: 'name',
       render: (r) => (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <FolderKanban size={20} color="var(--primary)" />
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              backgroundColor: 'var(--primary-light, #edf7f8)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              color: 'var(--primary, #3f929a)',
+            }}
+          >
+            <FolderKanban size={16} />
+          </div>
           <div>
             <div
-              style={{ fontWeight: 600, cursor: 'pointer', color: 'var(--primary)' }}
+              style={{ fontWeight: 600, cursor: 'pointer', color: 'var(--primary)', fontSize: '0.88rem' }}
               onClick={() => openProjectDetails(r)}
-              title="Click to view full details (GET /projects/:id)"
+              title="Click to view full project details"
             >
               {r.name}
             </div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-              {r.description || 'No description provided'}
-            </div>
+            {r.description ? (
+              <div
+                style={{
+                  fontSize: '0.78rem',
+                  color: 'var(--text-muted)',
+                  marginTop: 2,
+                  maxWidth: 320,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {r.description}
+              </div>
+            ) : null}
           </div>
         </div>
       ),
@@ -392,62 +447,94 @@ export const ProjectsSites = () => {
     {
       header: 'Code',
       key: 'code',
-      render: (r) => <Badge variant="primary">{r.code}</Badge>,
+      render: (r) => (
+        <span
+          style={{
+            fontFamily: 'monospace',
+            fontWeight: 600,
+            fontSize: '0.8rem',
+            backgroundColor: 'var(--bg-subtle, #f1f5f9)',
+            padding: '3px 8px',
+            borderRadius: 6,
+            border: '1px solid var(--border-color, #e2e8f0)',
+            color: 'var(--text-main, #334155)',
+          }}
+        >
+          {r.code || '-'}
+        </span>
+      ),
     },
     {
       header: 'Client',
       key: 'clientName',
-      render: (r) => r.clientName || 'Internal Company Project',
+      render: (r) => (
+        <span style={{ fontSize: '0.84rem', color: r.clientName ? 'var(--text-main)' : 'var(--text-muted)' }}>
+          {r.clientName || 'Internal Project'}
+        </span>
+      ),
     },
     {
-      header: 'Sites (500m GeoFences)',
+      header: 'Sites',
       key: 'sites',
-      render: (r) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Button
-            variant="light"
-            size="sm"
-            icon={HardHat}
+      render: (r) => {
+        const count = r.sites?.length || 0;
+        return (
+          <Badge
+            variant="info"
             onClick={() => openSitesModal(r)}
-            style={{ fontSize: '0.78rem', padding: '3px 8px' }}
+            style={{
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '4px 10px',
+              fontSize: '0.78rem',
+              fontWeight: 500,
+            }}
+            title="Click to manage geo-fence sites"
           >
-            {r.sites?.length || 0} Sites Manage
-          </Button>
-        </div>
-      ),
+            <HardHat size={13} />
+            {count} {count === 1 ? 'Site' : 'Sites'}
+          </Badge>
+        );
+      },
     },
     {
       header: 'Status',
       key: 'status',
-      render: (r) => <Badge variant="success">{r.status || 'Active'}</Badge>,
+      render: (r) => (
+        <Badge variant={r.status === 'Active' || r.status === 'ACTIVE' ? 'success' : 'neutral'}>
+          {r.status || 'Active'}
+        </Badge>
+      ),
     },
     {
       header: 'Actions',
       key: 'actions',
       render: (r) => (
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <Button
-            variant="light"
+            variant="ghost"
             size="sm"
             icon={Eye}
             onClick={() => openProjectDetails(r)}
-            style={{ fontSize: '0.76rem', padding: '3px 8px' }}
-            title="View Project Details (GET /projects/:id)"
+            style={{ fontSize: '0.78rem', padding: '4px 8px', color: 'var(--primary)' }}
+            title="View Project Details"
           >
             Details
           </Button>
           <Button
-            variant="light"
+            variant="secondary"
             size="sm"
             icon={Plus}
             onClick={() => {
               setSelectedProject(r);
               setAddSiteModalOpen(true);
             }}
-            style={{ fontSize: '0.76rem', padding: '3px 8px', color: '#0f766e' }}
-            title="Add 500m GeoFence Site"
+            style={{ fontSize: '0.78rem', padding: '4px 8px' }}
+            title="Add GeoFence Site"
           >
-            + Site
+            Add Site
           </Button>
         </div>
       ),
@@ -558,16 +645,6 @@ export const ProjectsSites = () => {
               Assign Site Task
             </Button>
           )}
-          <Button
-            variant="light"
-            icon={RotateCcw}
-            onClick={() => {
-              if (activeTab === 'projects') loadData();
-              else loadTasks();
-            }}
-          >
-            Refresh
-          </Button>
         </div>
       </div>
 
@@ -598,7 +675,7 @@ export const ProjectsSites = () => {
           }}
         >
           <FolderKanban size={17} />
-          Projects Master & 500m Sites ({projects.length})
+          Projects ({projects.length})
         </button>
 
         <button
@@ -619,7 +696,7 @@ export const ProjectsSites = () => {
           }}
         >
           <CheckSquare size={17} />
-          Site Task Assignments ({tasks.length})
+          Task Assignments ({tasks.length})
         </button>
       </div>
 
@@ -673,7 +750,7 @@ export const ProjectsSites = () => {
                 onClick={() => openAssignTaskModal()}
                 style={{ background: '#059669', borderColor: '#059669' }}
               >
-                + Assign Site Task
+                Assign Site Task
               </Button>
             </div>
           </div>
@@ -1022,11 +1099,21 @@ export const ProjectsSites = () => {
 
           <div className="grid-2">
             <div className="form-group">
-              <label className="form-label">Project</label>
+              <label className="form-label">Project *</label>
               <select
                 className="form-control"
                 value={taskForm.projectId}
-                onChange={(e) => setTaskForm({ ...taskForm, projectId: e.target.value })}
+                onChange={async (e) => {
+                  const pId = e.target.value;
+                  setTaskForm((prev) => ({ ...prev, projectId: pId, siteId: '' }));
+                  if (pId) {
+                    const sites = await loadSitesForProject(pId);
+                    if (sites.length > 0) {
+                      setTaskForm((prev) => ({ ...prev, siteId: sites[0]._id || sites[0].id }));
+                    }
+                  }
+                }}
+                required
               >
                 <option value="">Select Project</option>
                 {projects.map((p) => (
@@ -1038,21 +1125,38 @@ export const ProjectsSites = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Assign To Engineer *</label>
+              <label className="form-label">Project Site *</label>
               <select
                 className="form-control"
-                value={taskForm.assignedTo}
-                onChange={(e) => setTaskForm({ ...taskForm, assignedTo: e.target.value })}
+                value={taskForm.siteId}
+                onChange={(e) => setTaskForm({ ...taskForm, siteId: e.target.value })}
                 required
               >
-                <option value="">Select Employee</option>
-                {employees.map((emp) => (
-                  <option key={emp._id || emp.id} value={emp._id || emp.id}>
-                    {formatEmployeeOption(emp, true)}
+                <option value="">Select Project Site</option>
+                {taskAvailableSites.map((s) => (
+                  <option key={s._id || s.id} value={s._id || s.id}>
+                    {s.name} ({s.code || 'SITE'})
                   </option>
                 ))}
               </select>
             </div>
+          </div>
+
+          <div className="form-group" style={{ marginTop: 12 }}>
+            <label className="form-label">Assign To Engineer *</label>
+            <select
+              className="form-control"
+              value={taskForm.assignedTo}
+              onChange={(e) => setTaskForm({ ...taskForm, assignedTo: e.target.value })}
+              required
+            >
+              <option value="">Select Employee</option>
+              {employees.map((emp) => (
+                <option key={emp._id || emp.id} value={emp._id || emp.id}>
+                  {formatEmployeeOption(emp, true)}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="grid-2" style={{ marginTop: 12 }}>

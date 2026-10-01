@@ -5,6 +5,7 @@ import employeeApi from '../../api/employeeApi';
 import masterApi from '../../api/masterApi';
 import faceApi from '../../api/faceApi';
 import { useToast } from '../../context/ToastContext';
+import { useConfirm } from '../../context/ConfirmContext';
 import { validateEmail, validatePhone } from '../../utils/validation';
 import { saveRegisteredSelfie } from '../../utils/faceComparison';
 import {
@@ -30,7 +31,6 @@ import {
   CreditCard,
   HeartHandshake,
   AlertTriangle,
-  RefreshCw,
   Landmark,
   Calendar,
   MapPin,
@@ -90,10 +90,10 @@ const DetailCard = ({ title, subtitle, icon: Icon, action, children }) => (
     style={{
       backgroundColor: '#ffffff',
       border: '1px solid var(--border-color)',
-      borderRadius: 'var(--radius-md)',
-      padding: '14px 16px',
-      marginBottom: '12px',
-      boxShadow: '0 1px 2px rgba(0, 0, 0, 0.03)',
+      borderRadius: '10px',
+      padding: '16px 20px',
+      marginBottom: '14px',
+      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.02)',
     }}
   >
     <div
@@ -101,32 +101,32 @@ const DetailCard = ({ title, subtitle, icon: Icon, action, children }) => (
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: '12px',
-        paddingBottom: '8px',
+        marginBottom: '14px',
+        paddingBottom: '10px',
         borderBottom: '1px solid var(--border-light)',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         {Icon && (
           <div
             style={{
-              width: 28,
-              height: 28,
-              borderRadius: '6px',
-              backgroundColor: 'var(--primary-light)',
+              width: 30,
+              height: 30,
+              borderRadius: '8px',
+              backgroundColor: 'var(--primary-subtle)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               color: 'var(--primary)',
             }}
           >
-            <Icon size={15} />
+            <Icon size={16} />
           </div>
         )}
         <div>
-          <h4 style={{ margin: 0, fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-main)' }}>{title}</h4>
+          <h4 style={{ margin: 0, fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-main)' }}>{title}</h4>
           {subtitle && (
-            <p style={{ margin: '1px 0 0', fontSize: '0.74rem', color: 'var(--text-muted)' }}>{subtitle}</p>
+            <p style={{ margin: '2px 0 0', fontSize: '0.74rem', color: 'var(--text-muted)' }}>{subtitle}</p>
           )}
         </div>
       </div>
@@ -136,7 +136,7 @@ const DetailCard = ({ title, subtitle, icon: Icon, action, children }) => (
   </div>
 );
 
-const DetailField = ({ label, value, isMono, isBadge, badgeVariant, emptyText = 'Not Provided', icon: Icon, copyable, onEdit }) => {
+const DetailField = ({ label, value, isMono, isBadge, badgeVariant, emptyText = '—', icon: Icon, copyable, onEdit }) => {
   const [copied, setCopied] = useState(false);
   const isEmpty = value === undefined || value === null || value === '' || value === '-';
 
@@ -152,59 +152,55 @@ const DetailField = ({ label, value, isMono, isBadge, badgeVariant, emptyText = 
   return (
     <div
       style={{
-        padding: '7px 10px',
-        backgroundColor: '#f8fafc',
-        borderRadius: '6px',
-        border: '1px solid #edf2f7',
         display: 'flex',
         flexDirection: 'column',
-        gap: 2,
-        minHeight: '44px',
-        justifyContent: 'center',
+        gap: 3,
+        padding: '3px 0',
+        minWidth: 0,
       }}
     >
       <span
         style={{
-          fontSize: '0.67rem',
+          fontSize: '0.71rem',
           textTransform: 'uppercase',
-          letterSpacing: '0.4px',
+          letterSpacing: '0.5px',
           color: 'var(--text-muted)',
           fontWeight: 600,
-          display: 'flex',
+          display: 'inline-flex',
           alignItems: 'center',
-          gap: 4,
+          gap: 5,
         }}
       >
-        {Icon && <Icon size={11} color="var(--primary)" />}
+        {Icon && <Icon size={12} color="var(--primary)" />}
         {label}
       </span>
       {isEmpty ? (
         <span
           style={{
             color: 'var(--text-light)',
-            fontSize: '0.78rem',
+            fontSize: '0.84rem',
             fontStyle: 'italic',
           }}
         >
           {emptyText}
         </span>
       ) : isBadge ? (
-        <div style={{ marginTop: 1 }}>
-          <Badge variant={badgeVariant || 'primary'} style={{ fontSize: '0.72rem', padding: '2px 7px' }}>
+        <div style={{ marginTop: 2 }}>
+          <Badge variant={badgeVariant || 'primary'} style={{ fontSize: '0.72rem', padding: '2px 8px' }}>
             {value}
           </Badge>
         </div>
       ) : copyable ? (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginTop: 1 }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 1 }}>
           <span
             style={{
-              fontSize: '0.8rem',
+              fontSize: '0.84rem',
               fontWeight: 600,
               color: 'var(--text-main)',
               fontFamily: 'monospace',
               letterSpacing: '0.3px',
               wordBreak: 'break-all',
-              lineHeight: 1.25,
+              lineHeight: 1.3,
             }}
             title={String(value)}
           >
@@ -230,16 +226,16 @@ const DetailField = ({ label, value, isMono, isBadge, badgeVariant, emptyText = 
           </button>
         </div>
       ) : onEdit ? (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginTop: 1 }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 1 }}>
           <span
             style={{
-              fontSize: '0.84rem',
+              fontSize: '0.86rem',
               fontWeight: 600,
               color: 'var(--text-main)',
               fontFamily: isMono ? 'monospace' : 'inherit',
               letterSpacing: isMono ? '0.3px' : 'normal',
               wordBreak: 'break-word',
-              lineHeight: 1.25,
+              lineHeight: 1.35,
             }}
           >
             {value}
@@ -263,19 +259,19 @@ const DetailField = ({ label, value, isMono, isBadge, badgeVariant, emptyText = 
               flexShrink: 0,
             }}
           >
-            <Edit2 size={13} />
+            <Edit2 size={12} />
           </button>
         </div>
       ) : (
         <span
           style={{
-            fontSize: '0.84rem',
+            fontSize: '0.86rem',
             fontWeight: 600,
             color: 'var(--text-main)',
             fontFamily: isMono ? 'monospace' : 'inherit',
             letterSpacing: isMono ? '0.3px' : 'normal',
             wordBreak: 'break-word',
-            lineHeight: 1.25,
+            lineHeight: 1.35,
           }}
         >
           {value}
@@ -288,7 +284,7 @@ const DetailField = ({ label, value, isMono, isBadge, badgeVariant, emptyText = 
 // ─────────────────────────────────────────────────────────────────────────────
 // MultiRolePicker — Premium multi-select role assignment widget
 // ─────────────────────────────────────────────────────────────────────────────
-const MultiRolePicker = ({ roles = [], selectedIds = [], onChange }) => {
+const MultiRolePicker = ({ roles = [], selectedIds = [], onChange, error }) => {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState('');
   const ref = React.useRef(null);
@@ -329,7 +325,7 @@ const MultiRolePicker = ({ roles = [], selectedIds = [], onChange }) => {
         style={{
           width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           gap: 8, padding: '9px 12px', borderRadius: 9,
-          border: open ? '1.5px solid var(--primary)' : '1.5px solid #cbd5e1',
+          border: error ? '1.5px solid #ef4444' : open ? '1.5px solid var(--primary)' : '1.5px solid #cbd5e1',
           background: '#fff', cursor: 'pointer', boxShadow: open ? '0 0 0 3px rgba(13,148,136,0.12)' : 'none',
           transition: 'border 0.15s, box-shadow 0.15s',
         }}
@@ -363,10 +359,10 @@ const MultiRolePicker = ({ roles = [], selectedIds = [], onChange }) => {
         <ChevronDown size={15} color="#64748b" style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
       </button>
 
-      {/* Error hint */}
-      {selectedIds.length === 0 && (
+      {/* Error message */}
+      {error && (
         <p style={{ margin: '3px 0 0', fontSize: '0.72rem', color: '#ef4444', fontWeight: 500 }}>
-          Please select at least one role
+          {error}
         </p>
       )}
 
@@ -436,7 +432,7 @@ const MultiRolePicker = ({ roles = [], selectedIds = [], onChange }) => {
                     </span>
                     {selected && (
                       <span style={{ fontSize: '0.68rem', color: 'var(--primary)', fontWeight: 700, background: '#f0fdfa', padding: '1px 7px', borderRadius: 20 }}>
-                        ✓ Selected
+                        Selected
                       </span>
                     )}
                   </div>
@@ -460,11 +456,17 @@ const MultiRolePicker = ({ roles = [], selectedIds = [], onChange }) => {
           </div>
         </div>
       )}
+      {error && (
+        <span className="form-error" style={{ display: 'block', color: '#ef4444', fontSize: '0.75rem', marginTop: 4 }}>
+          {error}
+        </span>
+      )}
     </div>
   );
 };
 
 export const EmployeeList = () => {
+  const confirm = useConfirm();
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -523,6 +525,8 @@ export const EmployeeList = () => {
     initialPassword: '',
     aadhaarNumber: '',
     panNumber: '',
+    aadhaarCardUrl: '',
+    panCardUrl: '',
     pfNumber: '',
     esicNumber: '',
     uanNumber: '',
@@ -540,6 +544,18 @@ export const EmployeeList = () => {
     experienceLetterUrl: '',
   };
   const [newEmp, setNewEmp] = useState(initialEmpState);
+  const [formErrors, setFormErrors] = useState({});
+
+  const handleFieldChange = (field, value) => {
+    setNewEmp((prev) => ({ ...prev, [field]: value }));
+    if (formErrors[field]) {
+      setFormErrors((prev) => {
+        const next = { ...prev };
+        delete next[field];
+        return next;
+      });
+    }
+  };
 
   // Profile Details & Edit Modal
   const [detailModalOpen, setDetailModalOpen] = useState(false);
@@ -611,6 +627,8 @@ export const EmployeeList = () => {
     APPOINTMENT_LETTER: null,
     RESIGNATION_LETTER: null,
     EXPERIENCE_LETTER: null,
+    AADHAAR_CARD: null,
+    PAN_CARD: null,
   });
 
   const handleDocFileSelect = (fieldKey, type, file) => {
@@ -741,6 +759,8 @@ export const EmployeeList = () => {
   // Load Employees with Filter & Pagination (GET /employees)
   const loadEmployees = async () => {
     setLoading(true);
+    // Auto-update global stats summary along with employee fetch
+    loadStatsSummary();
     try {
       const params = {
         page,
@@ -791,8 +811,71 @@ export const EmployeeList = () => {
     }
   };
 
+  const [statsSummary, setStatsSummary] = useState(null);
+
+  // Dynamic workforce statistics calculation across all employees
+  const loadStatsSummary = async () => {
+    try {
+      const res = await employeeApi.getEmployees({ limit: 1000 });
+      const allEmps = extractApiData(res, 'employees', 'data') || [];
+      if (Array.isArray(allEmps)) {
+        const total = res?.total || res?.totalCount || res?.count || allEmps.length;
+        let active = 0;
+        let onLeave = 0;
+        let fieldOrSite = 0;
+
+        allEmps.forEach((e) => {
+          const rawSt = e.employmentInfo?.employeeStatus || e.status || e.employeeStatus || 'ACTIVE';
+          const st = (typeof rawSt === 'string' ? rawSt : (rawSt?.name || rawSt?.status || 'ACTIVE')).toUpperCase();
+          if (st === 'ACTIVE') {
+            active++;
+          } else if (['ON_LEAVE', 'SUSPENDED', 'LEAVE', 'INACTIVE'].includes(st)) {
+            onLeave++;
+          }
+
+          const rawWt = String(e.employmentInfo?.workType || e.workType || 'OFFICE').toUpperCase();
+          if (rawWt === 'FIELD' || rawWt === 'HYBRID' || rawWt === 'SITE') {
+            fieldOrSite++;
+          }
+        });
+
+        if (active === 0 && total > 0 && onLeave === 0) {
+          active = total;
+        }
+
+        setStatsSummary({ total, active, onLeave, fieldOrSite });
+      }
+    } catch (err) {
+      console.warn('Could not load global employee stats summary:', err);
+    }
+  };
+
+  // Real-time automatic sync: polling interval (every 8s) & window focus/visibility/custom event
   useEffect(() => {
     loadFilterMasters();
+    loadStatsSummary();
+
+    const intervalTimer = setInterval(() => {
+      loadStatsSummary();
+    }, 8000);
+
+    const handleFocusSync = () => {
+      if (document.visibilityState === 'visible') {
+        loadStatsSummary();
+        loadEmployees();
+      }
+    };
+
+    window.addEventListener('focus', handleFocusSync);
+    document.addEventListener('visibilitychange', handleFocusSync);
+    window.addEventListener('employee-updated', handleFocusSync);
+
+    return () => {
+      clearInterval(intervalTimer);
+      window.removeEventListener('focus', handleFocusSync);
+      document.removeEventListener('visibilitychange', handleFocusSync);
+      window.removeEventListener('employee-updated', handleFocusSync);
+    };
   }, []);
 
   useEffect(() => {
@@ -811,6 +894,49 @@ export const EmployeeList = () => {
     e.preventDefault();
     setPage(1);
     loadEmployees();
+  };
+
+  // Quick Statistics calculation — dynamic, accurate & responsive
+  const stats = useMemo(() => {
+    if (statsSummary && typeof statsSummary.total === 'number') {
+      return statsSummary;
+    }
+    const total = totalCount || employees.length;
+    let active = 0;
+    let onLeave = 0;
+    let fieldOrSite = 0;
+
+    employees.forEach((e) => {
+      const rawSt = e.employmentInfo?.employeeStatus || e.status || e.employeeStatus || 'ACTIVE';
+      const st = (typeof rawSt === 'string' ? rawSt : (rawSt?.name || rawSt?.status || 'ACTIVE')).toUpperCase();
+      if (st === 'ACTIVE') {
+        active++;
+      } else if (['ON_LEAVE', 'SUSPENDED', 'LEAVE', 'INACTIVE'].includes(st)) {
+        onLeave++;
+      }
+
+      const rawWt = String(e.employmentInfo?.workType || e.workType || 'OFFICE').toUpperCase();
+      if (rawWt === 'FIELD' || rawWt === 'HYBRID' || rawWt === 'SITE') {
+        fieldOrSite++;
+      }
+    });
+
+    if (active === 0 && total > 0 && onLeave === 0) {
+      active = total;
+    }
+
+    return { total, active, onLeave, fieldOrSite };
+  }, [statsSummary, employees, totalCount]);
+
+  const hasActiveFilters = Boolean(search || selectedDept || selectedBranch || selectedStatus || selectedWorkType);
+
+  const clearAllFilters = () => {
+    setSearch('');
+    setSelectedDept('');
+    setSelectedBranch('');
+    setSelectedStatus('');
+    setSelectedWorkType('');
+    setPage(1);
   };
 
   // Designations memoized options — `name` is the primary field per swagger schema
@@ -879,139 +1005,136 @@ export const EmployeeList = () => {
       APPOINTMENT_LETTER: null,
       RESIGNATION_LETTER: null,
       EXPERIENCE_LETTER: null,
+      AADHAAR_CARD: null,
+      PAN_CARD: null,
     });
     setShowPhotoUrlInput(false);
+    setFormErrors({});
     setCreateTab('basic');
     setAddModalOpen(true);
   };
 
   // Step-by-Step Validation for Multi-Step Employee Creation
   const validateStep = (stepKey) => {
+    const errs = {};
+
     if (stepKey === 'basic') {
       if (!newEmp.firstName?.trim()) {
-        showToast('First Name is required', 'warning');
-        return false;
+        errs.firstName = 'First Name is required';
       }
       if (!newEmp.lastName?.trim()) {
-        showToast('Last Name is required', 'warning');
-        return false;
+        errs.lastName = 'Last Name is required';
       }
       if (!newEmp.email?.trim()) {
-        showToast('Official Email is required', 'warning');
-        return false;
-      }
-      const emailErr = validateEmail(newEmp.email, { fieldName: 'Official email' });
-      if (emailErr) {
-        showToast(emailErr, 'warning');
-        return false;
+        errs.email = 'Official Email is required';
+      } else {
+        const emailErr = validateEmail(newEmp.email, { fieldName: 'Official email' });
+        if (emailErr) errs.email = emailErr;
       }
       if (!newEmp.phone?.trim()) {
-        showToast('Mobile Number is required', 'warning');
-        return false;
-      }
-      const phoneErr = validatePhone(newEmp.phone, { fieldName: 'Mobile number' });
-      if (phoneErr) {
-        showToast(phoneErr, 'warning');
-        return false;
+        errs.phone = 'Mobile Number is required';
+      } else {
+        const phoneErr = validatePhone(newEmp.phone, { fieldName: 'Mobile number' });
+        if (phoneErr) errs.phone = phoneErr;
       }
       if (newEmp.alternateNumber?.trim()) {
         const altErr = validatePhone(newEmp.alternateNumber, { required: false, fieldName: 'Alternate number' });
         if (altErr) {
-          showToast(altErr, 'warning');
-          return false;
-        }
-        const cleanPhone = newEmp.phone.replace(/\D/g, '');
-        const cleanAlt = newEmp.alternateNumber.replace(/\D/g, '');
-        if (cleanAlt && cleanPhone && cleanPhone === cleanAlt) {
-          showToast('Mobile Number and Alternate Number cannot be the same', 'warning');
-          return false;
+          errs.alternateNumber = altErr;
+        } else {
+          const cleanPhone = newEmp.phone.replace(/\D/g, '');
+          const cleanAlt = newEmp.alternateNumber.replace(/\D/g, '');
+          if (cleanAlt && cleanPhone && cleanPhone === cleanAlt) {
+            errs.alternateNumber = 'Alternate Number cannot match primary Mobile Number';
+          }
         }
       }
       if (!newEmp.gender) {
-        showToast('Gender is required', 'warning');
-        return false;
+        errs.gender = 'Gender is required';
       }
       if (!newEmp.dateOfBirth) {
-        showToast('Date of Birth is required', 'warning');
-        return false;
+        errs.dateOfBirth = 'Date of Birth is required';
+      } else {
+        const dobDate = new Date(newEmp.dateOfBirth);
+        const today = new Date();
+        if (dobDate > today) {
+          errs.dateOfBirth = 'Date of Birth cannot be in the future';
+        }
       }
       if (!newEmp.initialPassword?.trim()) {
-        showToast('Initial Password is required', 'warning');
-        return false;
+        errs.initialPassword = 'Initial Password is required';
+      } else if (newEmp.initialPassword.trim().length < 6) {
+        errs.initialPassword = 'Initial Password must be at least 6 characters long';
       }
-      if (newEmp.initialPassword.trim().length < 6) {
-        showToast('Initial Password must be at least 6 characters long', 'warning');
-        return false;
-      }
-      return true;
     }
 
     if (stepKey === 'employment') {
       if (!newEmp.company) {
-        showToast('Company selection is required', 'warning');
-        return false;
+        errs.company = 'Company is required';
       }
       if (!newEmp.branch) {
-        showToast('Branch selection is required', 'warning');
-        return false;
+        errs.branch = 'Branch is required';
       }
       if (!newEmp.department) {
-        showToast('Department selection is required', 'warning');
-        return false;
+        errs.department = 'Department is required';
       }
       if (!newEmp.designation) {
-        showToast('Designation selection is required', 'warning');
-        return false;
+        errs.designation = 'Designation is required';
       }
       if (!newEmp.employeeRoles || newEmp.employeeRoles.length === 0) {
-        showToast('At least one Assigned System Role is required', 'warning');
-        return false;
+        errs.employeeRoles = 'At least one Assigned System Role is required';
       }
       if (!newEmp.employmentType) {
-        showToast('Employment Type is required', 'warning');
-        return false;
+        errs.employmentType = 'Employment Type is required';
       }
       if (!newEmp.employeeStatus) {
-        showToast('Employee Status is required', 'warning');
-        return false;
+        errs.employeeStatus = 'Employee Status is required';
       }
       if (!newEmp.workType) {
-        showToast('Work Type is required', 'warning');
-        return false;
+        errs.workType = 'Work Type is required';
       }
       if (!newEmp.dateOfJoining) {
-        showToast('Date of Joining is required', 'warning');
-        return false;
+        errs.dateOfJoining = 'Date of Joining is required';
       }
-      return true;
     }
 
     if (stepKey === 'government') {
       if (newEmp.panNumber?.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/i.test(newEmp.panNumber.trim())) {
-        showToast('Invalid PAN format (e.g. ABCDE1234F)', 'warning');
-        return false;
+        errs.panNumber = 'Invalid PAN format (e.g. ABCDE1234F)';
       }
       if (newEmp.aadhaarNumber?.trim()) {
         const cleanAadhaar = newEmp.aadhaarNumber.replace(/\D/g, '');
         if (cleanAadhaar.length !== 12) {
-          showToast('Aadhaar Number must be exactly 12 digits', 'warning');
-          return false;
+          errs.aadhaarNumber = 'Aadhaar Number must be exactly 12 digits';
         }
       }
-      return true;
+      if (newEmp.ifscCode?.trim() && !/^[A-Z]{4}0[A-Z0-9]{6}$/i.test(newEmp.ifscCode.trim())) {
+        errs.ifscCode = 'Invalid IFSC Code format (e.g. HDFC0001234)';
+      }
     }
 
     if (stepKey === 'emergency') {
       if (newEmp.emergencyPhone?.trim()) {
         const emgErr = validatePhone(newEmp.emergencyPhone, { required: false, fieldName: 'Emergency mobile phone' });
         if (emgErr) {
-          showToast(emgErr, 'warning');
-          return false;
+          errs.emergencyPhone = emgErr;
+        } else {
+          const cleanPhone = (newEmp.phone || '').replace(/\D/g, '');
+          const cleanEmg = newEmp.emergencyPhone.replace(/\D/g, '');
+          if (cleanEmg && cleanPhone && cleanPhone === cleanEmg) {
+            errs.emergencyPhone = 'Emergency phone cannot match employee primary mobile';
+          }
         }
       }
-      return true;
     }
 
+    if (Object.keys(errs).length > 0) {
+      setFormErrors(errs);
+      showToast(Object.values(errs)[0], 'warning');
+      return false;
+    }
+
+    setFormErrors({});
     return true;
   };
 
@@ -1084,7 +1207,7 @@ export const EmployeeList = () => {
         try {
           await faceApi.enrollFace(empId, [newEmp.photo]);
           faceEnrolled = true;
-          showToast('✓ Employee created & Selfie registered for face attendance!', 'success');
+          showToast('Employee created & Selfie registered for face attendance!', 'success');
         } catch (fErr) {
           console.warn('Auto face enrollment warning, opening enrollment modal:', fErr);
         }
@@ -1155,7 +1278,8 @@ export const EmployeeList = () => {
         employeeApi.getEmployeeById(empId),
         faceApi.getFaceStatus(empId),
       ]);
-      const detail = res.status === 'fulfilled' ? (res.value?.data || emp) : emp;
+      const rawEmp = res.status === 'fulfilled' ? (res.value?.data || res.value) : emp;
+      const detail = (rawEmp && typeof rawEmp === 'object' && !Array.isArray(rawEmp)) ? rawEmp : emp;
       const faceStatus = faceRes.status === 'fulfilled'
         ? (faceRes.value?.status || faceRes.value?.data?.status || 'UNREGISTERED')
         : 'UNREGISTERED';
@@ -1242,6 +1366,8 @@ export const EmployeeList = () => {
       setEditFormData({
         aadhaarNumber: g.aadhaarNumber || '',
         panNumber: g.panNumber || '',
+        aadhaarCardUrl: g.aadhaarCardUrl || '',
+        panCardUrl: g.panCardUrl || '',
         pfNumber: g.pfNumber || '',
         esicNumber: g.esicNumber || '',
         uanNumber: g.uanNumber || '',
@@ -1377,6 +1503,8 @@ export const EmployeeList = () => {
         const govPayload = {
           aadhaarNumber: editFormData.aadhaarNumber?.trim(),
           panNumber: editFormData.panNumber?.trim()?.toUpperCase(),
+          aadhaarCardUrl: editFormData.aadhaarCardUrl || undefined,
+          panCardUrl: editFormData.panCardUrl || undefined,
           pfNumber: editFormData.pfNumber?.trim(),
           esicNumber: editFormData.esicNumber?.trim(),
           uanNumber: editFormData.uanNumber?.trim(),
@@ -1452,7 +1580,14 @@ export const EmployeeList = () => {
 
   // Delete Document (DELETE /employees/:id/documents/:docIndex)
   const handleDeleteDocument = async (docIndex) => {
-    if (!window.confirm('Are you sure you want to delete this document?')) return;
+    const isConfirmed = await confirm({
+      title: 'Delete Employee Document',
+      message: 'Are you sure you want to delete this document from the employee profile?',
+      confirmText: 'Delete Document',
+      cancelText: 'Cancel',
+      variant: 'danger',
+    });
+    if (!isConfirmed) return;
     try {
       await employeeApi.deleteDocument(currentEmployeeDetail._id, docIndex);
       showToast('Document deleted successfully', 'success');
@@ -1575,10 +1710,10 @@ export const EmployeeList = () => {
         } catch {
           await faceApi.enrollFace(empId, [img]);
         }
-        showToast('✓ Face biometrics updated! Employee is ready for attendance.', 'success');
+        showToast('Face biometrics updated! Employee is ready for attendance.', 'success');
       } else {
         await faceApi.enrollFace(empId, [img]);
-        showToast('✓ Face registered successfully! Employee can now punch attendance.', 'success');
+        showToast('Face registered successfully! Employee can now punch attendance.', 'success');
       }
 
       // Save registered selfie persistently for client-side biometric matching
@@ -1617,27 +1752,19 @@ export const EmployeeList = () => {
   };
 
   // Table Columns
+  // Table Columns — Streamlined into clean, compact columns to prevent horizontal scroll
   const columns = [
     {
-      header: 'Employee Code',
-      key: 'employeeCode',
-      width: 120,
-      minWidth: 110,
-      render: (r) => (
-        <span style={{ fontWeight: 600, color: 'var(--primary)', fontFamily: 'monospace' }}>
-          {r?.employeeCode || r?.basicInfo?.employeeCode || (r?._id ? String(r._id).substring(0, 8).toUpperCase() : (r?.id ? String(r.id).substring(0, 8).toUpperCase() : 'EMP'))}
-        </span>
-      ),
-    },
-    {
-      header: 'Employee Details',
-      key: 'firstName',
-      minWidth: 190,
+      header: 'Employee',
+      key: 'employee',
+      minWidth: 220,
       render: (r) => {
-        const name = r.basicInfo?.fullName || (r.firstName ? `${r.firstName} ${r.lastName || ''}` : r.name || '-');
+        const name = r.basicInfo?.fullName || (r.firstName ? `${r.firstName} ${r.lastName || ''}`.trim() : r.name || '-');
+        const code = r?.employeeCode || r?.basicInfo?.employeeCode || (r?._id ? String(r._id).substring(0, 8).toUpperCase() : 'EMP');
         const email = r.basicInfo?.email || r.email || '-';
         const phone = r.basicInfo?.mobileNumber || r.phone || r.mobileNumber;
         const photo = r.basicInfo?.photograph || r.basicInfo?.photo || r.photo;
+
         return (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {photo ? (
@@ -1658,7 +1785,7 @@ export const EmployeeList = () => {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontWeight: 600,
+                  fontWeight: 700,
                   fontSize: '0.8rem',
                   flexShrink: 0,
                 }}
@@ -1666,135 +1793,190 @@ export const EmployeeList = () => {
                 {(name.charAt(0) || 'E').toUpperCase()}
               </div>
             )}
-            <div>
-              <div style={{ fontWeight: 600, color: 'var(--text-main)', whiteSpace: 'nowrap' }}>{name}</div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{email}</div>
-              {phone && (
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 1 }}>
-                  <Phone size={10} /> {phone}
-                </div>
-              )}
+            <div style={{ minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.86rem' }}>{name}</span>
+                <span
+                  style={{
+                    fontSize: '0.7rem',
+                    fontWeight: 600,
+                    color: 'var(--primary)',
+                    backgroundColor: 'rgba(42, 171, 160, 0.1)',
+                    padding: '1px 6px',
+                    borderRadius: 4,
+                    fontFamily: 'monospace',
+                  }}
+                >
+                  {code}
+                </span>
+              </div>
+              <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 170 }}>{email}</span>
+                {phone && (
+                  <>
+                    <span>•</span>
+                    <span style={{ whiteSpace: 'nowrap' }}>{phone}</span>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         );
       },
     },
     {
-      header: 'Department',
+      header: 'Role & Department',
       key: 'department',
-      minWidth: 140,
-      render: (r) => {
-        const d = r.employmentInfo?.department || r.department;
-        if (d && typeof d === 'object') return d.name || d.title || '-';
-        if (typeof d === 'string') {
-          const found = departments.find((item) => item._id === d || item.id === d);
-          return found?.name || d;
-        }
-        return '-';
-      },
-    },
-    {
-      header: 'Designation',
-      key: 'designation',
-      minWidth: 150,
+      minWidth: 180,
       render: (r) => {
         const des = r.employmentInfo?.designation || r.designation;
-        if (des && typeof des === 'object') return des.title || des.name || '-';
-        if (typeof des === 'string') {
-          const found = designations.find((item) => item._id === des || item.id === des);
-          return found?.title || found?.name || des;
-        }
-        return '-';
+        const desTitle = typeof des === 'object' ? (des.title || des.name || '-') : (designations.find((item) => item._id === des || item.id === des)?.title || designations.find((item) => item._id === des || item.id === des)?.name || des || '-');
+
+        const d = r.employmentInfo?.department || r.department;
+        const deptName = typeof d === 'object' ? (d.name || d.title || '-') : (departments.find((item) => item._id === d || item.id === d)?.name || d || '-');
+
+        const roleVal = r.employmentInfo?.employeeRole || r.employeeRole || r.role;
+        const roleObj = typeof roleVal === 'object' ? roleVal : roles.find((item) => item._id === roleVal || item.name === roleVal);
+        const roleLabel = roleObj?.displayName || roleObj?.name;
+        const isElevated = roleLabel && !/^employee$/i.test(roleLabel);
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div style={{ fontWeight: 600, fontSize: '0.84rem', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>{desTitle}</span>
+              {isElevated && (
+                <span style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--primary)', backgroundColor: 'rgba(42, 171, 160, 0.1)', padding: '1px 5px', borderRadius: 4 }}>
+                  {roleLabel}
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>{deptName}</div>
+          </div>
+        );
       },
     },
     {
       header: 'Branch',
       key: 'branch',
-      minWidth: 130,
+      minWidth: 120,
       render: (r) => {
         const b = r.employmentInfo?.branch || r.branch;
-        if (b && typeof b === 'object') return b.name || b.title || '-';
-        if (typeof b === 'string') {
-          const found = branches.find((item) => item._id === b || item.id === b);
-          return found?.name || b;
-        }
-        return '-';
-      },
-    },
-    {
-      header: 'Assigned Role',
-      key: 'employeeRole',
-      minWidth: 150,
-      render: (r) => {
-        const roleVal = r.employmentInfo?.employeeRole || r.employeeRole || r.role;
-        const roleObj = typeof roleVal === 'object' ? roleVal : roles.find((item) => item._id === roleVal || item.name === roleVal);
-        const roleLabel = roleObj?.displayName || roleObj?.name || (typeof roleVal === 'string' && roleVal !== '' ? roleVal : 'Employee');
-        return (
-          <span
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              fontSize: '0.78rem',
-              fontWeight: 600,
-              padding: '2px 8px',
-              borderRadius: 5,
-              backgroundColor: 'rgba(42, 171, 160, 0.1)',
-              color: 'var(--primary)',
-            }}
-          >
-            <ShieldCheck size={12} />
-            <span>{roleLabel}</span>
-          </span>
-        );
+        const branchName = typeof b === 'object' ? (b.name || b.title || '-') : (branches.find((item) => item._id === b || item.id === b)?.name || b || '-');
+        return <span style={{ fontSize: '0.82rem', color: 'var(--text-main)' }}>{branchName}</span>;
       },
     },
     {
       header: 'Work Type',
       key: 'workType',
-      minWidth: 100,
+      minWidth: 95,
       render: (r) => {
-        const wt = r.employmentInfo?.workType || r.workType || 'OFFICE';
-        const str = typeof wt === 'string' ? wt : (wt?.name || 'OFFICE');
-        return <Badge variant={str === 'SITE' ? 'warning' : str === 'FIELD' ? 'info' : 'secondary'}>{str}</Badge>;
+        const wt = String(r.employmentInfo?.workType || r.workType || 'OFFICE').toUpperCase();
+        if (wt === 'FIELD') {
+          return (
+            <span
+              style={{
+                fontSize: '0.74rem',
+                fontWeight: 600,
+                padding: '2px 8px',
+                borderRadius: 5,
+                backgroundColor: '#f0fdf4',
+                color: '#15803d',
+                border: '1px solid #bbf7d0',
+                whiteSpace: 'nowrap',
+              }}
+              title="Field Staff — GPS & Field Visit Attendance"
+            >
+              Field Staff
+            </span>
+          );
+        }
+        if (wt === 'HYBRID') {
+          return (
+            <span
+              style={{
+                fontSize: '0.74rem',
+                fontWeight: 600,
+                padding: '2px 8px',
+                borderRadius: 5,
+                backgroundColor: '#faf5ff',
+                color: '#7e22ce',
+                border: '1px solid #e9d5ff',
+                whiteSpace: 'nowrap',
+              }}
+              title="Hybrid — Allowed both Office Gate & Field Attendance"
+            >
+              Hybrid
+            </span>
+          );
+        }
+        return (
+          <span
+            style={{
+              fontSize: '0.74rem',
+              fontWeight: 600,
+              padding: '2px 8px',
+              borderRadius: 5,
+              backgroundColor: '#eff6ff',
+              color: '#1d4ed8',
+              border: '1px solid #bfdbfe',
+              whiteSpace: 'nowrap',
+            }}
+            title="Office Staff — Gate & Biometric Attendance"
+          >
+            Office
+          </span>
+        );
       },
     },
     {
       header: 'Face Status',
       key: 'isFaceEnrolled',
-      minWidth: 135,
+      minWidth: 105,
       render: (r) => {
         const enrolled = r.isFaceEnrolled === true;
         return enrolled ? (
           <button
+            type="button"
             className="btn btn-light btn-sm"
             onClick={() => openEnrollModal(r)}
             style={{
-              fontSize: '0.73rem', padding: '3px 9px',
-              color: '#16a34a', background: '#dcfce7',
-              border: '1px solid #bbf7d0', borderRadius: 6,
-              display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
+              fontSize: '0.73rem',
+              padding: '2px 7px',
+              color: '#16a34a',
+              background: '#dcfce7',
+              border: '1px solid #bbf7d0',
+              borderRadius: 5,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              cursor: 'pointer',
               whiteSpace: 'nowrap',
             }}
             title="Face Enrolled — Click to Re-register"
           >
-            <CheckCircle2 size={13} /> Face Enrolled
+            <CheckCircle2 size={12} /> Enrolled
           </button>
         ) : (
           <button
+            type="button"
             className="btn btn-warning btn-sm"
             onClick={() => openEnrollModal(r)}
             style={{
-              fontSize: '0.73rem', padding: '3px 9px',
-              color: '#b45309', background: '#fef9c3',
-              border: '1px solid #fde68a', borderRadius: 6,
-              display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
-              animation: 'pulse 2s infinite',
+              fontSize: '0.73rem',
+              padding: '2px 7px',
+              color: '#b45309',
+              background: '#fef9c3',
+              border: '1px solid #fde68a',
+              borderRadius: 5,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              cursor: 'pointer',
               whiteSpace: 'nowrap',
             }}
-            title="Face Not Registered — Click to Register Now"
+            title="Click to Register Face"
           >
-            <ScanFace size={13} /> Register Face
+            <ScanFace size={12} /> Register
           </button>
         );
       },
@@ -1802,7 +1984,7 @@ export const EmployeeList = () => {
     {
       header: 'Status',
       key: 'status',
-      minWidth: 90,
+      minWidth: 80,
       render: (r) => {
         const rawStatus = r.employmentInfo?.employeeStatus || r.status || 'ACTIVE';
         const st = typeof rawStatus === 'string' ? rawStatus : (rawStatus?.name || 'ACTIVE');
@@ -1822,34 +2004,73 @@ export const EmployeeList = () => {
     {
       header: 'Actions',
       key: 'actions',
-      width: 175,
-      minWidth: 175,
+      width: 110,
+      minWidth: 100,
       style: { textAlign: 'right' },
       render: (r) => (
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
           <button
+            type="button"
             className="btn btn-secondary btn-sm"
             onClick={() => openDetail(r)}
-            title="View & Edit 5-Tab Profile"
-            style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+            title="View & Edit Profile"
+            style={{
+              padding: '4px 9px',
+              fontSize: '0.76rem',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              borderRadius: 6,
+              border: '1px solid var(--border-color)',
+              color: 'var(--text-main)',
+              backgroundColor: '#ffffff',
+              cursor: 'pointer',
+            }}
           >
-            <Eye size={13} /> Profile
+            <Eye size={14} color="var(--primary)" style={{ flexShrink: 0 }} />
+            <span>View</span>
           </button>
           <button
-            className="btn btn-outline-warning btn-sm"
+            type="button"
             onClick={() => confirmDeactivate(r)}
-            title="Deactivate Employee & User Access (PUT /employees/:id/deactivate)"
-            style={{ padding: '5px 8px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+            title="Deactivate Employee"
+            style={{
+              width: 28,
+              height: 28,
+              padding: 0,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 6,
+              border: '1px solid #fde68a',
+              backgroundColor: '#fffbeb',
+              color: '#d97706',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
           >
-            <UserX size={13} />
+            <UserX size={14} color="#d97706" style={{ flexShrink: 0 }} />
           </button>
           <button
-            className="btn btn-outline-danger btn-sm"
+            type="button"
             onClick={() => confirmDelete(r)}
             title="Delete Employee"
-            style={{ padding: '5px 8px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{
+              width: 28,
+              height: 28,
+              padding: 0,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 6,
+              border: '1px solid #fecaca',
+              backgroundColor: '#fef2f2',
+              color: '#dc2626',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
           >
-            <Trash2 size={13} />
+            <Trash2 size={14} color="#dc2626" style={{ flexShrink: 0 }} />
           </button>
         </div>
       ),
@@ -1860,29 +2081,316 @@ export const EmployeeList = () => {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Header & Primary Actions */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>Employee Master Directory</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div
+            style={{
+              width: 42,
+              height: 42,
+              borderRadius: 10,
+              backgroundColor: 'rgba(46, 123, 133, 0.1)',
+              color: 'var(--primary)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Users size={22} />
+          </div>
+          <div>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>
+              Employee Master Directory
+            </h2>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+              Centralized Employee Master, Profiles, Documents & Sub-Section Management
+            </div>
+          </div>
         </div>
-        <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Button variant="primary" icon={Plus} onClick={openAddModal}>
             Add New Employee
           </Button>
         </div>
       </div>
 
+      {/* Quick Stats Cards — Dynamic & Interactive Filter Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14 }}>
+        {/* 1. Total Staff */}
+        <div
+          onClick={() => {
+            setSelectedStatus('');
+            setSelectedWorkType('');
+            setPage(1);
+          }}
+          className="card"
+          style={{
+            padding: '16px 20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            cursor: 'pointer',
+            border: (!selectedStatus && !selectedWorkType) ? '1.5px solid var(--primary)' : '1px solid var(--border-color)',
+            backgroundColor: (!selectedStatus && !selectedWorkType) ? 'rgba(46, 123, 133, 0.03)' : '#ffffff',
+            boxShadow: (!selectedStatus && !selectedWorkType) ? '0 4px 12px rgba(46, 123, 133, 0.12)' : '0 1px 3px rgba(0,0,0,0.03)',
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            borderRadius: '10px',
+            position: 'relative',
+          }}
+          title="Click to view all employees"
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: 10,
+                backgroundColor: 'rgba(46, 123, 133, 0.12)',
+                color: 'var(--primary)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <Users size={20} />
+            </div>
+            <div>
+              <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-main)', lineHeight: 1.1 }}>
+                {stats.total}
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 3, fontWeight: 500 }}>
+                Total Staff
+              </div>
+            </div>
+          </div>
+          {!selectedStatus && !selectedWorkType && (
+            <span
+              style={{
+                fontSize: '0.68rem',
+                fontWeight: 600,
+                color: 'var(--primary)',
+                backgroundColor: 'var(--primary-subtle)',
+                padding: '2px 7px',
+                borderRadius: 4,
+                border: '1px solid var(--primary-border)',
+              }}
+            >
+              All Active
+            </span>
+          )}
+        </div>
+
+        {/* 2. Active Workforce */}
+        <div
+          onClick={() => {
+            setSelectedStatus((prev) => (prev === 'ACTIVE' ? '' : 'ACTIVE'));
+            setPage(1);
+          }}
+          className="card"
+          style={{
+            padding: '16px 20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            cursor: 'pointer',
+            border: selectedStatus === 'ACTIVE' ? '1.5px solid #10b981' : '1px solid var(--border-color)',
+            backgroundColor: selectedStatus === 'ACTIVE' ? 'rgba(16, 185, 129, 0.04)' : '#ffffff',
+            boxShadow: selectedStatus === 'ACTIVE' ? '0 4px 12px rgba(16, 185, 129, 0.12)' : '0 1px 3px rgba(0,0,0,0.03)',
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            borderRadius: '10px',
+            position: 'relative',
+          }}
+          title="Click to filter Active workforce"
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: 10,
+                backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                color: '#10b981',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <CheckCircle2 size={20} />
+            </div>
+            <div>
+              <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-main)', lineHeight: 1.1 }}>
+                {stats.active}
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 3, fontWeight: 500 }}>
+                Active Workforce
+              </div>
+            </div>
+          </div>
+          {selectedStatus === 'ACTIVE' && (
+            <span
+              style={{
+                fontSize: '0.68rem',
+                fontWeight: 600,
+                color: '#059669',
+                backgroundColor: '#ecfdf5',
+                padding: '2px 7px',
+                borderRadius: 4,
+                border: '1px solid #a7f3d0',
+              }}
+            >
+              Filtered
+            </span>
+          )}
+        </div>
+
+        {/* 3. On Leave / Suspended */}
+        <div
+          onClick={() => {
+            setSelectedStatus((prev) => (prev === 'ON_LEAVE' || prev === 'SUSPENDED' ? '' : 'ON_LEAVE'));
+            setPage(1);
+          }}
+          className="card"
+          style={{
+            padding: '16px 20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            cursor: 'pointer',
+            border: (selectedStatus === 'ON_LEAVE' || selectedStatus === 'SUSPENDED') ? '1.5px solid #f59e0b' : '1px solid var(--border-color)',
+            backgroundColor: (selectedStatus === 'ON_LEAVE' || selectedStatus === 'SUSPENDED') ? 'rgba(245, 158, 11, 0.04)' : '#ffffff',
+            boxShadow: (selectedStatus === 'ON_LEAVE' || selectedStatus === 'SUSPENDED') ? '0 4px 12px rgba(245, 158, 11, 0.12)' : '0 1px 3px rgba(0,0,0,0.03)',
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            borderRadius: '10px',
+            position: 'relative',
+          }}
+          title="Click to filter On Leave / Suspended employees"
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: 10,
+                backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                color: '#f59e0b',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <Clock size={20} />
+            </div>
+            <div>
+              <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-main)', lineHeight: 1.1 }}>
+                {stats.onLeave}
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 3, fontWeight: 500 }}>
+                On Leave / Suspended
+              </div>
+            </div>
+          </div>
+          {(selectedStatus === 'ON_LEAVE' || selectedStatus === 'SUSPENDED') && (
+            <span
+              style={{
+                fontSize: '0.68rem',
+                fontWeight: 600,
+                color: '#d97706',
+                backgroundColor: '#fffbeb',
+                padding: '2px 7px',
+                borderRadius: 4,
+                border: '1px solid #fde68a',
+              }}
+            >
+              Filtered
+            </span>
+          )}
+        </div>
+
+        {/* 4. Field & Site Staff */}
+        <div
+          onClick={() => {
+            setSelectedWorkType((prev) => (prev === 'FIELD' || prev === 'HYBRID' ? '' : 'FIELD'));
+            setPage(1);
+          }}
+          className="card"
+          style={{
+            padding: '16px 20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            cursor: 'pointer',
+            border: (selectedWorkType === 'FIELD' || selectedWorkType === 'HYBRID') ? '1.5px solid #6366f1' : '1px solid var(--border-color)',
+            backgroundColor: (selectedWorkType === 'FIELD' || selectedWorkType === 'HYBRID') ? 'rgba(99, 102, 241, 0.04)' : '#ffffff',
+            boxShadow: (selectedWorkType === 'FIELD' || selectedWorkType === 'HYBRID') ? '0 4px 12px rgba(99, 102, 241, 0.12)' : '0 1px 3px rgba(0,0,0,0.03)',
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            borderRadius: '10px',
+            position: 'relative',
+          }}
+          title="Click to filter Field & Site Staff"
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: 10,
+                backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                color: '#6366f1',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <Briefcase size={20} />
+            </div>
+            <div>
+              <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-main)', lineHeight: 1.1 }}>
+                {stats.fieldOrSite}
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 3, fontWeight: 500 }}>
+                Field & Site Staff
+              </div>
+            </div>
+          </div>
+          {(selectedWorkType === 'FIELD' || selectedWorkType === 'HYBRID') && (
+            <span
+              style={{
+                fontSize: '0.68rem',
+                fontWeight: 600,
+                color: '#4f46e5',
+                backgroundColor: '#eef2ff',
+                padding: '2px 7px',
+                borderRadius: 4,
+                border: '1px solid #c7d2fe',
+              }}
+            >
+              Filtered
+            </span>
+          )}
+        </div>
+      </div>
+
       {/* Multi-Parameter Search & Filter Bar */}
-      <div className="card" style={{ padding: '16px 20px', overflow: 'visible', position: 'relative', zIndex: 20 }}>
-        <form onSubmit={handleSearchSubmit} className="filter-toolbar">
-          <div className="filter-search">
+      <div className="card" style={{ padding: '14px 18px', overflow: 'visible', position: 'relative', zIndex: 20 }}>
+        <form onSubmit={handleSearchSubmit} className="filter-toolbar" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+          <div className="filter-search" style={{ flex: '1 1 240px', minWidth: 200 }}>
             <Input
+              icon={Search}
               placeholder="Search by Name, Code, Email, Mobile..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              inputStyle={{ height: 38, fontSize: '0.84rem' }}
               style={{ marginBottom: 0 }}
             />
           </div>
 
-          <div className="filter-item">
+          <div className="filter-item" style={{ width: 170, minWidth: 140 }}>
             <Select
               placeholder="All Departments"
               value={selectedDept}
@@ -1894,11 +2402,11 @@ export const EmployeeList = () => {
                 { value: '', label: 'All Departments' },
                 ...departments.map((d) => ({ value: d.name || d._id, label: d.name })),
               ]}
-              style={{ marginBottom: 0 }}
+              style={{ height: 38, fontSize: '0.84rem', marginBottom: 0 }}
             />
           </div>
 
-          <div className="filter-item">
+          <div className="filter-item" style={{ width: 170, minWidth: 140 }}>
             <Select
               placeholder="All Branches"
               value={selectedBranch}
@@ -1910,11 +2418,11 @@ export const EmployeeList = () => {
                 { value: '', label: 'All Branches' },
                 ...branches.map((b) => ({ value: b._id, label: b.name })),
               ]}
-              style={{ marginBottom: 0 }}
+              style={{ height: 38, fontSize: '0.84rem', marginBottom: 0 }}
             />
           </div>
 
-          <div className="filter-item">
+          <div className="filter-item" style={{ width: 150, minWidth: 130 }}>
             <Select
               placeholder="All Statuses"
               value={selectedStatus}
@@ -1929,11 +2437,11 @@ export const EmployeeList = () => {
                 { value: 'SUSPENDED', label: 'SUSPENDED' },
                 { value: 'EXITED', label: 'EXITED' },
               ]}
-              style={{ marginBottom: 0 }}
+              style={{ height: 38, fontSize: '0.84rem', marginBottom: 0 }}
             />
           </div>
 
-          <div className="filter-item">
+          <div className="filter-item" style={{ width: 150, minWidth: 130 }}>
             <Select
               placeholder="Work Type"
               value={selectedWorkType}
@@ -1943,20 +2451,38 @@ export const EmployeeList = () => {
               }}
               options={[
                 { value: '', label: 'All Work Types' },
-                { value: 'OFFICE', label: 'OFFICE' },
-                { value: 'FIELD', label: 'FIELD' },
-                { value: 'SITE', label: 'SITE' },
-                { value: 'HYBRID', label: 'HYBRID' },
+                { value: 'OFFICE', label: 'Office' },
+                { value: 'FIELD', label: 'Field Staff' },
+                { value: 'HYBRID', label: 'Hybrid' },
               ]}
-              style={{ marginBottom: 0 }}
+              style={{ height: 38, fontSize: '0.84rem', marginBottom: 0 }}
             />
           </div>
+
+          {hasActiveFilters && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              icon={X}
+              onClick={clearAllFilters}
+              style={{ height: 38, fontSize: '0.82rem', whiteSpace: 'nowrap' }}
+            >
+              Clear Filters
+            </Button>
+          )}
         </form>
       </div>
 
       {/* Directory Table */}
-      <div className="card">
-        <Table columns={columns} data={employees} loading={loading} emptyMessage="No employees found matching criteria." />
+      <div className="card" style={{ overflow: 'hidden' }}>
+        <Table
+          columns={columns}
+          data={employees}
+          loading={loading}
+          emptyMessage="No employees found matching criteria."
+          style={{ border: 'none', borderRadius: 0 }}
+        />
         <div style={{ padding: '0 20px 16px' }}>
           <Pagination
             currentPage={page}
@@ -2017,283 +2543,317 @@ export const EmployeeList = () => {
         <form onSubmit={handleCreateEmployee}>
           {/* TAB 1: BASIC INFORMATION */}
           {createTab === 'basic' && (
-            <div className="grid-2">
-              <Input
-                label="Employee Code"
-                value={newEmp.employeeCode}
-                onChange={(e) => setNewEmp({ ...newEmp, employeeCode: e.target.value.toUpperCase() })}
-                placeholder="Auto-generated if empty (e.g. EMP-1001)"
-              />
-              <div className="form-group" style={{ marginBottom: 16 }}>
-                <label className="form-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <span>Profile Photo</span>
+            <div>
+              {/* Dedicated Profile Photo & Biometrics Top Card */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 16,
+                  padding: '12px 16px',
+                  backgroundColor: '#f8fafc',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '10px',
+                  marginBottom: '20px',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <div
+                    style={{
+                      width: 52,
+                      height: 52,
+                      borderRadius: '50%',
+                      overflow: 'hidden',
+                      backgroundColor: '#e2e8f0',
+                      border: '2px solid #ffffff',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {newEmp.photo ? (
+                      <img
+                        src={newEmp.photo}
+                        alt="Profile Preview"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    ) : (
+                      <Camera size={22} color="var(--text-muted)" />
+                    )}
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span>Profile Photograph</span>
+                      {newEmp.photo && (
+                        <span style={{ fontSize: '0.72rem', color: '#16a34a', fontWeight: 600, backgroundColor: '#dcfce7', padding: '2px 8px', borderRadius: 4 }}>
+                          Biometrics Ready
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                      Upload or capture a live selfie for profile & facial attendance verification
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <label
+                    htmlFor="add-emp-photo-input"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '6px 14px',
+                      borderRadius: '6px',
+                      backgroundColor: 'var(--primary)',
+                      color: '#ffffff',
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <Upload size={14} />
+                    {newEmp.photo ? 'Change Photo' : 'Upload Photo'}
+                  </label>
+                  <input
+                    id="add-emp-photo-input"
+                    type="file"
+                    accept="image/png, image/jpeg, image/jpg, image/webp"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handlePhotoSelect(file);
+                      e.target.value = '';
+                    }}
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => setShowCameraInAddForm(!showCameraInAddForm)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '6px 14px',
+                      borderRadius: '6px',
+                      backgroundColor: '#0d9488',
+                      color: '#ffffff',
+                      border: 'none',
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <Camera size={14} />
+                    {showCameraInAddForm ? 'Close Camera' : 'Take Live Selfie'}
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => setShowPhotoUrlInput(!showPhotoUrlInput)}
                     style={{
                       background: 'none',
-                      border: 'none',
-                      color: 'var(--primary)',
-                      fontSize: '0.75rem',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '6px',
+                      color: 'var(--text-main)',
+                      fontSize: '0.78rem',
                       cursor: 'pointer',
-                      textDecoration: 'underline',
-                      padding: 0,
+                      padding: '5px 10px',
                     }}
                   >
-                    {showPhotoUrlInput ? 'Switch to File Upload' : 'or enter Image URL'}
+                    {showPhotoUrlInput ? 'Hide URL' : 'or enter Image URL'}
                   </button>
-                </label>
 
-                {showPhotoUrlInput ? (
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <Input
-                      value={newEmp.photo}
-                      onChange={(e) => setNewEmp({ ...newEmp, photo: e.target.value })}
-                      placeholder="https://example.com/avatar.jpg"
-                      style={{ flex: 1 }}
-                    />
-                    {newEmp.photo && (
-                      <img
-                        src={newEmp.photo}
-                        alt="Preview"
-                        style={{ width: 38, height: 38, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--border-color)', flexShrink: 0 }}
-                        onError={(e) => { e.target.style.display = 'none'; }}
-                      />
-                    )}
-                  </div>
-                ) : (
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 12,
-                      padding: '8px 12px',
-                      border: '1px dashed var(--border-color)',
-                      borderRadius: '8px',
-                      backgroundColor: '#fafbfc',
-                      minHeight: '52px',
-                    }}
-                  >
-                    <div
+                  {newEmp.photo && (
+                    <button
+                      type="button"
+                      onClick={handlePhotoRemove}
                       style={{
-                        width: 44,
-                        height: 44,
-                        borderRadius: '50%',
-                        overflow: 'hidden',
-                        backgroundColor: '#f1f5f9',
-                        border: '1px solid var(--border-color)',
-                        display: 'flex',
+                        display: 'inline-flex',
                         alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0,
+                        gap: 4,
+                        padding: '5px 10px',
+                        borderRadius: '6px',
+                        backgroundColor: '#fee2e2',
+                        color: '#ef4444',
+                        border: 'none',
+                        fontSize: '0.78rem',
+                        fontWeight: 500,
+                        cursor: 'pointer',
                       }}
                     >
-                      {newEmp.photo ? (
-                        <img
-                          src={newEmp.photo}
-                          alt="Profile Preview"
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        />
-                      ) : (
-                        <Camera size={20} color="var(--text-muted)" />
-                      )}
-                    </div>
-
-                    <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <label
-                          htmlFor="add-emp-photo-input"
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 6,
-                            padding: '5px 12px',
-                            borderRadius: '6px',
-                            backgroundColor: 'var(--primary)',
-                            color: '#ffffff',
-                            fontSize: '0.78rem',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <Upload size={13} />
-                          {newEmp.photo ? 'Change Photo' : 'Upload Photo'}
-                        </label>
-                        <input
-                          id="add-emp-photo-input"
-                          type="file"
-                          accept="image/png, image/jpeg, image/jpg, image/webp"
-                          style={{ display: 'none' }}
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) handlePhotoSelect(file);
-                            e.target.value = '';
-                          }}
-                        />
-
-                        <button
-                          type="button"
-                          onClick={() => setShowCameraInAddForm(!showCameraInAddForm)}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 6,
-                            padding: '5px 12px',
-                            borderRadius: '6px',
-                            backgroundColor: '#0d9488',
-                            color: '#ffffff',
-                            border: 'none',
-                            fontSize: '0.78rem',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <Camera size={13} />
-                          {showCameraInAddForm ? 'Close Camera' : 'Take Live Selfie'}
-                        </button>
-
-                        <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>
-                          Selfie will auto-register for biometric attendance
-                        </span>
-                      </div>
-
-                      {newEmp.photo && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ fontSize: '0.72rem', color: '#16a34a', fontWeight: 600, backgroundColor: '#dcfce7', padding: '3px 8px', borderRadius: 4 }}>
-                            ✓ Biometrics Ready
-                          </span>
-                          <button
-                            type="button"
-                            onClick={handlePhotoRemove}
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 4,
-                              padding: '4px 8px',
-                              borderRadius: '4px',
-                              backgroundColor: '#fee2e2',
-                              color: '#ef4444',
-                              border: 'none',
-                              fontSize: '0.75rem',
-                              fontWeight: 500,
-                              cursor: 'pointer',
-                            }}
-                          >
-                            <Trash2 size={12} /> Remove
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {showCameraInAddForm && (
-                  <div style={{ marginTop: 12, padding: 12, backgroundColor: '#f8fafc', borderRadius: 8, border: '1px solid var(--border-color)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--primary)' }}>
-                        Capture Employee Selfie (Look directly into the camera)
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setShowCameraInAddForm(false)}
-                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)' }}
-                      >
-                        <X size={16} />
-                      </button>
-                    </div>
-                    <CameraCapture
-                      onCapture={(img) => {
-                        setNewEmp((prev) => ({ ...prev, photo: img }));
-                        setShowCameraInAddForm(false);
-                        showToast('Selfie captured! Will auto-enroll on employee creation.', 'success');
-                      }}
-                      onCancel={() => setShowCameraInAddForm(false)}
-                      label="Employee Face Photo"
-                    />
-                  </div>
-                )}
+                      <Trash2 size={13} /> Remove
+                    </button>
+                  )}
+                </div>
               </div>
-              <Input
-                label="First Name"
-                value={newEmp.firstName}
-                onChange={(e) => setNewEmp({ ...newEmp, firstName: e.target.value })}
-                placeholder="First name"
-                required
-              />
-              <Input
-                label="Last Name"
-                value={newEmp.lastName}
-                onChange={(e) => setNewEmp({ ...newEmp, lastName: e.target.value })}
-                placeholder="Last name"
-                required
-              />
-              <Input
-                label="Official Email (Login ID)"
-                type="email"
-                value={newEmp.email}
-                onChange={(e) => setNewEmp({ ...newEmp, email: e.target.value })}
-                placeholder="email@company.com"
-                required
-              />
-              <Input
-                label="Mobile Number *"
-                type="tel"
-                isPhone={true}
-                value={newEmp.phone}
-                onChange={(e) => setNewEmp({ ...newEmp, phone: e.target.value })}
-                placeholder="10-digit mobile number"
-                required
-              />
-              <Input
-                label="Alternate Number"
-                type="tel"
-                isPhone={true}
-                value={newEmp.alternateNumber}
-                onChange={(e) => setNewEmp({ ...newEmp, alternateNumber: e.target.value })}
-                placeholder="10-digit alternate mobile (cannot match mobile)"
-              />
-              <Select
-                label="Gender *"
-                value={newEmp.gender}
-                onChange={(e) => setNewEmp({ ...newEmp, gender: e.target.value })}
-                options={[
-                  { value: 'MALE', label: 'Male' },
-                  { value: 'FEMALE', label: 'Female' },
-                  { value: 'OTHER', label: 'Other' },
-                ]}
-                required
-              />
-              <Input
-                label="Date of Birth *"
-                type="date"
-                value={newEmp.dateOfBirth}
-                onChange={(e) => setNewEmp({ ...newEmp, dateOfBirth: e.target.value })}
-                required
-              />
-              <Select
-                label="Blood Group"
-                value={newEmp.bloodGroup}
-                onChange={(e) => setNewEmp({ ...newEmp, bloodGroup: e.target.value })}
-                options={['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'].map((bg) => ({ value: bg, label: bg }))}
-              />
-              <Select
-                label="Marital Status"
-                value={newEmp.maritalStatus}
-                onChange={(e) => setNewEmp({ ...newEmp, maritalStatus: e.target.value })}
-                options={[
-                  { value: 'SINGLE', label: 'Single' },
-                  { value: 'MARRIED', label: 'Married' },
-                  { value: 'OTHER', label: 'Other' },
-                ]}
-              />
-              <Input
-                label="Initial Password *"
-                type="password"
-                value={newEmp.initialPassword}
-                onChange={(e) => setNewEmp({ ...newEmp, initialPassword: e.target.value })}
-                placeholder="Enter password (minimum 6 characters)"
-                required
-              />
+
+              {/* Optional Photo URL Input */}
+              {showPhotoUrlInput && (
+                <div style={{ marginBottom: 16, display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <Input
+                    label="Image Direct URL"
+                    value={newEmp.photo}
+                    onChange={(e) => handleFieldChange('photo', e.target.value)}
+                    placeholder="https://example.com/avatar.jpg"
+                    style={{ flex: 1 }}
+                  />
+                  {newEmp.photo && (
+                    <img
+                      src={newEmp.photo}
+                      alt="Preview"
+                      style={{ width: 42, height: 42, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--border-color)', flexShrink: 0, marginTop: 18 }}
+                      onError={(e) => { e.target.style.display = 'none'; }}
+                    />
+                  )}
+                </div>
+              )}
+
+              {/* Live Selfie Camera Modal in Form */}
+              {showCameraInAddForm && (
+                <div style={{ marginBottom: 20, padding: 14, backgroundColor: '#f8fafc', borderRadius: 8, border: '1px solid var(--border-color)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--primary)' }}>
+                      Capture Employee Selfie (Look directly into the camera)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowCameraInAddForm(false)}
+                      style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)' }}
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                  <CameraCapture
+                    onCapture={(img) => {
+                      setNewEmp((prev) => ({ ...prev, photo: img }));
+                      setShowCameraInAddForm(false);
+                      showToast('Selfie captured! Will auto-enroll on employee creation.', 'success');
+                    }}
+                    onCancel={() => setShowCameraInAddForm(false)}
+                    label="Employee Face Photo"
+                  />
+                </div>
+              )}
+
+              {/* Perfectly Aligned 2-Column Input Grid */}
+              <div className="grid-2">
+                {/* Row 1: Full Names */}
+                <Input
+                  label="First Name"
+                  value={newEmp.firstName}
+                  onChange={(e) => handleFieldChange('firstName', e.target.value)}
+                  placeholder="First name"
+                  required
+                  error={formErrors.firstName}
+                />
+                <Input
+                  label="Last Name"
+                  value={newEmp.lastName}
+                  onChange={(e) => handleFieldChange('lastName', e.target.value)}
+                  placeholder="Last name"
+                  required
+                  error={formErrors.lastName}
+                />
+
+                {/* Row 2: Identifiers */}
+                <Input
+                  label="Employee Code"
+                  value={newEmp.employeeCode}
+                  onChange={(e) => handleFieldChange('employeeCode', e.target.value.toUpperCase())}
+                  placeholder="Auto-generated if empty (e.g. EMP-1001)"
+                  helperText="Optional, system auto-generates if left blank"
+                />
+                <Input
+                  label="Official Email (Login ID)"
+                  type="email"
+                  value={newEmp.email}
+                  onChange={(e) => handleFieldChange('email', e.target.value)}
+                  placeholder="e.g. name@example.com"
+                  required
+                  error={formErrors.email}
+                />
+
+                {/* Row 3: Phone Contact Numbers */}
+                <Input
+                  label="Mobile Number"
+                  type="tel"
+                  isPhone={true}
+                  value={newEmp.phone}
+                  onChange={(e) => handleFieldChange('phone', e.target.value)}
+                  placeholder="10-digit mobile number"
+                  required
+                  error={formErrors.phone}
+                />
+                <Input
+                  label="Alternate Number"
+                  type="tel"
+                  isPhone={true}
+                  value={newEmp.alternateNumber}
+                  onChange={(e) => handleFieldChange('alternateNumber', e.target.value)}
+                  placeholder="10-digit alternate mobile (cannot match primary)"
+                  error={formErrors.alternateNumber}
+                />
+
+                {/* Row 4: Personal Details */}
+                <Select
+                  label="Gender"
+                  value={newEmp.gender}
+                  onChange={(e) => handleFieldChange('gender', e.target.value)}
+                  options={[
+                    { value: 'MALE', label: 'Male' },
+                    { value: 'FEMALE', label: 'Female' },
+                    { value: 'OTHER', label: 'Other' },
+                  ]}
+                  required
+                  error={formErrors.gender}
+                />
+                <Input
+                  label="Date of Birth"
+                  type="date"
+                  value={newEmp.dateOfBirth}
+                  onChange={(e) => handleFieldChange('dateOfBirth', e.target.value)}
+                  required
+                  error={formErrors.dateOfBirth}
+                  max={new Date().toISOString().split('T')[0]}
+                />
+
+                {/* Row 5: Demographics */}
+                <Select
+                  label="Blood Group"
+                  value={newEmp.bloodGroup}
+                  onChange={(e) => handleFieldChange('bloodGroup', e.target.value)}
+                  options={['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'].map((bg) => ({ value: bg, label: bg }))}
+                />
+                <Select
+                  label="Marital Status"
+                  value={newEmp.maritalStatus}
+                  onChange={(e) => handleFieldChange('maritalStatus', e.target.value)}
+                  options={[
+                    { value: 'SINGLE', label: 'Single' },
+                    { value: 'MARRIED', label: 'Married' },
+                    { value: 'OTHER', label: 'Other' },
+                  ]}
+                />
+
+                {/* Row 6: Initial Security Password (Span 2 for clean balance) */}
+                <div style={{ gridColumn: 'span 2' }}>
+                  <Input
+                    label="Initial Password"
+                    type="password"
+                    value={newEmp.initialPassword}
+                    onChange={(e) => handleFieldChange('initialPassword', e.target.value)}
+                    placeholder="Enter password (minimum 6 characters)"
+                    required
+                    error={formErrors.initialPassword}
+                    helperText="Employee will use this password along with their Official Email to log in."
+                  />
+                </div>
+              </div>
             </div>
           )}
 
@@ -2303,17 +2863,25 @@ export const EmployeeList = () => {
               <Select
                 label="Company"
                 value={newEmp.company}
+                error={formErrors.company}
                 onChange={(e) => {
                   const compId = e.target.value;
                   const matchingBranches = branches.filter((b) => {
                     const cId = b.company?._id || b.company?.id || b.company;
                     return !cId || String(cId) === String(compId);
                   });
-                  setNewEmp({
-                    ...newEmp,
+                  setNewEmp((prev) => ({
+                    ...prev,
                     company: compId,
                     branch: matchingBranches[0]?._id || (branches[0]?._id || ''),
-                  });
+                  }));
+                  if (formErrors.company) {
+                    setFormErrors((prev) => {
+                      const next = { ...prev };
+                      delete next.company;
+                      return next;
+                    });
+                  }
                 }}
                 options={companies.map((c) => ({ value: c._id, label: c.name }))}
                 required
@@ -2321,15 +2889,23 @@ export const EmployeeList = () => {
               <Select
                 label="Branch"
                 value={newEmp.branch}
+                error={formErrors.branch}
                 onChange={(e) => {
                   const bId = e.target.value;
                   const chosenBranch = branches.find((b) => String(b._id) === String(bId));
                   const branchCompany = chosenBranch?.company?._id || chosenBranch?.company;
-                  setNewEmp({
-                    ...newEmp,
+                  setNewEmp((prev) => ({
+                    ...prev,
                     branch: bId,
-                    company: branchCompany || newEmp.company,
-                  });
+                    company: branchCompany || prev.company,
+                  }));
+                  if (formErrors.branch) {
+                    setFormErrors((prev) => {
+                      const next = { ...prev };
+                      delete next.branch;
+                      return next;
+                    });
+                  }
                 }}
                 options={availableBranches.map((b) => ({
                   value: b._id,
@@ -2340,9 +2916,10 @@ export const EmployeeList = () => {
               <Select
                 label="Department"
                 value={newEmp.department}
+                error={formErrors.department}
                 onChange={(e) => {
                   const val = e.target.value;
-                  setNewEmp({ ...newEmp, department: val });
+                  handleFieldChange('department', val);
                   if (val) fetchDesignations(val);
                 }}
                 options={departments.map((d) => ({ value: d._id, label: d.name }))}
@@ -2352,14 +2929,15 @@ export const EmployeeList = () => {
                 label="Designation"
                 placeholder="Select Designation"
                 value={newEmp.designation}
-                onChange={(e) => setNewEmp({ ...newEmp, designation: e.target.value })}
+                error={formErrors.designation}
+                onChange={(e) => handleFieldChange('designation', e.target.value)}
                 options={designationOptions}
                 required
               />
               <Select
                 label="Reporting Manager"
                 value={newEmp.reportingManager}
-                onChange={(e) => setNewEmp({ ...newEmp, reportingManager: e.target.value })}
+                onChange={(e) => handleFieldChange('reportingManager', e.target.value)}
                 options={[
                   { value: '', label: 'None / Top Level Manager' },
                   ...employees.map((em) => ({
@@ -2372,12 +2950,14 @@ export const EmployeeList = () => {
               <MultiRolePicker
                 roles={roles}
                 selectedIds={newEmp.employeeRoles}
-                onChange={(ids) => setNewEmp({ ...newEmp, employeeRoles: ids })}
+                error={formErrors.employeeRoles}
+                onChange={(ids) => handleFieldChange('employeeRoles', ids)}
               />
               <Select
                 label="Employment Type"
                 value={newEmp.employmentType}
-                onChange={(e) => setNewEmp({ ...newEmp, employmentType: e.target.value })}
+                error={formErrors.employmentType}
+                onChange={(e) => handleFieldChange('employmentType', e.target.value)}
                 options={[
                   { value: 'FULL_TIME', label: 'Full Time' },
                   { value: 'PART_TIME', label: 'Part Time' },
@@ -2389,7 +2969,8 @@ export const EmployeeList = () => {
               <Select
                 label="Employee Status"
                 value={newEmp.employeeStatus}
-                onChange={(e) => setNewEmp({ ...newEmp, employeeStatus: e.target.value })}
+                error={formErrors.employeeStatus}
+                onChange={(e) => handleFieldChange('employeeStatus', e.target.value)}
                 options={[
                   { value: 'ACTIVE', label: 'ACTIVE' },
                   { value: 'PROBATION', label: 'PROBATION' },
@@ -2400,11 +2981,11 @@ export const EmployeeList = () => {
               <Select
                 label="Work Type"
                 value={newEmp.workType}
-                onChange={(e) => setNewEmp({ ...newEmp, workType: e.target.value })}
+                error={formErrors.workType}
+                onChange={(e) => handleFieldChange('workType', e.target.value)}
                 options={[
                   { value: 'OFFICE', label: 'Office' },
                   { value: 'FIELD', label: 'Field Staff' },
-                  { value: 'SITE', label: 'Site / Project' },
                   { value: 'HYBRID', label: 'Hybrid' },
                 ]}
                 required
@@ -2412,7 +2993,7 @@ export const EmployeeList = () => {
               <Select
                 label="Shift"
                 value={newEmp.shift}
-                onChange={(e) => setNewEmp({ ...newEmp, shift: e.target.value })}
+                onChange={(e) => handleFieldChange('shift', e.target.value)}
                 options={[
                   { value: 'GENERAL', label: 'General Shift (9:00 AM - 7:00 PM)' },
                   { value: 'MORNING', label: 'Morning Shift' },
@@ -2424,28 +3005,29 @@ export const EmployeeList = () => {
                 label="Daily Duty Hours"
                 type="number"
                 value={newEmp.dutyHours}
-                onChange={(e) => setNewEmp({ ...newEmp, dutyHours: Number(e.target.value) })}
+                onChange={(e) => handleFieldChange('dutyHours', Number(e.target.value))}
                 placeholder="8"
               />
               <Input
                 label="Date of Joining"
                 type="date"
                 value={newEmp.dateOfJoining}
-                onChange={(e) => setNewEmp({ ...newEmp, dateOfJoining: e.target.value })}
+                error={formErrors.dateOfJoining}
+                onChange={(e) => handleFieldChange('dateOfJoining', e.target.value)}
                 required
               />
               <Input
                 label="Basic Salary (₹/month)"
                 type="number"
                 value={newEmp.salaryBasic}
-                onChange={(e) => setNewEmp({ ...newEmp, salaryBasic: Number(e.target.value) })}
+                onChange={(e) => handleFieldChange('salaryBasic', Number(e.target.value))}
                 placeholder="30000"
               />
               <Input
                 label="Gross Salary / CTC (₹/month)"
                 type="number"
                 value={newEmp.salaryGross}
-                onChange={(e) => setNewEmp({ ...newEmp, salaryGross: Number(e.target.value) })}
+                onChange={(e) => handleFieldChange('salaryGross', Number(e.target.value))}
                 placeholder="46000"
               />
             </div>
@@ -2454,65 +3036,270 @@ export const EmployeeList = () => {
           {/* TAB 3: GOVERNMENT DETAILS */}
           {createTab === 'government' && (
             <div className="grid-2">
-              <Input
-                label="Aadhaar Number"
-                value={newEmp.aadhaarNumber}
-                onChange={(e) => setNewEmp({ ...newEmp, aadhaarNumber: e.target.value })}
-                placeholder="1234 5678 9012"
-              />
-              <Input
-                label="PAN Number"
-                value={newEmp.panNumber}
-                onChange={(e) => setNewEmp({ ...newEmp, panNumber: e.target.value })}
-                placeholder="ABCDE1234F"
-              />
+              {/* Column 1: Aadhaar Number & Document Upload */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <Input
+                  label="Aadhaar Number"
+                  value={newEmp.aadhaarNumber}
+                  error={formErrors.aadhaarNumber}
+                  onChange={(e) => handleFieldChange('aadhaarNumber', e.target.value)}
+                  placeholder="Enter 12-digit Aadhaar number"
+                  helperText="12-digit UIDAI Aadhaar Number"
+                />
+
+                {/* Aadhaar Card Document Upload Card */}
+                <div
+                  style={{
+                    border: newEmp.aadhaarCardUrl || docFiles.AADHAAR_CARD ? '1.5px solid #10b981' : '1.5px dashed var(--border-color)',
+                    borderRadius: 8,
+                    padding: '8px 12px',
+                    backgroundColor: newEmp.aadhaarCardUrl || docFiles.AADHAAR_CARD ? 'rgba(16, 185, 129, 0.04)' : '#f8fafc',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <FileText size={14} color="var(--primary)" />
+                      Aadhaar Card Document
+                    </span>
+                    {(newEmp.aadhaarCardUrl || docFiles.AADHAAR_CARD) && (
+                      <span style={{ fontSize: '0.72rem', color: '#059669', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <CheckCircle2 size={12} />
+                        Attached
+                      </span>
+                    )}
+                  </div>
+
+                  {docFiles.AADHAAR_CARD || newEmp.aadhaarCardUrl ? (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: '#ffffff', border: '1px solid #a7f3d0', borderRadius: 6 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                        <FileText size={16} color="#059669" style={{ flexShrink: 0 }} />
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: '0.78rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {docFiles.AADHAAR_CARD?.name || 'Aadhaar Card File'}
+                          </div>
+                          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
+                            {docFiles.AADHAAR_CARD?.size || 'Document attached'}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {newEmp.aadhaarCardUrl && (
+                          <a
+                            href={newEmp.aadhaarCardUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ fontSize: '0.72rem', color: 'var(--primary)', fontWeight: 600, textDecoration: 'none', padding: '2px 7px', borderRadius: 4, background: '#f0fdf4' }}
+                          >
+                            View
+                          </a>
+                        )}
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="light"
+                          icon={X}
+                          onClick={() => handleDocFileRemove('aadhaarCardUrl', 'AADHAAR_CARD')}
+                          title="Remove Aadhaar document"
+                          style={{ color: '#ef4444', padding: '3px 5px' }}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <label
+                        htmlFor="aadhaar-doc-upload"
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 6,
+                          padding: '6px 10px',
+                          borderRadius: 6,
+                          backgroundColor: '#ffffff',
+                          border: '1px solid var(--border-color)',
+                          cursor: 'pointer',
+                          fontSize: '0.75rem',
+                          fontWeight: 600,
+                          color: 'var(--primary)',
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        <Upload size={13} />
+                        Upload Aadhaar Card (PDF / JPG / PNG)
+                      </label>
+                      <input
+                        id="aadhaar-doc-upload"
+                        type="file"
+                        accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          if (e.target.files?.[0]) {
+                            handleDocFileSelect('aadhaarCardUrl', 'AADHAAR_CARD', e.target.files[0]);
+                          }
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Column 2: PAN Number & Document Upload */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <Input
+                  label="PAN Number"
+                  value={newEmp.panNumber}
+                  error={formErrors.panNumber}
+                  onChange={(e) => handleFieldChange('panNumber', e.target.value.toUpperCase())}
+                  placeholder="Enter 10-character PAN number"
+                  helperText="10-character alphanumeric PAN"
+                />
+
+                {/* PAN Card Document Upload Card */}
+                <div
+                  style={{
+                    border: newEmp.panCardUrl || docFiles.PAN_CARD ? '1.5px solid #10b981' : '1.5px dashed var(--border-color)',
+                    borderRadius: 8,
+                    padding: '8px 12px',
+                    backgroundColor: newEmp.panCardUrl || docFiles.PAN_CARD ? 'rgba(16, 185, 129, 0.04)' : '#f8fafc',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <FileText size={14} color="var(--primary)" />
+                      PAN Card Document
+                    </span>
+                    {(newEmp.panCardUrl || docFiles.PAN_CARD) && (
+                      <span style={{ fontSize: '0.72rem', color: '#059669', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <CheckCircle2 size={12} />
+                        Attached
+                      </span>
+                    )}
+                  </div>
+
+                  {docFiles.PAN_CARD || newEmp.panCardUrl ? (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: '#ffffff', border: '1px solid #a7f3d0', borderRadius: 6 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                        <FileText size={16} color="#059669" style={{ flexShrink: 0 }} />
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: '0.78rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {docFiles.PAN_CARD?.name || 'PAN Card File'}
+                          </div>
+                          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
+                            {docFiles.PAN_CARD?.size || 'Document attached'}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {newEmp.panCardUrl && (
+                          <a
+                            href={newEmp.panCardUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ fontSize: '0.72rem', color: 'var(--primary)', fontWeight: 600, textDecoration: 'none', padding: '2px 7px', borderRadius: 4, background: '#f0fdf4' }}
+                          >
+                            View
+                          </a>
+                        )}
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="light"
+                          icon={X}
+                          onClick={() => handleDocFileRemove('panCardUrl', 'PAN_CARD')}
+                          title="Remove PAN document"
+                          style={{ color: '#ef4444', padding: '3px 5px' }}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <label
+                        htmlFor="pan-doc-upload"
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 6,
+                          padding: '6px 10px',
+                          borderRadius: 6,
+                          backgroundColor: '#ffffff',
+                          border: '1px solid var(--border-color)',
+                          cursor: 'pointer',
+                          fontSize: '0.75rem',
+                          fontWeight: 600,
+                          color: 'var(--primary)',
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        <Upload size={13} />
+                        Upload PAN Card (PDF / JPG / PNG)
+                      </label>
+                      <input
+                        id="pan-doc-upload"
+                        type="file"
+                        accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          if (e.target.files?.[0]) {
+                            handleDocFileSelect('panCardUrl', 'PAN_CARD', e.target.files[0]);
+                          }
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
               <Input
                 label="PF Number"
                 value={newEmp.pfNumber}
-                onChange={(e) => setNewEmp({ ...newEmp, pfNumber: e.target.value })}
+                onChange={(e) => handleFieldChange('pfNumber', e.target.value)}
                 placeholder="PF/12345/678"
               />
               <Input
                 label="ESIC Number"
                 value={newEmp.esicNumber}
-                onChange={(e) => setNewEmp({ ...newEmp, esicNumber: e.target.value })}
+                onChange={(e) => handleFieldChange('esicNumber', e.target.value)}
                 placeholder="ESIC/987654"
               />
               <Input
                 label="Universal Account Number (UAN)"
                 value={newEmp.uanNumber}
-                onChange={(e) => setNewEmp({ ...newEmp, uanNumber: e.target.value })}
+                onChange={(e) => handleFieldChange('uanNumber', e.target.value)}
                 placeholder="100123456789"
               />
               <Input
                 label="Professional Tax (PT Number)"
                 value={newEmp.ptNumber}
-                onChange={(e) => setNewEmp({ ...newEmp, ptNumber: e.target.value })}
+                onChange={(e) => handleFieldChange('ptNumber', e.target.value)}
                 placeholder="PT/GJ/2026/01"
               />
               <Input
                 label="Bank Name"
                 value={newEmp.bankName}
-                onChange={(e) => setNewEmp({ ...newEmp, bankName: e.target.value })}
-                placeholder="HDFC Bank"
+                onChange={(e) => handleFieldChange('bankName', e.target.value)}
+                placeholder="e.g. HDFC Bank"
               />
               <Input
                 label="Bank Account Number"
                 value={newEmp.accountNumber}
-                onChange={(e) => setNewEmp({ ...newEmp, accountNumber: e.target.value })}
+                onChange={(e) => handleFieldChange('accountNumber', e.target.value)}
                 placeholder="50100234567890"
               />
               <Input
                 label="IFSC Code"
                 value={newEmp.ifscCode}
-                onChange={(e) => setNewEmp({ ...newEmp, ifscCode: e.target.value })}
+                error={formErrors.ifscCode}
+                onChange={(e) => handleFieldChange('ifscCode', e.target.value.toUpperCase())}
                 placeholder="HDFC0001234"
+                helperText="11-character bank IFSC code"
               />
               <Input
                 label="Bank Branch"
                 value={newEmp.bankBranch}
-                onChange={(e) => setNewEmp({ ...newEmp, bankBranch: e.target.value })}
-                placeholder="Main Branch"
+                onChange={(e) => handleFieldChange('bankBranch', e.target.value)}
+                placeholder="Main Branch, Surat"
               />
             </div>
           )}
@@ -2523,175 +3310,173 @@ export const EmployeeList = () => {
               <Input
                 label="Contact Person Name"
                 value={newEmp.emergencyName}
-                onChange={(e) => setNewEmp({ ...newEmp, emergencyName: e.target.value })}
-                placeholder="Suresh Sharma"
+                onChange={(e) => handleFieldChange('emergencyName', e.target.value)}
+                placeholder="e.g. Suresh Sharma"
               />
               <Input
                 label="Relationship"
                 value={newEmp.emergencyRelationship}
-                onChange={(e) => setNewEmp({ ...newEmp, emergencyRelationship: e.target.value })}
-                placeholder="Father / Spouse / Guardian"
+                onChange={(e) => handleFieldChange('emergencyRelationship', e.target.value)}
+                placeholder="e.g. Father / Spouse / Guardian"
               />
-              <Input
-                label="Emergency Mobile Phone"
-                value={newEmp.emergencyPhone}
-                onChange={(e) => setNewEmp({ ...newEmp, emergencyPhone: e.target.value })}
-                placeholder="+91 9876500000"
-              />
+              <div style={{ gridColumn: 'span 2' }}>
+                <Input
+                  label="Emergency Mobile Phone"
+                  type="tel"
+                  isPhone={true}
+                  value={newEmp.emergencyPhone}
+                  error={formErrors.emergencyPhone}
+                  onChange={(e) => handleFieldChange('emergencyPhone', e.target.value)}
+                  placeholder="10-digit emergency contact phone number"
+                  helperText="Primary point of contact during workplace emergencies"
+                />
+              </div>
             </div>
           )}
 
-          {/* TAB 5: EMPLOYEE DOCUMENTS */}
+          {/* TAB 5: EMPLOYEE DOCUMENTS (Compact & Professional UI) */}
           {createTab === 'documents' && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
-              {[
-                { label: 'Joining Letter', key: 'joiningLetterUrl', type: 'JOINING_LETTER', ph: 'Or enter direct URL: https://...' },
-                { label: 'Appointment Letter', key: 'appointmentLetterUrl', type: 'APPOINTMENT_LETTER', ph: 'Or enter direct URL: https://...' },
-                { label: 'Resignation Letter', key: 'resignationLetterUrl', type: 'RESIGNATION_LETTER', ph: 'Optional (https://...)' },
-                { label: 'Experience Letter', key: 'experienceLetterUrl', type: 'EXPERIENCE_LETTER', ph: 'Optional (https://...)' },
-              ].map((doc) => {
-                const fileInfo = docFiles[doc.type];
-                const hasUrl = Boolean(newEmp[doc.key]);
-                const isCustomUrl = hasUrl && !fileInfo && !newEmp[doc.key]?.startsWith('data:');
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '8px 12px',
+                background: 'var(--primary-light)',
+                borderRadius: 8,
+                border: '1px solid var(--primary-border)',
+                marginBottom: 2,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <FileText size={15} color="var(--primary)" />
+                  <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--primary)' }}>
+                    Employee Document Attachments
+                  </span>
+                </div>
+                <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>
+                  PDF, DOCX, PNG, JPG (Max 10MB per file)
+                </span>
+              </div>
 
-                return (
-                  <div
-                    key={doc.type}
-                    style={{
-                      border: fileInfo || hasUrl ? '1px solid #10b981' : '1px solid var(--border-color)',
-                      borderRadius: 8,
-                      padding: 14,
-                      backgroundColor: fileInfo || hasUrl ? 'rgba(16, 185, 129, 0.04)' : 'var(--bg-subtle)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 8,
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text-main)' }}>
-                        {doc.label}
-                      </span>
-                      {(fileInfo || hasUrl) && (
-                        <span style={{ fontSize: '0.74rem', color: '#059669', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                          <CheckCircle2 size={13} />
-                          Attached
-                        </span>
-                      )}
-                    </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+                {[
+                  { label: 'Aadhaar Card Copy', key: 'aadhaarCardUrl', type: 'AADHAAR_CARD', desc: 'Govt ID Proof' },
+                  { label: 'PAN Card Copy', key: 'panCardUrl', type: 'PAN_CARD', desc: 'Tax Document' },
+                  { label: 'Joining Letter', key: 'joiningLetterUrl', type: 'JOINING_LETTER', desc: 'Signed Joining Letter' },
+                  { label: 'Appointment Letter', key: 'appointmentLetterUrl', type: 'APPOINTMENT_LETTER', desc: 'Employment Contract' },
+                  { label: 'Experience Letter', key: 'experienceLetterUrl', type: 'EXPERIENCE_LETTER', desc: 'Past Work Certificate' },
+                  { label: 'Resignation Letter', key: 'resignationLetterUrl', type: 'RESIGNATION_LETTER', desc: 'Relieving / Exit Document' },
+                  { label: 'Other Document / Certificate', key: 'otherDocUrl', type: 'OTHER', desc: 'Educational / Skill Cert' },
+                ].map((doc) => {
+                  const fileInfo = docFiles[doc.type];
+                  const hasUrl = Boolean(newEmp[doc.key]);
+                  const isAttached = Boolean(fileInfo || hasUrl);
 
-                    {fileInfo ? (
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '8px 12px',
-                          background: '#ffffff',
-                          border: '1px solid #a7f3d0',
-                          borderRadius: 6,
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                          <FileText size={20} color="#059669" style={{ flexShrink: 0 }} />
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: '0.82rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {fileInfo.name}
-                            </div>
-                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{fileInfo.size}</div>
-                          </div>
-                        </div>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="light"
-                          icon={X}
-                          onClick={() => handleDocFileRemove(doc.key, doc.type)}
-                          title="Remove document"
-                          style={{ color: '#ef4444', padding: '4px 6px' }}
-                        />
-                      </div>
-                    ) : isCustomUrl ? (
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '8px 12px',
-                          background: '#ffffff',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: 6,
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                          <FileText size={18} color="var(--text-muted)" style={{ flexShrink: 0 }} />
-                          <span style={{ fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {newEmp[doc.key]}
-                          </span>
-                        </div>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="light"
-                          icon={X}
-                          onClick={() => handleDocFileRemove(doc.key, doc.type)}
-                          title="Clear URL"
-                          style={{ color: '#ef4444', padding: '4px 6px' }}
-                        />
-                      </div>
-                    ) : (
-                      <div>
+                  return (
+                    <div
+                      key={doc.type}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: 8,
+                        border: isAttached ? '1px solid #10b981' : '1px solid var(--border-color)',
+                        backgroundColor: isAttached ? '#f0fdf4' : '#ffffff',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 10,
+                        minHeight: 52,
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0, flex: 1 }}>
                         <div
                           style={{
-                            border: '1.5px dashed var(--border-color, #cbd5e1)',
+                            width: 32,
+                            height: 32,
                             borderRadius: 6,
-                            padding: '16px 12px',
-                            textAlign: 'center',
-                            backgroundColor: '#ffffff',
-                            cursor: 'pointer',
-                            transition: 'border-color 0.2s, background-color 0.2s',
-                          }}
-                          onClick={() => document.getElementById(`doc-upload-${doc.type}`)?.click()}
-                          onDragOver={(e) => e.preventDefault()}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            if (e.dataTransfer.files?.[0]) {
-                              handleDocFileSelect(doc.key, doc.type, e.dataTransfer.files[0]);
-                            }
+                            backgroundColor: isAttached ? '#dcfce7' : 'var(--bg-subtle)',
+                            color: isAttached ? '#15803d' : 'var(--text-muted)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexShrink: 0,
                           }}
                         >
-                          <Upload size={22} color="var(--primary)" style={{ margin: '0 auto 6px', display: 'block' }} />
-                          <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--primary)' }}>
-                            Click to Upload {doc.label}
-                          </div>
-                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 2 }}>
-                            Drag & drop PDF, DOCX, PNG, JPG (up to 10MB)
-                          </div>
-                          <input
-                            id={`doc-upload-${doc.type}`}
-                            type="file"
-                            accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
-                            style={{ display: 'none' }}
-                            onChange={(e) => {
-                              if (e.target.files?.[0]) {
-                                handleDocFileSelect(doc.key, doc.type, e.target.files[0]);
-                              }
-                            }}
-                          />
+                          <FileText size={16} />
                         </div>
-
-                        <div style={{ marginTop: 8 }}>
-                          <Input
-                            placeholder={doc.ph}
-                            value={newEmp[doc.key] || ''}
-                            onChange={(e) => setNewEmp({ ...newEmp, [doc.key]: e.target.value })}
-                            style={{ fontSize: '0.78rem' }}
-                          />
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontWeight: 600, fontSize: '0.81rem', color: 'var(--text-main)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {doc.label}
+                          </div>
+                          <div style={{ fontSize: '0.71rem', color: isAttached ? '#15803d' : 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {fileInfo ? `${fileInfo.name} (${fileInfo.size})` : hasUrl ? 'Document Linked' : doc.desc}
+                          </div>
                         </div>
                       </div>
-                    )}
-                  </div>
-                );
-              })}
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                        <input
+                          id={`doc-upload-${doc.type}`}
+                          type="file"
+                          accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                          style={{ display: 'none' }}
+                          onChange={(e) => {
+                            if (e.target.files?.[0]) {
+                              handleDocFileSelect(doc.key, doc.type, e.target.files[0]);
+                            }
+                          }}
+                        />
+
+                        {isAttached ? (
+                          <>
+                            <span style={{ fontSize: '0.7rem', color: '#15803d', fontWeight: 600, backgroundColor: '#dcfce7', padding: '2px 7px', borderRadius: 4, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                              <CheckCircle2 size={11} /> Attached
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleDocFileRemove(doc.key, doc.type)}
+                              title="Remove document"
+                              style={{
+                                border: 'none',
+                                background: '#fee2e2',
+                                color: '#dc2626',
+                                borderRadius: 5,
+                                padding: '4px 6px',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                              }}
+                            >
+                              <X size={12} />
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => document.getElementById(`doc-upload-${doc.type}`)?.click()}
+                            style={{
+                              border: '1px solid var(--border-color)',
+                              background: '#f8fafc',
+                              color: 'var(--primary)',
+                              borderRadius: 6,
+                              padding: '5px 10px',
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 5,
+                              transition: 'all 0.15s ease',
+                            }}
+                          >
+                            <Upload size={12} /> Upload
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -2748,28 +3533,27 @@ export const EmployeeList = () => {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                padding: '12px 16px',
-                background: 'linear-gradient(135deg, rgba(46, 123, 133, 0.08) 0%, rgba(46, 123, 133, 0.02) 100%)',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--primary-border)',
-                marginBottom: 12,
-                gap: 12,
-                flexWrap: 'wrap',
+                padding: '16px 20px',
+                background: 'linear-gradient(135deg, rgba(46, 123, 133, 0.05) 0%, #ffffff 100%)',
+                borderRadius: '10px',
+                border: '1px solid var(--border-color)',
+                marginBottom: 14,
+                gap: 16,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0, flex: 1 }}>
                 {/* Avatar circle with Initials and status dot */}
-                <div style={{ position: 'relative' }}>
+                <div style={{ position: 'relative', flexShrink: 0 }}>
                   {currentEmployeeDetail.basicInfo?.photograph || currentEmployeeDetail.basicInfo?.photo || currentEmployeeDetail.photo ? (
                     <img
                       src={currentEmployeeDetail.basicInfo?.photograph || currentEmployeeDetail.basicInfo?.photo || currentEmployeeDetail.photo}
                       alt="Profile"
                       style={{
-                        width: 44,
-                        height: 44,
+                        width: 52,
+                        height: 52,
                         borderRadius: '50%',
                         objectFit: 'cover',
-                        boxShadow: '0 2px 6px rgba(46, 123, 133, 0.25)',
+                        boxShadow: '0 2px 8px rgba(46, 123, 133, 0.2)',
                         border: '2px solid #ffffff',
                       }}
                       onError={(e) => { e.target.style.display = 'none'; }}
@@ -2777,8 +3561,8 @@ export const EmployeeList = () => {
                   ) : (
                     <div
                       style={{
-                        width: 44,
-                        height: 44,
+                        width: 52,
+                        height: 52,
                         borderRadius: '50%',
                         background: 'linear-gradient(135deg, var(--primary) 0%, #1c525a 100%)',
                         color: '#ffffff',
@@ -2786,8 +3570,8 @@ export const EmployeeList = () => {
                         alignItems: 'center',
                         justifyContent: 'center',
                         fontWeight: 700,
-                        fontSize: '1.05rem',
-                        boxShadow: '0 2px 6px rgba(46, 123, 133, 0.25)',
+                        fontSize: '1.2rem',
+                        boxShadow: '0 2px 8px rgba(46, 123, 133, 0.2)',
                         letterSpacing: '0.5px',
                       }}
                     >
@@ -2798,10 +3582,10 @@ export const EmployeeList = () => {
                   <div
                     style={{
                       position: 'absolute',
-                      bottom: 0,
-                      right: 0,
-                      width: 10,
-                      height: 10,
+                      bottom: 1,
+                      right: 1,
+                      width: 12,
+                      height: 12,
                       borderRadius: '50%',
                       backgroundColor:
                         (currentEmployeeDetail.employmentInfo?.employeeStatus || currentEmployeeDetail.status) === 'ACTIVE'
@@ -2813,10 +3597,10 @@ export const EmployeeList = () => {
                   />
                 </div>
 
-                {/* Identity Information */}
-                <div>
+                {/* Identity & Details */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, flex: 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-main)' }}>
+                    <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-main)', letterSpacing: '-0.2px' }}>
                       {currentEmployeeDetail.basicInfo?.fullName ||
                         `${currentEmployeeDetail.firstName || ''} ${currentEmployeeDetail.lastName || ''}`.trim()}
                     </h3>
@@ -2824,7 +3608,7 @@ export const EmployeeList = () => {
                       style={{
                         background: 'var(--primary-subtle)',
                         color: 'var(--primary)',
-                        padding: '1px 7px',
+                        padding: '2px 8px',
                         borderRadius: '4px',
                         fontSize: '0.74rem',
                         fontWeight: 700,
@@ -2841,10 +3625,27 @@ export const EmployeeList = () => {
                           ? 'success'
                           : 'warning'
                       }
-                      style={{ fontSize: '0.72rem', padding: '2px 7px' }}
+                      style={{ fontSize: '0.72rem', padding: '2px 8px' }}
                     >
                       {currentEmployeeDetail.employmentInfo?.employeeStatus || currentEmployeeDetail.status || 'ACTIVE'}
                     </Badge>
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        fontSize: '0.72rem',
+                        fontWeight: 600,
+                        backgroundColor: '#f1f5f9',
+                        color: '#334155',
+                        border: '1px solid #e2e8f0',
+                      }}
+                    >
+                      <MapPin size={11} color="var(--primary)" />
+                      {currentEmployeeDetail.employmentInfo?.workType || currentEmployeeDetail.workType || 'OFFICE'}
+                    </span>
                   </div>
 
                   <div
@@ -2852,26 +3653,28 @@ export const EmployeeList = () => {
                       display: 'flex',
                       alignItems: 'center',
                       gap: 12,
-                      marginTop: 4,
                       flexWrap: 'wrap',
-                      fontSize: '0.78rem',
+                      fontSize: '0.8rem',
                       color: 'var(--text-muted)',
                     }}
                   >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 500 }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontWeight: 500, color: 'var(--text-main)' }}>
                       <Briefcase size={13} color="var(--primary)" />
                       {formatDesignation(currentEmployeeDetail.employmentInfo?.designation || currentEmployeeDetail.designation)} •{' '}
                       {formatDepartment(currentEmployeeDetail.employmentInfo?.department || currentEmployeeDetail.department)}
                     </span>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      <Building size={13} color="var(--primary)" />
+                    <span style={{ color: 'var(--border-color)' }}>•</span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                      <Building size={13} color="var(--text-muted)" />
                       {formatBranch(currentEmployeeDetail.employmentInfo?.branch || currentEmployeeDetail.branch)}
                     </span>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ color: 'var(--border-color)' }}>•</span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                       <Mail size={13} color="var(--text-muted)" />
                       {currentEmployeeDetail.basicInfo?.email || currentEmployeeDetail.email || '-'}
                     </span>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ color: 'var(--border-color)' }}>•</span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                       <Phone size={13} color="var(--text-muted)" />
                       {currentEmployeeDetail.basicInfo?.mobileNumber ||
                         currentEmployeeDetail.phone ||
@@ -2881,25 +3684,18 @@ export const EmployeeList = () => {
                   </div>
                 </div>
               </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Badge variant="neutral" style={{ padding: '4px 9px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <MapPin size={12} />
-                  {currentEmployeeDetail.employmentInfo?.workType || currentEmployeeDetail.workType || 'OFFICE'}
-                </Badge>
-              </div>
             </div>
 
-            {/* 2. SEGMENTED PILL TAB NAVIGATION (Compact & Simple) */}
+            {/* 2. SEGMENTED TAB NAVIGATION (Clean & Simple) */}
             <div
               style={{
                 display: 'flex',
                 gap: 4,
-                background: 'var(--bg-subtle)',
+                background: '#f8fafc',
                 padding: '4px',
                 borderRadius: '8px',
                 border: '1px solid var(--border-color)',
-                marginBottom: 12,
+                marginBottom: 14,
                 overflowX: 'auto',
                 WebkitOverflowScrolling: 'touch',
                 scrollbarWidth: 'none',
@@ -2927,7 +3723,7 @@ export const EmployeeList = () => {
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: 6,
-                      padding: '6px 12px',
+                      padding: '7px 14px',
                       border: isActive ? '1px solid var(--border-color)' : '1px solid transparent',
                       borderRadius: '6px',
                       background: isActive ? '#ffffff' : 'transparent',
@@ -2936,7 +3732,7 @@ export const EmployeeList = () => {
                       cursor: 'pointer',
                       fontSize: '0.82rem',
                       whiteSpace: 'nowrap',
-                      boxShadow: isActive ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                      boxShadow: isActive ? '0 1px 3px rgba(0,0,0,0.05)' : 'none',
                       outline: 'none',
                       transition: 'all 0.15s ease',
                     }}
@@ -3050,14 +3846,7 @@ export const EmployeeList = () => {
                         </Button>
                       }
                     >
-                      <div className="grid-3">
-                        <DetailField
-                          label="Employee ID / Code"
-                          value={currentEmployeeDetail.basicInfo?.employeeCode || currentEmployeeDetail.employeeCode || 'N/A'}
-                          isBadge
-                          badgeVariant="primary"
-                          icon={User}
-                        />
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px 24px' }}>
                         <DetailField
                           label="Full Name"
                           value={
@@ -3066,10 +3855,10 @@ export const EmployeeList = () => {
                           }
                         />
                         <DetailField
-                          label="System Record ID"
-                          value={currentEmployeeDetail._id}
-                          isMono
-                          copyable
+                          label="Employee ID / Code"
+                          value={currentEmployeeDetail.basicInfo?.employeeCode || currentEmployeeDetail.employeeCode || 'N/A'}
+                          isBadge
+                          badgeVariant="primary"
                         />
                         <DetailField
                           label="Gender"
@@ -3108,12 +3897,11 @@ export const EmployeeList = () => {
                         </Button>
                       }
                     >
-                      <div className="grid-3">
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px 24px' }}>
                         <DetailField
                           label="Primary Email"
                           value={currentEmployeeDetail.basicInfo?.email || currentEmployeeDetail.email}
                           icon={Mail}
-                          onEdit={() => startEditSection('basic')}
                         />
                         <DetailField
                           label="Mobile Phone"
@@ -3123,15 +3911,36 @@ export const EmployeeList = () => {
                             currentEmployeeDetail.mobile
                           }
                           icon={Phone}
-                          onEdit={() => startEditSection('basic')}
                         />
                         <DetailField
                           label="Alternate Contact"
                           value={currentEmployeeDetail.basicInfo?.alternateNumber}
-                          onEdit={() => startEditSection('basic')}
+                          emptyText="None"
                         />
                       </div>
                     </DetailCard>
+
+                    {/* Subtle system record footer */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px', fontSize: '0.74rem', color: 'var(--text-light)', borderTop: '1px solid var(--border-light)', marginTop: 4 }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <span>System ID:</span>
+                        <code style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>{currentEmployeeDetail._id}</code>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(String(currentEmployeeDetail._id));
+                            showToast('Record ID copied!', 'info');
+                          }}
+                          title="Copy System ID"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--text-muted)', display: 'inline-flex' }}
+                        >
+                          <Copy size={11} />
+                        </button>
+                      </span>
+                      {currentEmployeeDetail.createdAt && (
+                        <span>Record Created: {formatDate(currentEmployeeDetail.createdAt)}</span>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -3208,7 +4017,6 @@ export const EmployeeList = () => {
                           options={[
                             { value: 'OFFICE', label: 'Office' },
                             { value: 'FIELD', label: 'Field Staff' },
-                            { value: 'SITE', label: 'Site / Project' },
                             { value: 'HYBRID', label: 'Hybrid' },
                           ]}
                         />
@@ -3278,7 +4086,7 @@ export const EmployeeList = () => {
                         </Button>
                       }
                     >
-                      <div className="grid-3">
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px 24px' }}>
                         <DetailField
                           label="Department"
                           value={formatDepartment(currentEmployeeDetail.employmentInfo?.department || currentEmployeeDetail.department)}
@@ -3335,9 +4143,19 @@ export const EmployeeList = () => {
                           }
                           icon={User}
                         />
-                        <div style={{ gridColumn: 'span 2' }}>
-                          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <ShieldCheck size={13} /> Assigned System Role(s)
+                        <DetailField
+                          label="Salary Structure"
+                          value={
+                            currentEmployeeDetail.employmentInfo?.salaryStructure?.grossSalary
+                              ? `₹${Number(currentEmployeeDetail.employmentInfo.salaryStructure.grossSalary).toLocaleString('en-IN')}/mo`
+                              : (currentEmployeeDetail.salaryStructure?.grossSalary ? `₹${Number(currentEmployeeDetail.salaryStructure.grossSalary).toLocaleString('en-IN')}/mo` : 'Configured')
+                          }
+                          isBadge
+                          badgeVariant="success"
+                        />
+                        <div style={{ gridColumn: '1 / -1', paddingTop: 10, borderTop: '1px dashed var(--border-light)' }}>
+                          <div style={{ fontSize: '0.71rem', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <ShieldCheck size={12} color="var(--primary)" /> Assigned System Role(s)
                           </div>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                             {(() => {
@@ -3363,16 +4181,6 @@ export const EmployeeList = () => {
                             })()}
                           </div>
                         </div>
-                        <DetailField
-                          label="Salary Structure"
-                          value={
-                            currentEmployeeDetail.employmentInfo?.salaryStructure?.grossSalary
-                              ? `₹${Number(currentEmployeeDetail.employmentInfo.salaryStructure.grossSalary).toLocaleString('en-IN')}/mo`
-                              : (currentEmployeeDetail.salaryStructure?.grossSalary ? `₹${Number(currentEmployeeDetail.salaryStructure.grossSalary).toLocaleString('en-IN')}/mo` : 'Configured')
-                          }
-                          isBadge
-                          badgeVariant="success"
-                        />
                       </div>
                     </DetailCard>
                   </div>
@@ -3403,19 +4211,109 @@ export const EmployeeList = () => {
                       >
                         <ShieldCheck size={16} color="var(--primary)" /> Statutory Identification & Tax Records
                       </div>
+                      <div className="grid-2" style={{ marginBottom: 16 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <Input
+                            label="Aadhaar Number"
+                            value={editFormData.aadhaarNumber}
+                            onChange={(e) => setEditFormData({ ...editFormData, aadhaarNumber: e.target.value })}
+                            placeholder="Enter 12-digit Aadhaar number"
+                          />
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <label
+                              htmlFor="edit-aadhaar-doc"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                fontSize: '0.74rem',
+                                padding: '4px 10px',
+                                background: '#f8fafc',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: 4,
+                                cursor: 'pointer',
+                                color: 'var(--primary)',
+                                fontWeight: 600,
+                              }}
+                            >
+                              <Upload size={12} />
+                              {editFormData.aadhaarCardUrl ? 'Change Aadhaar Card' : 'Upload Aadhaar Card'}
+                            </label>
+                            <input
+                              id="edit-aadhaar-doc"
+                              type="file"
+                              accept=".pdf,.png,.jpg,.jpeg"
+                              style={{ display: 'none' }}
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  const reader = new FileReader();
+                                  reader.onload = (ev) => {
+                                    setEditFormData((prev) => ({ ...prev, aadhaarCardUrl: ev.target.result }));
+                                    showToast(`${file.name} attached!`, 'success');
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
+                              }}
+                            />
+                            {editFormData.aadhaarCardUrl && (
+                              <span style={{ fontSize: '0.72rem', color: '#16a34a', fontWeight: 600 }}>Attached</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <Input
+                            label="PAN Number"
+                            value={editFormData.panNumber}
+                            onChange={(e) => setEditFormData({ ...editFormData, panNumber: e.target.value.toUpperCase() })}
+                            placeholder="Enter 10-character PAN number"
+                          />
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <label
+                              htmlFor="edit-pan-doc"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                fontSize: '0.74rem',
+                                padding: '4px 10px',
+                                background: '#f8fafc',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: 4,
+                                cursor: 'pointer',
+                                color: 'var(--primary)',
+                                fontWeight: 600,
+                              }}
+                            >
+                              <Upload size={12} />
+                              {editFormData.panCardUrl ? 'Change PAN Card' : 'Upload PAN Card'}
+                            </label>
+                            <input
+                              id="edit-pan-doc"
+                              type="file"
+                              accept=".pdf,.png,.jpg,.jpeg"
+                              style={{ display: 'none' }}
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  const reader = new FileReader();
+                                  reader.onload = (ev) => {
+                                    setEditFormData((prev) => ({ ...prev, panCardUrl: ev.target.result }));
+                                    showToast(`${file.name} attached!`, 'success');
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
+                              }}
+                            />
+                            {editFormData.panCardUrl && (
+                              <span style={{ fontSize: '0.72rem', color: '#16a34a', fontWeight: 600 }}>Attached</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
                       <div className="grid-3" style={{ marginBottom: 20 }}>
-                        <Input
-                          label="Aadhaar Number"
-                          value={editFormData.aadhaarNumber}
-                          onChange={(e) => setEditFormData({ ...editFormData, aadhaarNumber: e.target.value })}
-                          placeholder="12-digit Aadhaar Number"
-                        />
-                        <Input
-                          label="PAN Number"
-                          value={editFormData.panNumber}
-                          onChange={(e) => setEditFormData({ ...editFormData, panNumber: e.target.value })}
-                          placeholder="e.g. ABCDE1234F"
-                        />
                         <Input
                           label="PF Number"
                           value={editFormData.pfNumber}
@@ -3503,17 +4401,76 @@ export const EmployeeList = () => {
                         </Button>
                       }
                     >
-                      <div className="grid-3">
-                        <DetailField
-                          label="Aadhaar Number"
-                          value={currentEmployeeDetail.governmentDetails?.aadhaarNumber}
-                          isMono
-                        />
-                        <DetailField
-                          label="PAN Number"
-                          value={currentEmployeeDetail.governmentDetails?.panNumber}
-                          isMono
-                        />
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px 24px' }}>
+                        <div>
+                          <DetailField
+                            label="Aadhaar Number"
+                            value={currentEmployeeDetail.governmentDetails?.aadhaarNumber}
+                            isMono
+                          />
+                          {(currentEmployeeDetail.governmentDetails?.aadhaarCardUrl ||
+                            currentEmployeeDetail.documents?.find((d) => d.title?.toLowerCase().includes('aadhaar'))?.fileUrl) && (
+                            <a
+                              href={
+                                currentEmployeeDetail.governmentDetails?.aadhaarCardUrl ||
+                                currentEmployeeDetail.documents?.find((d) => d.title?.toLowerCase().includes('aadhaar'))?.fileUrl
+                              }
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                marginTop: 4,
+                                fontSize: '0.74rem',
+                                color: 'var(--primary)',
+                                fontWeight: 600,
+                                textDecoration: 'none',
+                                padding: '2px 8px',
+                                background: '#f0fdf4',
+                                border: '1px solid #bbf7d0',
+                                borderRadius: 4,
+                              }}
+                            >
+                              <FileText size={12} /> View Aadhaar Card
+                            </a>
+                          )}
+                        </div>
+
+                        <div>
+                          <DetailField
+                            label="PAN Number"
+                            value={currentEmployeeDetail.governmentDetails?.panNumber}
+                            isMono
+                          />
+                          {(currentEmployeeDetail.governmentDetails?.panCardUrl ||
+                            currentEmployeeDetail.documents?.find((d) => d.title?.toLowerCase().includes('pan'))?.fileUrl) && (
+                            <a
+                              href={
+                                currentEmployeeDetail.governmentDetails?.panCardUrl ||
+                                currentEmployeeDetail.documents?.find((d) => d.title?.toLowerCase().includes('pan'))?.fileUrl
+                              }
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                marginTop: 4,
+                                fontSize: '0.74rem',
+                                color: 'var(--primary)',
+                                fontWeight: 600,
+                                textDecoration: 'none',
+                                padding: '2px 8px',
+                                background: '#f0fdf4',
+                                border: '1px solid #bbf7d0',
+                                borderRadius: 4,
+                              }}
+                            >
+                              <FileText size={12} /> View PAN Card
+                            </a>
+                          )}
+                        </div>
                         <DetailField
                           label="Provident Fund (PF) Number"
                           value={currentEmployeeDetail.governmentDetails?.pfNumber}
@@ -3546,7 +4503,7 @@ export const EmployeeList = () => {
                       title="Bank & Settlement Account"
                       icon={Landmark}
                     >
-                      <div className="grid-2">
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px 24px' }}>
                         <DetailField
                           label="Bank Name"
                           value={
@@ -3646,7 +4603,7 @@ export const EmployeeList = () => {
                         </Button>
                       }
                     >
-                      <div className="grid-3">
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px 24px' }}>
                         <DetailField
                           label="Contact Person Name"
                           value={
@@ -3717,9 +4674,9 @@ export const EmployeeList = () => {
                   </div>
                   <div>
                     {currentEmployeeDetail.isFaceEnrolled === true ? (
-                      <Badge variant="success" style={{ fontSize: '0.72rem', padding: '2px 7px' }}>Face Enrolled ✓</Badge>
+                      <Badge variant="success" style={{ fontSize: '0.72rem', padding: '2px 7px' }}>Face Enrolled</Badge>
                     ) : (
-                      <Badge variant="warning" style={{ fontSize: '0.72rem', padding: '2px 7px' }}>⚠ Enrollment Pending</Badge>
+                      <Badge variant="warning" style={{ fontSize: '0.72rem', padding: '2px 7px' }}>Enrollment Pending</Badge>
                     )}
                   </div>
                 </div>
@@ -4135,7 +5092,7 @@ export const EmployeeList = () => {
                   borderRadius: 8, border: '1px solid #fdba74',
                   fontSize: '0.78rem', color: '#9a3412', fontWeight: 600,
                 }}>
-                  🔐 Your current role does not have permission for biometric enrollment
+                  Your current role does not have permission for biometric enrollment
                 </div>
               </div>
               <div className="modal-footer" style={{ margin: '14px -20px -20px' }}>
@@ -4150,13 +5107,13 @@ export const EmployeeList = () => {
               {/* Visual 4-Step Pipeline */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, backgroundColor: '#f8fafc', padding: 8, borderRadius: 8, border: '1px solid var(--border-color)', textAlign: 'center' }}>
                 <div style={{ padding: '4px 6px', borderRadius: 6, backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', fontSize: '0.72rem', fontWeight: 700, color: '#166534' }}>
-                  ✓ 1. Employee Created
+                  1. Employee Created
                 </div>
                 <div style={{ padding: '4px 6px', borderRadius: 6, backgroundColor: enrolling ? '#f0fdfa' : '#eff6ff', border: `1px solid ${enrolling ? '#99f6e4' : '#3b82f6'}`, fontSize: '0.72rem', fontWeight: 700, color: enrolling ? '#0f766e' : '#1d4ed8' }}>
                   {enrolling ? '⏳ Storing...' : '▶ 2. Capture Face'}
                 </div>
                 <div style={{ padding: '4px 6px', borderRadius: 6, backgroundColor: capturedFace && !enrolling ? '#f0fdf4' : '#f8fafc', border: `1px solid ${capturedFace && !enrolling ? '#bbf7d0' : 'var(--border-color)'}`, fontSize: '0.72rem', fontWeight: 600, color: capturedFace && !enrolling ? '#166534' : 'var(--text-muted)' }}>
-                  {capturedFace && !enrolling ? '✓ 3. Face Stored' : '3. Face Stored'}
+                  {capturedFace && !enrolling ? '3. Face Stored (Ready)' : '3. Face Stored'}
                 </div>
                 <div style={{ padding: '4px 6px', borderRadius: 6, backgroundColor: '#f8fafc', border: '1px solid var(--border-color)', fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>
                   4. Ready for Attendance
@@ -4164,7 +5121,7 @@ export const EmployeeList = () => {
               </div>
 
               <div style={{ padding: '10px 12px', backgroundColor: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 8, fontSize: '0.84rem', color: '#0f766e' }}>
-                <strong>📷 Auto-capture:</strong> Look into the camera — face will be captured and stored automatically.
+                <strong>Auto-capture:</strong> Look into the camera — face will be captured and stored automatically.
               </div>
 
               {enrolling ? (

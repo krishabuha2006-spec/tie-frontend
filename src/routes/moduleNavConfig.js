@@ -8,9 +8,28 @@ import {
   Building2,
   Award,
   ShieldCheck,
-  Clock,
+  CalendarOff,
   Compass,
+  Clock,
+  DollarSign,
+  CreditCard,
+  FileText,
+  Layers,
 } from 'lucide-react';
+
+export const payrollNav = [
+  { label: 'Payroll Runs', path: '/payroll', icon: DollarSign, exact: true, module: 'payroll' },
+  { label: 'Approvals Queue', path: '/payroll/approvals', icon: ShieldCheck, module: 'payroll' },
+  { label: 'Salary Payments', path: '/payroll/payments', icon: CreditCard, module: 'payroll' },
+  { label: 'Payslips', path: '/payroll/payslips', icon: FileText, module: 'payroll' },
+  { label: 'Templates', path: '/payroll/templates', icon: Layers, module: 'payroll' },
+  { label: 'Salary Packages', path: '/payroll/structures', icon: Building2, module: 'payroll' },
+];
+
+export const leavesNav = [
+  { label: 'Leave Management', path: '/leaves', icon: CalendarCheck, exact: true, module: 'leaves' },
+  { label: 'Corporate Holidays', path: '/holidays', icon: CalendarOff, module: 'holidays' },
+];
 
 export const attendanceNav = [
   { label: 'Daily Register', path: '/attendance', icon: CalendarCheck, exact: true, module: 'attendance' },

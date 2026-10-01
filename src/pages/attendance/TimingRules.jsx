@@ -5,6 +5,7 @@ import employeeApi from '../../api/employeeApi';
 import attendanceApi from '../../api/attendanceApi';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
+import { useConfirm } from '../../context/ConfirmContext';
 import { formatEmployeeOption, extractEmployeeList } from '../../utils/employeeUtils';
 import {
   Clock,
@@ -45,6 +46,7 @@ import { attendanceNav } from '../../routes/moduleNavConfig';
 export const TimingRules = () => {
   const { isSuperAdmin, isHrAdmin, user } = useAuth();
   const { showToast } = useToast();
+  const confirm = useConfirm();
   const canManage = isSuperAdmin || isHrAdmin;
 
   // Active View Tab
@@ -341,7 +343,14 @@ export const TimingRules = () => {
 
   // Deactivate Config
   const handleDeleteConfig = async (id) => {
-    if (!window.confirm('Are you sure you want to deactivate this timing configuration?')) return;
+    const isConfirmed = await confirm({
+      title: 'Deactivate Timing Configuration',
+      message: 'Are you sure you want to deactivate this timing configuration? Existing attendance records will remain unaffected.',
+      confirmText: 'Deactivate',
+      cancelText: 'Cancel',
+      variant: 'danger',
+    });
+    if (!isConfirmed) return;
     try {
       await timingApi.deleteTimingConfig(id);
       showToast('Timing configuration deactivated', 'success');
@@ -676,17 +685,6 @@ export const TimingRules = () => {
               Configure Timing Rules
             </Button>
           )}
-          <Button
-            variant="light"
-            icon={RotateCcw}
-            onClick={() => {
-              loadConfigs();
-              if (activeTab === 'occurrences') loadLateOccurrences();
-              if (activeTab === 'balance' && selectedEmployeeId) fetchEmployeeBalance(selectedEmployeeId, balancePeriod);
-            }}
-          >
-            Refresh
-          </Button>
         </div>
       </div>
 
@@ -994,10 +992,6 @@ export const TimingRules = () => {
                 </select>
               </div>
             </div>
-
-            <Button size="sm" variant="light" icon={RotateCcw} onClick={loadLateOccurrences}>
-              Apply Filter
-            </Button>
           </div>
 
           <Table

@@ -2,6 +2,14 @@ import apiClient from './client';
 import { roleApi } from './roleApi';
 
 export const masterApi = {
+  // Clear any legacy skip flags on module load
+  clearLegacySkipFlags: (() => {
+    try {
+      sessionStorage.removeItem('tie_skip_companies_api');
+      sessionStorage.removeItem('tie_skip_branches_api');
+    } catch {}
+  })(),
+
   // Companies
   getCompanies: async (params) => {
     try {
@@ -9,34 +17,41 @@ export const masterApi = {
       return res.data;
     } catch (err) {
       if (err.response?.status === 403) {
-        const saved = localStorage.getItem('tie_user');
-        if (saved) {
+        let list = [];
+        try {
+          const accessible = localStorage.getItem('tie_accessible_companies');
+          if (accessible) list = JSON.parse(accessible);
+        } catch {}
+        if (!list.length) {
           try {
-            const u = JSON.parse(saved);
-            if (u.company) return { data: [u.company], companies: [u.company] };
+            const saved = localStorage.getItem('tie_user');
+            if (saved) {
+              const u = JSON.parse(saved);
+              if (u.company) list = [u.company];
+            }
           } catch {}
         }
-        return { data: [], companies: [] };
+        return { success: true, data: list, companies: list };
       }
       throw err;
     }
   },
   getCompanyById: async (id) => {
     const res = await apiClient.get(`/companies/${id}`);
-    return res.data;
+    return res.data?.data || res.data;
   },
   createCompany: async (data) => {
     const res = await apiClient.post('/companies', data);
-    return res.data;
+    return res.data?.data || res.data;
   },
   updateCompany: async (id, data) => {
     const res = await apiClient.put(`/companies/${id}`, data);
-    return res.data;
+    return res.data?.data || res.data;
   },
   deleteCompany: async (id) => {
     try {
       const res = await apiClient.delete(`/companies/${id}`);
-      return res.data;
+      return res.data?.data || res.data;
     } catch (err) {
       if (err.response?.status === 409) {
         const msg = err.response?.data?.message || 'Cannot delete company. It contains active branches. Remove or reassign them first.';
@@ -56,34 +71,41 @@ export const masterApi = {
       return res.data;
     } catch (err) {
       if (err.response?.status === 403) {
-        const saved = localStorage.getItem('tie_user');
-        if (saved) {
+        let list = [];
+        try {
+          const cached = localStorage.getItem('tie_all_branches');
+          if (cached) list = JSON.parse(cached);
+        } catch {}
+        if (!list.length) {
           try {
-            const u = JSON.parse(saved);
-            if (u.branch) return { data: [u.branch], branches: [u.branch] };
+            const saved = localStorage.getItem('tie_user');
+            if (saved) {
+              const u = JSON.parse(saved);
+              if (u.branch) list = [u.branch];
+            }
           } catch {}
         }
-        return { data: [], branches: [] };
+        return { success: true, data: list, branches: list };
       }
       throw err;
     }
   },
   getBranchById: async (id) => {
     const res = await apiClient.get(`/branches/${id}`);
-    return res.data;
+    return res.data?.data || res.data;
   },
   createBranch: async (data) => {
     const res = await apiClient.post('/branches', data);
-    return res.data;
+    return res.data?.data || res.data;
   },
   updateBranch: async (id, data) => {
     const res = await apiClient.put(`/branches/${id}`, data);
-    return res.data;
+    return res.data?.data || res.data;
   },
   deleteBranch: async (id) => {
     try {
       const res = await apiClient.delete(`/branches/${id}`);
-      return res.data;
+      return res.data?.data || res.data;
     } catch (err) {
       if (err.response?.status === 409) {
         const msg = err.response?.data?.message || 'Cannot delete branch. It has associated users or records. Reassign them first.';
@@ -98,22 +120,8 @@ export const masterApi = {
 
   // Departments
   getDepartments: async (params) => {
-    try {
-      const res = await apiClient.get('/departments', { params });
-      return res.data;
-    } catch (err) {
-      if (err.response?.status === 403) {
-        const saved = localStorage.getItem('tie_user');
-        if (saved) {
-          try {
-            const u = JSON.parse(saved);
-            if (u.department) return { data: [u.department], departments: [u.department] };
-          } catch {}
-        }
-        return { data: [], departments: [] };
-      }
-      throw err;
-    }
+    const res = await apiClient.get('/departments', { params });
+    return res.data;
   },
   getDepartmentById: async (id) => {
     const res = await apiClient.get(`/departments/${id}`);
@@ -128,99 +136,20 @@ export const masterApi = {
     return res.data;
   },
   deleteDepartment: async (id) => {
-    try {
-      const res = await apiClient.delete(`/departments/${id}`);
-      return res.data;
-    } catch (err) {
-      if (err.response?.status === 409) {
-        const msg = err.response?.data?.message || 'Cannot delete department. It has associated employees or designations. Reassign them first.';
-        const conflictErr = new Error(msg);
-        conflictErr.status = 409;
-        conflictErr.response = err.response;
-        throw conflictErr;
-      }
-      throw err;
-    }
+    const res = await apiClient.delete(`/departments/${id}`);
+    return res.data;
   },
 
   // Designations
-  // GET /designations — supports ?department=&search=&company= filters with robust fallback
   getDesignations: async (params) => {
-    try {
-      let cleanParams = undefined;
-      let clientFilterDept = null;
-
-      if (params) {
-        cleanParams = {};
-        if (params.search && typeof params.search === 'string' && params.search.trim()) {
-          cleanParams.search = params.search.trim();
-        }
-        if (params.company && /^[0-9a-fA-F]{24}$/.test(params.company)) {
-          cleanParams.company = params.company;
-        }
-        // Swagger expects department to be a 24-character hex ObjectId
-        if (params.department) {
-          if (/^[0-9a-fA-F]{24}$/.test(params.department)) {
-            cleanParams.department = params.department;
-          } else {
-            // It's a department name (e.g. "Management & Leadership")
-            // Filter client-side to prevent backend 404/400
-            clientFilterDept = String(params.department).toLowerCase();
-          }
-        }
-        if (Object.keys(cleanParams).length === 0) {
-          cleanParams = undefined;
-        }
-      }
-
-      let res;
-      try {
-        res = await apiClient.get('/designations', { params: cleanParams });
-      } catch (err) {
-        // If backend rejects query params with 404 or 400, fallback to fetching all designations
-        if ((err.response?.status === 404 || err.response?.status === 400) && cleanParams) {
-          res = await apiClient.get('/designations');
-        } else if (err.response?.status === 403 || err.response?.status === 404) {
-          return { data: [], designations: [] };
-        } else {
-          throw err;
-        }
-      }
-
-      const resData = res?.data;
-      let list = resData?.data || resData?.designations || (Array.isArray(resData) ? resData : []);
-
-      // If client-side department filtering is needed
-      if (clientFilterDept && Array.isArray(list)) {
-        list = list.filter((item) => {
-          const dName = typeof item.department === 'object' ? item.department?.name : '';
-          const dVal = typeof item.department === 'string' ? item.department : '';
-          return (
-            (dName && dName.toLowerCase().includes(clientFilterDept)) ||
-            (dVal && dVal.toLowerCase().includes(clientFilterDept))
-          );
-        });
-        return { ...resData, data: list, designations: list };
-      }
-
-      return resData;
-    } catch (err) {
-      if (err.response?.status === 403 || err.response?.status === 404) {
-        return { data: [], designations: [] };
-      }
-      throw err;
-    }
+    const res = await apiClient.get('/designations', { params });
+    return res.data;
   },
 
-  // GET /designations/levels — Returns levels 1-10 (static or from backend)
+  // GET /designations/levels — Returns enterprise levels 1-10 from backend
   getDesignationLevels: async () => {
-    try {
-      const res = await apiClient.get('/designations/levels');
-      return res.data;
-    } catch {
-      // Backend may not have this endpoint yet; return standard levels 1-10
-      return { data: Array.from({ length: 10 }, (_, i) => ({ value: i + 1, label: `Level ${i + 1}` })) };
-    }
+    const res = await apiClient.get('/designations/levels');
+    return res.data;
   },
 
   // GET /designations/:id
@@ -229,53 +158,22 @@ export const masterApi = {
     return res.data;
   },
 
-  // POST /designations — Required: name, department. Optional: code, level, description, company, isActive
+  // POST /designations
   createDesignation: async (data) => {
-    const payload = {
-      name: data.name || data.title, // support both field names
-      department: data.department,
-      code: data.code || undefined,
-      level: data.level ? Number(data.level) : undefined,
-      description: data.description || undefined,
-      company: data.company || undefined,
-      isActive: data.isActive !== false,
-    };
-    // Strip undefined keys
-    Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
-    const res = await apiClient.post('/designations', payload);
+    const res = await apiClient.post('/designations', data);
     return res.data;
   },
 
-  // PUT /designations/:id — All fields optional
+  // PUT /designations/:id
   updateDesignation: async (id, data) => {
-    const payload = {
-      name: data.name || data.title || undefined,
-      department: data.department || undefined,
-      code: data.code || undefined,
-      level: data.level ? Number(data.level) : undefined,
-      description: data.description !== undefined ? data.description : undefined,
-      isActive: data.isActive !== undefined ? data.isActive : undefined,
-    };
-    Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
-    const res = await apiClient.put(`/designations/${id}`, payload);
+    const res = await apiClient.put(`/designations/${id}`, data);
     return res.data;
   },
 
-  // DELETE /designations/:id — Safe delete (blocked if employees assigned)
+  // DELETE /designations/:id
   deleteDesignation: async (id) => {
-    try {
-      const res = await apiClient.delete(`/designations/${id}`);
-      return res.data;
-    } catch (err) {
-      if (err.response?.status === 409) {
-        const msg = err.response?.data?.message || 'Cannot delete designation. It has associated employees. Reassign them first.';
-        const conflictErr = new Error(msg);
-        conflictErr.status = 409;
-        conflictErr.response = err.response;
-        throw conflictErr;
-      }
-      throw err;
-    }
+    const res = await apiClient.delete(`/designations/${id}`);
+    return res.data;
   },
 
 

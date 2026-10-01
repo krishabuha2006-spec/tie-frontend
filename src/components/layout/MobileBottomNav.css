@@ -1,0 +1,105 @@
+/* ==========================================================================
+   Mobile Bottom Navigation Bar - Native App Experience (< 768px)
+   ========================================================================== */
+
+.mobile-bottom-nav {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: calc(60px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-top: 1px solid rgba(226, 232, 240, 0.85);
+  box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.06);
+  z-index: 1000;
+  align-items: center;
+  justify-content: space-around;
+}
+
+@media (max-width: 768px) {
+  .mobile-bottom-nav {
+    display: flex;
+  }
+
+  /* Add spacing at bottom of scrollable main area so bottom nav never blocks content */
+  .app-main {
+    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .app-content {
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+.mobile-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  height: 100%;
+  padding: 4px 2px;
+  background: transparent;
+  border: none;
+  color: #64748b;
+  cursor: pointer;
+  text-decoration: none;
+  position: relative;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
+
+.mobile-nav-item:active {
+  transform: scale(0.92);
+}
+
+.mobile-nav-icon-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 28px;
+  border-radius: 14px;
+  transition: all 0.2s ease;
+}
+
+.mobile-nav-label {
+  font-size: 0.68rem;
+  font-weight: 500;
+  margin-top: 2px;
+  letter-spacing: -0.01em;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+/* Active State: Modern pill highlight */
+.mobile-nav-item.active {
+  color: var(--primary, #3f929a);
+}
+
+.mobile-nav-item.active .mobile-nav-icon-wrap {
+  background: var(--primary-light, #edf7f8);
+  color: var(--primary, #3f929a);
+}
+
+.mobile-nav-item.active .mobile-nav-label {
+  font-weight: 700;
+  color: var(--primary, #3f929a);
+}
+
+/* Active indicator dot */
+.mobile-nav-item.active::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--primary, #3f929a);
+}

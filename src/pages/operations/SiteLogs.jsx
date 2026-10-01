@@ -349,7 +349,7 @@ export const SiteLogs = () => {
             <span style={{ color: '#1e293b' }}>{r.workCompleted}</span>
           ) : (
             <span style={{ color: '#d97706', fontStyle: 'italic', fontWeight: 600 }}>
-              ⚠ Pending Narrative Submission
+              Pending Narrative Submission
             </span>
           )}
         </div>
@@ -371,7 +371,7 @@ export const SiteLogs = () => {
         <div>
           {r.issuesObservations ? (
             <Badge variant="warning">
-              ⚠ Issue Flagged
+              Issue Flagged
             </Badge>
           ) : (
             <span style={{ fontSize: '0.76rem', color: '#16a34a' }}>None</span>
@@ -384,7 +384,7 @@ export const SiteLogs = () => {
       key: 'isComplete',
       render: (r) => (
         <Badge variant={r.isComplete ? 'success' : 'danger'}>
-          {r.isComplete ? '✓ Complete & Locked' : 'Pending Narrative'}
+          {r.isComplete ? 'Complete & Locked' : 'Pending Narrative'}
         </Badge>
       ),
     },
@@ -606,20 +606,6 @@ export const SiteLogs = () => {
               New Log Stub
             </Button>
           )}
-          <Button
-            variant="light"
-            size="sm"
-            icon={RotateCcw}
-            onClick={() => {
-              if (activeTab === 'my_logs') loadMyLogs();
-              if (activeTab === 'incomplete_queue') loadIncompleteQueue();
-              if (activeTab === 'issues_report') loadIssuesReport();
-              if (activeTab === 'project_report' && selectedProjectId) loadProjectReport(selectedProjectId);
-              if (activeTab === 'employee_report' && selectedEmployeeId) loadEmployeeReport(selectedEmployeeId);
-            }}
-          >
-            Refresh
-          </Button>
         </div>
       </div>
 
@@ -727,7 +713,7 @@ export const SiteLogs = () => {
             columns={incompleteColumns}
             data={incompleteQueue}
             loading={loadingIncomplete}
-            emptyMessage="✓ All checked-out site visits have their narratives completed! Queue is empty."
+            emptyMessage="All checked-out site visits have their narratives completed! Queue is empty."
           />
         </div>
       )}
@@ -1100,7 +1086,7 @@ export const SiteLogs = () => {
                   {joinedLogData.siteAttendanceRecord?.project?.name}
                 </span>
                 <Badge variant={joinedLogData.isComplete ? 'success' : 'danger'}>
-                  {joinedLogData.isComplete ? '✓ Locked & Complete' : 'Incomplete'}
+                  {joinedLogData.isComplete ? 'Locked & Complete' : 'Incomplete'}
                 </Badge>
               </div>
               <div style={{ fontSize: '0.84rem', color: '#64748b', marginTop: 4 }}>

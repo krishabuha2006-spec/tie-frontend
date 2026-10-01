@@ -4,29 +4,57 @@ import employeeApi from '../../api/employeeApi';
 import masterApi from '../../api/masterApi';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
+import { useConfirm } from '../../context/ConfirmContext';
 import {
-  Calendar, Clock, CheckCircle2, AlertCircle, Plus, RefreshCw,
+  Calendar, Clock, CheckCircle2, AlertCircle, Plus, Edit2,
   Trash2, Search, Check, X, ShieldCheck, Settings, CalendarOff,
-  User, Layers, FileText, Ban
+  User, Layers, FileText, Ban, Filter, ArrowRight, RefreshCw,
+  Info, AlertTriangle
 } from 'lucide-react';
 import Modal from '../../components/common/Modal';
 import Button from '../../components/common/Button';
 import Badge from '../../components/common/Badge';
+import StaffPicker from '../../components/common/StaffPicker';
 import { extractApiData } from '../../utils/apiUtils';
 
 export const LeavesHolidays = () => {
-  const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager } = useAuth();
-  const isManagerOrAdmin = isSuperAdmin || isHrAdmin || isDirector || isBranchManager;
+  const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager, userRole, hasPermission } = useAuth();
   const { showToast } = useToast();
+  const confirm = useConfirm();
 
-  // Active Tab: 'my_leaves' | 'approvals' | 'balances' | 'leave_types' | 'holidays'
-  const [activeTab, setActiveTab] = useState(isManagerOrAdmin ? 'approvals' : 'my_leaves');
+  // ─── Strict Role & Permission Gatekeeping ────────────────────────────────────
+  // Backend rule: Only CEO, Directors, or HR/Admin can view and decide pending leave requests.
+  const canApprove = Boolean(
+    isSuperAdmin ||
+    isDirector ||
+    isHrAdmin ||
+    hasPermission('leaves.approve') ||
+    hasPermission('hrms.leaveManagement.approve') ||
+    (typeof userRole === 'string' && ['ceo', 'director', 'hr', 'superadmin', 'admin'].some((r) => userRole.toLowerCase().includes(r))) ||
+    (Array.isArray(user?.roles) && user.roles.some((r) => ['admin', 'hr', 'director', 'ceo'].includes((r.name || r).toLowerCase())))
+  );
+
+  const canManagePolicy = Boolean(
+    isSuperAdmin ||
+    isDirector ||
+    isHrAdmin ||
+    hasPermission('leaves.manage') ||
+    hasPermission('hrms.leaveManagement.manage')
+  );
+
+  // Active Tab: approvers default to 'approvals', regular employees to 'my_leaves'
+  const [activeTab, setActiveTab] = useState(canApprove ? 'approvals' : 'my_leaves');
 
   // Master Data
   const [employees, setEmployees] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [leaveTypes, setLeaveTypes] = useState([]);
   const [loadingMasters, setLoadingMasters] = useState(false);
+
+  // Filter & Search States
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
   // 1. My Leaves State
   const [myRequests, setMyRequests] = useState([]);
@@ -44,11 +72,25 @@ export const LeavesHolidays = () => {
   const [pendingRequests, setPendingRequests] = useState([]);
   const [loadingPending, setLoadingPending] = useState(false);
   const [actingRequestId, setActingRequestId] = useState(null);
+  const [rejectionModalOpen, setRejectionModalOpen] = useState(false);
+  const [rejectingRequest, setRejectingRequest] = useState(null);
+  const [rejectionRemark, setRejectionRemark] = useState('');
+  const [submittingReject, setSubmittingReject] = useState(false);
 
-  // 3. Balances & Accrual State
-  const [selectedBalanceEmpId, setSelectedBalanceEmpId] = useState('');
+  // 3. Withdraw / Cancel Modal State
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [cancellingRequest, setCancellingRequest] = useState(null);
+  const [submittingCancel, setSubmittingCancel] = useState(false);
+
+  // 4. Balances & Accrual State
+  const myEmpId = user?.employee?._id || user?.employee || user?._id;
+  const [selectedBalanceEmpId, setSelectedBalanceEmpId] = useState(myEmpId || '');
   const [employeeBalances, setEmployeeBalances] = useState([]);
+  const [myBalances, setMyBalances] = useState([]);
   const [loadingBalance, setLoadingBalance] = useState(false);
+  const [loadingMyBalance, setLoadingMyBalance] = useState(false);
+  const [employeeRequests, setEmployeeRequests] = useState([]);
+  const [loadingEmpRequests, setLoadingEmpRequests] = useState(false);
   const [accrueModalOpen, setAccrueModalOpen] = useState(false);
   const [submittingAccrue, setSubmittingAccrue] = useState(false);
   const [accrueForm, setAccrueForm] = useState({
@@ -59,9 +101,11 @@ export const LeavesHolidays = () => {
     carriedForwardDays: 0,
   });
 
-  // 4. Leave Types Configuration State
+  // 5. Leave Types Configuration State
   const [loadingTypes, setLoadingTypes] = useState(false);
   const [typeModalOpen, setTypeModalOpen] = useState(false);
+  const [editTypeModalOpen, setEditTypeModalOpen] = useState(false);
+  const [editingType, setEditingType] = useState(null);
   const [submittingType, setSubmittingType] = useState(false);
   const [newTypeForm, setNewTypeForm] = useState({
     name: '',
@@ -72,45 +116,44 @@ export const LeavesHolidays = () => {
     maxCarryForwardDays: 0,
     company: '',
   });
-
-  // 5. Holidays State
-  const [holidays, setHolidays] = useState([]);
-  const [loadingHolidays, setLoadingHolidays] = useState(false);
-  const [holidayModalOpen, setHolidayModalOpen] = useState(false);
-  const [submittingHoliday, setSubmittingHoliday] = useState(false);
-  const [holidayForm, setHolidayForm] = useState({
+  const [editTypeForm, setEditTypeForm] = useState({
     name: '',
-    date: new Date().toISOString().split('T')[0],
-    type: 'FESTIVAL',
-    scope: 'COMPANY',
-    isOptional: false,
+    code: '',
+    annualEntitlement: 12,
+    isPaid: true,
+    carryForwardAllowed: false,
+    maxCarryForwardDays: 0,
+    isActive: true,
   });
 
+
+
   // Safe list extractor
-  const toList = (res, ...keys) => extractApiData(res, ...keys, 'leaveRequests', 'pendingRequests', 'leaveTypes', 'holidays', 'balances', 'data');
+  const toList = (res, ...keys) =>
+    extractApiData(res, ...keys, 'leaveRequests', 'pendingRequests', 'leaveTypes', 'holidays', 'balances', 'data');
 
   // Load Masters (Employees, Companies, Leave Types)
   const loadMasters = useCallback(async () => {
     setLoadingMasters(true);
     try {
-      const [eRes, cRes, ltRes] = await Promise.allSettled([
-        employeeApi.getEmployees({ limit: 150 }),
-        masterApi.getCompanies(),
-        leaveHolidayApi.getLeaveTypes(),
-      ]);
+      const calls = [leaveHolidayApi.getLeaveTypes(), masterApi.getCompanies()];
+      if (canApprove || canManagePolicy) {
+        calls.push(employeeApi.getEmployees({ limit: 150 }));
+      }
+      const results = await Promise.allSettled(calls);
 
-      const empList = eRes.status === 'fulfilled' ? toList(eRes.value, 'employees') : [];
-      const compList = cRes.status === 'fulfilled' ? toList(cRes.value, 'companies') : [];
-      const typeList = ltRes.status === 'fulfilled' ? toList(ltRes.value, 'leaveTypes') : [];
+      const typeList = results[0].status === 'fulfilled' ? toList(results[0].value, 'leaveTypes') : [];
+      const compList = results[1].status === 'fulfilled' ? toList(results[1].value, 'companies') : [];
+      const empList = results[2]?.status === 'fulfilled' ? toList(results[2].value, 'employees') : [];
 
-      setEmployees(empList);
-      setCompanies(compList);
       setLeaveTypes(typeList);
+      setCompanies(compList);
+      setEmployees(empList);
 
       if (empList.length > 0 && !selectedBalanceEmpId) {
-        const myEmpId = user?.employee?._id || user?.employee || empList[0]._id;
-        setSelectedBalanceEmpId(myEmpId);
-        setAccrueForm((prev) => ({ ...prev, employeeId: myEmpId }));
+        const defaultEmp = myEmpId || empList[0]._id;
+        setSelectedBalanceEmpId(defaultEmp);
+        setAccrueForm((prev) => ({ ...prev, employeeId: defaultEmp }));
       }
 
       if (typeList.length > 0) {
@@ -122,13 +165,13 @@ export const LeavesHolidays = () => {
     } finally {
       setLoadingMasters(false);
     }
-  }, [user, selectedBalanceEmpId]);
+  }, [canApprove, canManagePolicy, myEmpId, selectedBalanceEmpId]);
 
   // 1. Load My Leaves (GET /leave/requests/me)
   const loadMyLeaves = useCallback(async () => {
     setLoadingMyRequests(true);
     try {
-      const res = await leaveHolidayApi.getMyLeaveRequests();
+      const res = await leaveHolidayApi.getMyLeaveRequests({ year: selectedYear });
       setMyRequests(toList(res, 'leaveRequests', 'requests'));
     } catch (err) {
       console.error('Error loading my leaves:', err);
@@ -136,10 +179,27 @@ export const LeavesHolidays = () => {
     } finally {
       setLoadingMyRequests(false);
     }
-  }, []);
+  }, [selectedYear]);
 
-  // 2. Load Pending Approvals (GET /leave/requests/pending-approval)
+  // 2. Load My Own Balance (GET /leave/employees/:myEmpId/balance)
+  const loadMyBalance = useCallback(async () => {
+    if (!myEmpId) return;
+    setLoadingMyBalance(true);
+    try {
+      const res = await leaveHolidayApi.getEmployeeLeaveBalance(myEmpId, { year: selectedYear });
+      const bList = res?.balances || res?.data?.balances || (Array.isArray(res?.data) ? res.data : []);
+      setMyBalances(bList);
+    } catch (err) {
+      console.error('Error loading personal leave balance:', err);
+      setMyBalances([]);
+    } finally {
+      setLoadingMyBalance(false);
+    }
+  }, [myEmpId, selectedYear]);
+
+  // 3. Load Pending Approvals (GET /leave/requests/pending-approval)
   const loadPending = useCallback(async () => {
+    if (!canApprove) return;
     setLoadingPending(true);
     try {
       const res = await leaveHolidayApi.getPendingLeaveApprovals();
@@ -150,25 +210,41 @@ export const LeavesHolidays = () => {
     } finally {
       setLoadingPending(false);
     }
-  }, []);
+  }, [canApprove]);
 
-  // 3. Load Employee Leave Balance (GET /leave/employees/:id/balance)
+  // 4. Load Staff Leave Balance for selected employee (GET /leave/employees/:id/balance)
   const loadBalance = useCallback(async (empId) => {
     if (!empId) return;
     setLoadingBalance(true);
     try {
-      const res = await leaveHolidayApi.getEmployeeLeaveBalance(empId);
+      const res = await leaveHolidayApi.getEmployeeLeaveBalance(empId, { year: selectedYear });
       const bList = res?.balances || res?.data?.balances || (Array.isArray(res?.data) ? res.data : []);
       setEmployeeBalances(bList);
     } catch (err) {
-      console.error('Error loading leave balance:', err);
+      console.error('Error loading staff leave balance:', err);
       setEmployeeBalances([]);
     } finally {
       setLoadingBalance(false);
     }
-  }, []);
+  }, [selectedYear]);
 
-  // 4. Load Leave Types (GET /leave-types)
+  // 4b. Load Specific Staff Leave Requests (GET /leave/requests/employees/:id)
+  const loadEmpRequests = useCallback(async (empId) => {
+    if (!empId) return;
+    setLoadingEmpRequests(true);
+    try {
+      const res = await leaveHolidayApi.getEmployeeLeaveRequests(empId, { year: selectedYear });
+      const list = toList(res, 'leaveRequests', 'requests');
+      setEmployeeRequests(list);
+    } catch (err) {
+      console.error('Error loading employee leave requests:', err);
+      setEmployeeRequests([]);
+    } finally {
+      setLoadingEmpRequests(false);
+    }
+  }, [selectedYear]);
+
+  // 5. Load Leave Types (GET /leave-types)
   const loadLeaveTypes = useCallback(async () => {
     setLoadingTypes(true);
     try {
@@ -187,37 +263,47 @@ export const LeavesHolidays = () => {
     }
   }, [leaveForm.leaveType]);
 
-  // 5. Load Holidays (GET /holidays)
-  const loadHolidays = useCallback(async () => {
-    setLoadingHolidays(true);
-    try {
-      const res = await leaveHolidayApi.getHolidays();
-      setHolidays(toList(res, 'holidays'));
-    } catch (err) {
-      console.error('Error loading holidays:', err);
-      setHolidays([]);
-    } finally {
-      setLoadingHolidays(false);
-    }
-  }, []);
+
 
   // Initial mount
   useEffect(() => {
     loadMasters();
-  }, [loadMasters]);
+    loadMyLeaves();
+    loadMyBalance();
+    if (canApprove) loadPending();
+  }, [loadMasters, loadMyLeaves, loadMyBalance, loadPending, canApprove]);
 
-  // Tab switch effect
+  // Tab switch effect: dynamically refresh tab data
   useEffect(() => {
-    if (activeTab === 'my_leaves') loadMyLeaves();
-    else if (activeTab === 'approvals') loadPending();
-    else if (activeTab === 'balances') {
-      const targetEmp = selectedBalanceEmpId || user?.employee?._id || user?.employee;
-      if (targetEmp) loadBalance(targetEmp);
-    } else if (activeTab === 'leave_types') loadLeaveTypes();
-    else if (activeTab === 'holidays') loadHolidays();
-  }, [activeTab, selectedBalanceEmpId, loadMyLeaves, loadPending, loadBalance, loadLeaveTypes, loadHolidays, user]);
+    if (activeTab === 'my_leaves') {
+      loadMyLeaves();
+      loadMyBalance();
+    } else if (activeTab === 'approvals' && canApprove) {
+      loadPending();
+    } else if (activeTab === 'my_balances') {
+      loadMyBalance();
+    } else if (activeTab === 'balances') {
+      const targetEmp = selectedBalanceEmpId || myEmpId;
+      if (targetEmp) {
+        loadBalance(targetEmp);
+        loadEmpRequests(targetEmp);
+      }
+    } else if (activeTab === 'leave_types') {
+      loadLeaveTypes();
+    }
+  }, [activeTab, selectedBalanceEmpId, loadMyLeaves, loadMyBalance, loadPending, loadBalance, loadEmpRequests, loadLeaveTypes, canApprove, myEmpId]);
 
-  // Apply for Leave (POST /leave/requests)
+  // Dynamic Duration Calculator
+  const calculatedDays = useMemo(() => {
+    if (!leaveForm.fromDate || !leaveForm.toDate) return 1;
+    const d1 = new Date(leaveForm.fromDate);
+    const d2 = new Date(leaveForm.toDate);
+    const diffTime = d2.getTime() - d1.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    return diffDays > 0 ? diffDays : 0;
+  }, [leaveForm.fromDate, leaveForm.toDate]);
+
+  // Apply for Leave (POST /leave/requests with auto-accrual recovery)
   const handleApplyLeave = async (e) => {
     e.preventDefault();
     if (!leaveForm.leaveType) {
@@ -225,7 +311,7 @@ export const LeavesHolidays = () => {
       return;
     }
     if (!leaveForm.fromDate || !leaveForm.toDate) {
-      showToast('From date and To date are required', 'warning');
+      showToast('From Date and To Date are required', 'warning');
       return;
     }
     if (new Date(leaveForm.toDate) < new Date(leaveForm.fromDate)) {
@@ -233,27 +319,57 @@ export const LeavesHolidays = () => {
       return;
     }
     if (!leaveForm.reason.trim()) {
-      showToast('Reason is required', 'warning');
+      showToast('Please provide a reason for your leave', 'warning');
       return;
     }
 
     setSubmittingApply(true);
     try {
-      await leaveHolidayApi.applyLeave({
-        leaveType: leaveForm.leaveType,
-        fromDate: leaveForm.fromDate,
-        toDate: leaveForm.toDate,
-        reason: leaveForm.reason.trim(),
-      });
+      // First attempt: apply directly
+      try {
+        await leaveHolidayApi.applyLeave({
+          leaveType: leaveForm.leaveType,
+          fromDate: leaveForm.fromDate,
+          toDate: leaveForm.toDate,
+          reason: leaveForm.reason.trim(),
+        });
+      } catch (err) {
+        const errMsg = err.response?.data?.message || err.message || '';
+        // If error is missing balance record, auto-accrue the standard quota and retry
+        if (errMsg.toLowerCase().includes('no leave balance record found') && myEmpId) {
+          const selectedTypeObj = leaveTypes.find((t) => t._id === leaveForm.leaveType);
+          const quota = selectedTypeObj?.annualEntitlement || 12;
+          const year = new Date(leaveForm.fromDate).getFullYear() || new Date().getFullYear();
 
-      showToast('✓ Leave request submitted and routed for approval!', 'success');
+          await leaveHolidayApi.accrueLeaveBalance({
+            employeeId: myEmpId,
+            leaveType: leaveForm.leaveType,
+            year: Number(year),
+            entitledDays: Number(quota),
+            carriedForwardDays: 0,
+          });
+
+          // Retry application with newly created balance
+          await leaveHolidayApi.applyLeave({
+            leaveType: leaveForm.leaveType,
+            fromDate: leaveForm.fromDate,
+            toDate: leaveForm.toDate,
+            reason: leaveForm.reason.trim(),
+          });
+        } else {
+          throw err;
+        }
+      }
+
+      showToast('Leave request submitted and routed for approval!', 'success');
       setApplyModalOpen(false);
       setLeaveForm((prev) => ({
         ...prev,
         reason: '',
       }));
       await loadMyLeaves();
-      if (isManagerOrAdmin) await loadPending();
+      await loadMyBalance();
+      if (canApprove) await loadPending();
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to submit leave request';
       showToast(msg, 'error');
@@ -266,9 +382,13 @@ export const LeavesHolidays = () => {
   const handleApproveLeave = async (id) => {
     setActingRequestId(id);
     try {
-      await leaveHolidayApi.approveLeave(id, { remarks: 'Approved by Manager' });
-      showToast('✓ Leave request approved!', 'success');
+      await leaveHolidayApi.approveLeave(id, { remark: 'Approved by Manager' });
+      showToast('Leave request approved successfully!', 'success');
       await loadPending();
+      if (selectedBalanceEmpId) {
+        await loadBalance(selectedBalanceEmpId);
+        await loadEmpRequests(selectedBalanceEmpId);
+      }
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to approve leave', 'error');
     } finally {
@@ -276,32 +396,63 @@ export const LeavesHolidays = () => {
     }
   };
 
-  // Reject Leave (PUT /leave/requests/:id/reject)
-  const handleRejectLeave = async (id) => {
-    const reason = window.prompt('Please provide a reason for rejecting this leave request:');
-    if (reason === null) return;
+  // Open Rejection Modal
+  const handleOpenRejectModal = (req) => {
+    setRejectingRequest(req);
+    setRejectionRemark('');
+    setRejectionModalOpen(true);
+  };
 
-    setActingRequestId(id);
+  // Submit Rejection (PUT /leave/requests/:id/reject with required remark)
+  const handleSubmitReject = async (e) => {
+    e.preventDefault();
+    if (!rejectingRequest?._id) return;
+    if (!rejectionRemark.trim()) {
+      showToast('Please provide a reason for rejection', 'warning');
+      return;
+    }
+
+    setSubmittingReject(true);
     try {
-      await leaveHolidayApi.rejectLeave(id, { reason: reason || 'Rejected by Manager' });
+      await leaveHolidayApi.rejectLeave(rejectingRequest._id, {
+        remark: rejectionRemark.trim(),
+      });
       showToast('Leave request rejected', 'info');
+      setRejectionModalOpen(false);
+      setRejectingRequest(null);
       await loadPending();
+      if (selectedBalanceEmpId) {
+        await loadBalance(selectedBalanceEmpId);
+        await loadEmpRequests(selectedBalanceEmpId);
+      }
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to reject leave', 'error');
     } finally {
-      setActingRequestId(null);
+      setSubmittingReject(false);
     }
   };
 
-  // Cancel Own Leave (PUT /leave/requests/:id/cancel)
-  const handleCancelLeave = async (id) => {
-    if (!window.confirm('Are you sure you want to withdraw this pending leave application?')) return;
+  // Open Cancel / Withdraw Modal
+  const handleOpenCancelModal = (req) => {
+    setCancellingRequest(req);
+    setCancelModalOpen(true);
+  };
+
+  // Confirm Cancel (PUT /leave/requests/:id/cancel)
+  const handleConfirmCancel = async () => {
+    if (!cancellingRequest?._id) return;
+    setSubmittingCancel(true);
     try {
-      await leaveHolidayApi.cancelLeave(id);
-      showToast('✓ Leave request withdrawn', 'info');
+      await leaveHolidayApi.cancelLeave(cancellingRequest._id);
+      showToast('Leave request withdrawn successfully', 'info');
+      setCancelModalOpen(false);
+      setCancellingRequest(null);
       await loadMyLeaves();
+      await loadMyBalance();
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to cancel leave', 'error');
+    } finally {
+      setSubmittingCancel(false);
     }
   };
 
@@ -309,7 +460,7 @@ export const LeavesHolidays = () => {
   const handleAccrueBalance = async (e) => {
     e.preventDefault();
     if (!accrueForm.employeeId || !accrueForm.leaveType) {
-      showToast('Employee and Leave Category are required', 'warning');
+      showToast('Staff member and Leave Category are required', 'warning');
       return;
     }
 
@@ -323,13 +474,59 @@ export const LeavesHolidays = () => {
         carriedForwardDays: Number(accrueForm.carriedForwardDays || 0),
       });
 
-      showToast('✓ Leave balance allocated successfully!', 'success');
+      showToast('Leave balance allocated successfully!', 'success');
       setAccrueModalOpen(false);
       await loadBalance(accrueForm.employeeId);
+      await loadEmpRequests(accrueForm.employeeId);
+      if (accrueForm.employeeId === myEmpId) {
+        await loadMyBalance();
+      }
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to allocate balance', 'error');
     } finally {
       setSubmittingAccrue(false);
+    }
+  };
+
+  // Open Edit Leave Type Modal (PUT /leave-types/:id)
+  const handleOpenEditType = (type) => {
+    setEditingType(type);
+    setEditTypeForm({
+      name: type.name || '',
+      code: type.code || '',
+      annualEntitlement: type.annualEntitlement || 12,
+      isPaid: type.isPaid !== undefined ? Boolean(type.isPaid) : true,
+      carryForwardAllowed: Boolean(type.carryForwardAllowed),
+      maxCarryForwardDays: type.maxCarryForwardDays || 0,
+      isActive: type.isActive !== undefined ? Boolean(type.isActive) : true,
+    });
+    setEditTypeModalOpen(true);
+  };
+
+  // Update Leave Type (PUT /leave-types/:id)
+  const handleUpdateLeaveType = async (e) => {
+    e.preventDefault();
+    if (!editingType?._id) return;
+    setSubmittingType(true);
+    try {
+      await leaveHolidayApi.updateLeaveType(editingType._id, {
+        name: editTypeForm.name.trim(),
+        code: editTypeForm.code.trim().toUpperCase(),
+        annualEntitlement: Number(editTypeForm.annualEntitlement) || 12,
+        isPaid: Boolean(editTypeForm.isPaid),
+        carryForwardAllowed: Boolean(editTypeForm.carryForwardAllowed),
+        maxCarryForwardDays: Number(editTypeForm.maxCarryForwardDays || 0),
+        isActive: Boolean(editTypeForm.isActive),
+      });
+
+      showToast('Leave category updated successfully!', 'success');
+      setEditTypeModalOpen(false);
+      setEditingType(null);
+      await loadLeaveTypes();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to update leave category', 'error');
+    } finally {
+      setSubmittingType(false);
     }
   };
 
@@ -353,7 +550,7 @@ export const LeavesHolidays = () => {
         company: newTypeForm.company || companies[0]?._id || undefined,
       });
 
-      showToast('✓ Leave Type created successfully!', 'success');
+      showToast('Leave Category created successfully!', 'success');
       setTypeModalOpen(false);
       setNewTypeForm({
         name: '',
@@ -366,221 +563,201 @@ export const LeavesHolidays = () => {
       });
       await loadLeaveTypes();
     } catch (err) {
-      showToast(err.response?.data?.message || 'Failed to create leave type', 'error');
+      showToast(err.response?.data?.message || 'Failed to create leave category', 'error');
     } finally {
       setSubmittingType(false);
     }
   };
 
-  // Initialize Default Standard Leave Categories
-  const handleInitDefaultCategories = async () => {
-    setSubmittingType(true);
-    try {
-      const standard = [
-        { name: 'Casual Leave', code: 'CL', annualEntitlement: 12, isPaid: true, carryForwardAllowed: false },
-        { name: 'Sick Leave', code: 'SL', annualEntitlement: 10, isPaid: true, carryForwardAllowed: false },
-        { name: 'Paid Privilege Leave', code: 'PL', annualEntitlement: 18, isPaid: true, carryForwardAllowed: true, maxCarryForwardDays: 9 },
-      ];
+  // Filtered "My Leaves" by Status & Search
+  const filteredMyRequests = useMemo(() => {
+    return myRequests.filter((r) => {
+      const matchesStatus = statusFilter === 'ALL' || r.status === statusFilter;
+      const q = searchQuery.toLowerCase().trim();
+      const matchesSearch =
+        !q ||
+        (r.leaveType?.name && r.leaveType.name.toLowerCase().includes(q)) ||
+        (r.reason && r.reason.toLowerCase().includes(q)) ||
+        (r.status && r.status.toLowerCase().includes(q));
+      return matchesStatus && matchesSearch;
+    });
+  }, [myRequests, statusFilter, searchQuery]);
 
-      for (const cat of standard) {
-        await leaveHolidayApi.createLeaveType(cat).catch(() => {});
-      }
-
-      showToast('✓ Standard leave categories initialized on backend!', 'success');
-      await loadLeaveTypes();
-    } catch (err) {
-      showToast('Error initializing categories', 'error');
-    } finally {
-      setSubmittingType(false);
-    }
-  };
-
-  // Create Holiday (POST /holidays)
-  const handleCreateHoliday = async (e) => {
-    e.preventDefault();
-    if (!holidayForm.name.trim() || !holidayForm.date) {
-      showToast('Holiday name and date are required', 'warning');
-      return;
-    }
-
-    setSubmittingHoliday(true);
-    try {
-      await leaveHolidayApi.createHoliday({
-        name: holidayForm.name.trim(),
-        date: holidayForm.date,
-        type: holidayForm.type,
-        scope: holidayForm.scope,
-        isOptional: Boolean(holidayForm.isOptional),
-      });
-
-      showToast('✓ Holiday added to company calendar!', 'success');
-      setHolidayModalOpen(false);
-      setHolidayForm({
-        name: '',
-        date: new Date().toISOString().split('T')[0],
-        type: 'FESTIVAL',
-        scope: 'COMPANY',
-        isOptional: false,
-      });
-      await loadHolidays();
-    } catch (err) {
-      showToast(err.response?.data?.message || 'Failed to add holiday', 'error');
-    } finally {
-      setSubmittingHoliday(false);
-    }
-  };
-
-  // Delete Holiday (DELETE /holidays/:id)
-  const handleDeleteHoliday = async (id) => {
-    if (!window.confirm('Are you sure you want to remove this holiday?')) return;
-    try {
-      await leaveHolidayApi.deleteHoliday(id);
-      showToast('✓ Holiday removed', 'info');
-      await loadHolidays();
-    } catch (err) {
-      showToast(err.response?.data?.message || 'Failed to delete holiday', 'error');
-    }
-  };
-
-  // Calculate total entitled and remaining from live balance cards
-  const totalEntitledSum = employeeBalances.reduce((acc, b) => acc + (b.entitledDays || 0), 0);
-  const totalRemainingSum = employeeBalances.reduce((acc, b) => acc + (b.remainingDays != null ? b.remainingDays : (b.entitledDays - (b.usedDays || 0))), 0);
-  const totalUsedSum = employeeBalances.reduce((acc, b) => acc + (b.usedDays || 0), 0);
+  // Balances summary calculations
+  const displayedBalances = canApprove && activeTab === 'balances' ? employeeBalances : myBalances;
+  const totalEntitledSum = displayedBalances.reduce((acc, b) => acc + (b.entitledDays || 0), 0);
+  const totalRemainingSum = displayedBalances.reduce(
+    (acc, b) => acc + (b.remainingDays != null ? b.remainingDays : (b.entitledDays || 0) - (b.usedDays || 0)),
+    0
+  );
+  const totalUsedSum = displayedBalances.reduce((acc, b) => acc + (b.usedDays || 0), 0);
+  const myPendingCount = myRequests.filter((r) => r.status === 'PENDING').length;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: 'Inter, system-ui, sans-serif' }}>
-
-      {/* 1. Header Card */}
-      <div style={{
-        background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0',
-        padding: '16px 20px', display: 'flex', justifyContent: 'space-between',
-        alignItems: 'center', flexWrap: 'wrap', gap: 14
-      }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: 'var(--font-family)' }}>
+      {/* ─── 1. Header Card ────────────────────────────────────────────────── */}
+      <div
+        style={{
+          background: '#fff',
+          borderRadius: 10,
+          border: '1px solid #e2e8f0',
+          padding: '16px 20px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 14,
+        }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            background: 'linear-gradient(135deg, var(--primary) 0%, #1e565d 100%)',
-            color: '#fff', padding: 10, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center'
-          }}>
+          <div
+            style={{
+              background: 'linear-gradient(135deg, var(--primary) 0%, #337a82 100%)',
+              color: '#fff',
+              padding: 10,
+              borderRadius: 10,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
             <CalendarOff size={24} />
           </div>
           <div>
-            <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#0f172a' }}>
-              Leave &amp; Holiday Management
-            </h2>
-            <p style={{ margin: '3px 0 0', fontSize: '0.8rem', color: '#64748b' }}>
-              Live annual leave balances, application approvals &amp; organization calendar
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700, color: '#0f172a' }}>
+                Leave Management &amp; Accrual
+              </h2>
+              <span
+                style={{
+                  fontSize: '0.73rem',
+                  background: 'var(--primary-light, #edf7f8)',
+                  color: 'var(--primary, #3f929a)',
+                  padding: '2px 8px',
+                  borderRadius: 6,
+                  fontWeight: 600,
+                }}
+              >
+                {canApprove ? 'Manager / HR Scope' : 'Employee Self-Service'}
+              </span>
+            </div>
+            <p style={{ margin: '3px 0 0', fontSize: '0.78rem', color: '#64748b' }}>
+              Live annual quotas, personal balances &amp; application approvals
             </p>
           </div>
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <Button
-            variant="secondary"
-            icon={RefreshCw}
-            onClick={() => {
-              if (activeTab === 'my_leaves') loadMyLeaves();
-              else if (activeTab === 'approvals') loadPending();
-              else if (activeTab === 'balances') loadBalance(selectedBalanceEmpId);
-              else if (activeTab === 'leave_types') loadLeaveTypes();
-              else loadHolidays();
-            }}
-          >
-            Refresh
-          </Button>
-
-          <Button
             variant="primary"
             icon={Plus}
             onClick={() => setApplyModalOpen(true)}
+            style={{
+              background: 'var(--primary)',
+              borderColor: 'var(--primary)',
+              color: '#fff',
+              fontWeight: 700,
+              boxShadow: '0 2px 6px rgba(63, 146, 154, 0.35)',
+            }}
           >
             Apply for Leave
           </Button>
 
-          {isManagerOrAdmin && activeTab === 'leave_types' && (
-            <Button
-              variant="secondary"
-              icon={Plus}
-              onClick={() => setTypeModalOpen(true)}
-            >
-              Add Category
-            </Button>
-          )}
-
-          {isManagerOrAdmin && activeTab === 'holidays' && (
-            <Button
-              variant="secondary"
-              icon={Plus}
-              onClick={() => setHolidayModalOpen(true)}
-            >
-              Add Holiday
+          {canManagePolicy && activeTab === 'leave_types' && (
+            <Button variant="secondary" icon={Plus} onClick={() => setTypeModalOpen(true)}>
+              New Category
             </Button>
           )}
         </div>
       </div>
 
-      {/* 2. KPI Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+      {/* ─── 2. Dynamic KPI Metric Cards ───────────────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 }}>
+        {/* Total Applications */}
         <div style={{ background: '#fff', padding: '14px 18px', borderRadius: 10, border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ background: '#16a34a15', color: '#16a34a', padding: 10, borderRadius: 8 }}>
+          <div style={{ background: 'var(--primary-light, #edf7f8)', color: 'var(--primary, #3f929a)', padding: 10, borderRadius: 8 }}>
             <Calendar size={20} />
           </div>
           <div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a' }}>
-              {myRequests.length} Applications
+            <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#0f172a' }}>
+              {myRequests.length}
             </div>
-            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>My Total Leave Requests</div>
+            <div style={{ fontSize: '0.74rem', color: '#64748b' }}>My Total Applications</div>
           </div>
         </div>
 
+        {/* Pending Review: Approvals for manager, or own pending for employee */}
         <div style={{ background: '#fff', padding: '14px 18px', borderRadius: 10, border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ background: '#d9770615', color: '#d97706', padding: 10, borderRadius: 8 }}>
+          <div style={{ background: 'var(--logo-orange-light, #fef8ee)', color: 'var(--logo-orange, #f5a532)', padding: 10, borderRadius: 8 }}>
             <Clock size={20} />
           </div>
           <div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#d97706' }}>
-              {pendingRequests.length} Pending
+            <div style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--logo-orange, #f5a532)' }}>
+              {canApprove ? pendingRequests.length : myPendingCount}
             </div>
-            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Awaiting Manager Review</div>
+            <div style={{ fontSize: '0.74rem', color: '#64748b' }}>
+              {canApprove ? 'Pending Approval (Action Req)' : 'My Pending Submissions'}
+            </div>
           </div>
         </div>
 
+        {/* Available Balance Days */}
         <div style={{ background: '#fff', padding: '14px 18px', borderRadius: 10, border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ background: '#0284c715', color: '#0284c7', padding: 10, borderRadius: 8 }}>
+          <div style={{ background: 'var(--logo-green-light, #f4f9ed)', color: 'var(--logo-green, #8bc54a)', padding: 10, borderRadius: 8 }}>
             <ShieldCheck size={20} />
           </div>
           <div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a' }}>
+            <div style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--logo-green, #8bc54a)' }}>
               {totalRemainingSum} Days
             </div>
-            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Available Balance ({employeeBalances.length} Categories)</div>
+            <div style={{ fontSize: '0.74rem', color: '#64748b' }}>
+              Available Balance ({displayedBalances.length} Categories)
+            </div>
           </div>
         </div>
 
+        {/* Organization Leave Categories */}
         <div style={{ background: '#fff', padding: '14px 18px', borderRadius: 10, border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ background: '#8b5cf615', color: '#8b5cf6', padding: 10, borderRadius: 8 }}>
+          <div style={{ background: '#f8fafc', color: '#64748b', padding: 10, borderRadius: 8 }}>
             <Settings size={20} />
           </div>
           <div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a' }}>
-              {leaveTypes.length} Categories
+            <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#0f172a' }}>
+              {leaveTypes.length}
             </div>
-            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Configured Leave Types</div>
+            <div style={{ fontSize: '0.74rem', color: '#64748b' }}>Configured Leave Categories</div>
           </div>
         </div>
       </div>
 
-      {/* 3. Navigation Tabs */}
-      <div style={{
-        display: 'flex', gap: 6, background: '#fff', padding: '6px',
-        borderRadius: 10, border: '1px solid #e2e8f0', width: 'fit-content'
-      }}>
-        {isManagerOrAdmin && (
+      {/* ─── 3. Navigation Tab Bar (Strictly Role-Based) ────────────────────── */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 6,
+          background: '#fff',
+          padding: '6px',
+          borderRadius: 10,
+          border: '1px solid #e2e8f0',
+          width: 'fit-content',
+          flexWrap: 'wrap',
+        }}
+      >
+        {/* Approvals tab: only rendered for authorized approvers (CEO, Director, HR, Manager) */}
+        {canApprove && (
           <button
             onClick={() => setActiveTab('approvals')}
             style={{
-              display: 'flex', alignItems: 'center', gap: 6, padding: '7px 16px',
-              borderRadius: 7, border: 'none', fontSize: '0.84rem', fontWeight: 600,
-              cursor: 'pointer', transition: 'all 0.15s',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '7px 16px',
+              borderRadius: 7,
+              border: 'none',
+              fontSize: '0.84rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.15s',
               background: activeTab === 'approvals' ? 'var(--primary)' : 'transparent',
               color: activeTab === 'approvals' ? '#fff' : '#64748b',
             }}
@@ -592,9 +769,16 @@ export const LeavesHolidays = () => {
         <button
           onClick={() => setActiveTab('my_leaves')}
           style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '7px 16px',
-            borderRadius: 7, border: 'none', fontSize: '0.84rem', fontWeight: 600,
-            cursor: 'pointer', transition: 'all 0.15s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '7px 16px',
+            borderRadius: 7,
+            border: 'none',
+            fontSize: '0.84rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.15s',
             background: activeTab === 'my_leaves' ? 'var(--primary)' : 'transparent',
             color: activeTab === 'my_leaves' ? '#fff' : '#64748b',
           }}
@@ -602,71 +786,124 @@ export const LeavesHolidays = () => {
           <Calendar size={15} /> My Leaves ({myRequests.length})
         </button>
 
-        <button
-          onClick={() => setActiveTab('balances')}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '7px 16px',
-            borderRadius: 7, border: 'none', fontSize: '0.84rem', fontWeight: 600,
-            cursor: 'pointer', transition: 'all 0.15s',
-            background: activeTab === 'balances' ? 'var(--primary)' : 'transparent',
-            color: activeTab === 'balances' ? '#fff' : '#64748b',
-          }}
-        >
-          <ShieldCheck size={15} /> Balances &amp; Accrual
-        </button>
+        {/* My Balances Tab (Regular Staff) */}
+        {!canApprove && (
+          <button
+            onClick={() => setActiveTab('my_balances')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '7px 16px',
+              borderRadius: 7,
+              border: 'none',
+              fontSize: '0.84rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+              background: activeTab === 'my_balances' ? 'var(--primary)' : 'transparent',
+              color: activeTab === 'my_balances' ? '#fff' : '#64748b',
+            }}
+          >
+            <ShieldCheck size={15} /> My Leave Balances ({myBalances.length})
+          </button>
+        )}
+
+        {/* Staff Balances & Accrual (Managers & HR) */}
+        {canApprove && (
+          <button
+            onClick={() => setActiveTab('balances')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '7px 16px',
+              borderRadius: 7,
+              border: 'none',
+              fontSize: '0.84rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+              background: activeTab === 'balances' ? 'var(--primary)' : 'transparent',
+              color: activeTab === 'balances' ? '#fff' : '#64748b',
+            }}
+          >
+            <ShieldCheck size={15} /> Staff Balances &amp; Accrual
+          </button>
+        )}
 
         <button
           onClick={() => setActiveTab('leave_types')}
           style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '7px 16px',
-            borderRadius: 7, border: 'none', fontSize: '0.84rem', fontWeight: 600,
-            cursor: 'pointer', transition: 'all 0.15s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '7px 16px',
+            borderRadius: 7,
+            border: 'none',
+            fontSize: '0.84rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.15s',
             background: activeTab === 'leave_types' ? 'var(--primary)' : 'transparent',
             color: activeTab === 'leave_types' ? '#fff' : '#64748b',
           }}
         >
-          <Settings size={15} /> Leave Types ({leaveTypes.length})
-        </button>
-
-        <button
-          onClick={() => setActiveTab('holidays')}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '7px 16px',
-            borderRadius: 7, border: 'none', fontSize: '0.84rem', fontWeight: 600,
-            cursor: 'pointer', transition: 'all 0.15s',
-            background: activeTab === 'holidays' ? 'var(--primary)' : 'transparent',
-            color: activeTab === 'holidays' ? '#fff' : '#64748b',
-          }}
-        >
-          <CalendarOff size={15} /> Holiday Calendar ({holidays.length})
+          <Settings size={15} /> Leave Policies ({leaveTypes.length})
         </button>
       </div>
 
-      {/* ================================================================== */}
-      {/* TAB 1: PENDING APPROVALS (HR / MANAGERS) */}
-      {/* ================================================================== */}
-      {activeTab === 'approvals' && (
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* TAB 1: PENDING APPROVALS (AUTHORIZED APPROVERS ONLY)                  */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'approvals' && canApprove && (
         <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-          <div style={{ padding: '12px 18px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>
-              Pending Leave Applications for Approval
-            </h3>
-            <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
-              {pendingRequests.length} Requests Awaiting Review
+          <div
+            style={{
+              padding: '14px 18px',
+              borderBottom: '1px solid #e2e8f0',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 10,
+            }}
+          >
+            <div>
+              <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 700, color: '#0f172a' }}>
+                Pending Leave Applications for Approval
+              </h3>
+              <p style={{ margin: '2px 0 0', fontSize: '0.76rem', color: '#64748b' }}>
+                Review and approve/reject leave submissions from your subordinates
+              </p>
+            </div>
+            <span
+              style={{
+                fontSize: '0.76rem',
+                background: 'var(--logo-orange-light, #fef8ee)',
+                color: 'var(--logo-orange, #f5a532)',
+                padding: '4px 10px',
+                borderRadius: 6,
+                fontWeight: 700,
+              }}
+            >
+              {pendingRequests.length} Pending Actions
             </span>
           </div>
 
           {loadingPending ? (
             <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
               <Clock size={24} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 8px' }} />
-              <div>Loading pending applications...</div>
+              <div>Loading pending applications from backend...</div>
             </div>
           ) : pendingRequests.length === 0 ? (
             <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
-              <CheckCircle2 size={32} color="#16a34a" style={{ margin: '0 auto 8px' }} />
-              <div style={{ fontWeight: 600 }}>No pending leave applications</div>
+              <CheckCircle2 size={36} color="var(--logo-green, #8bc54a)" style={{ margin: '0 auto 8px' }} />
+              <div style={{ fontWeight: 700, fontSize: '0.92rem', color: '#0f172a' }}>
+                No pending leave applications
+              </div>
               <div style={{ fontSize: '0.8rem', marginTop: 4 }}>
-                All submitted leave requests have been reviewed.
+                All leave submissions in your reporting line have been reviewed.
               </div>
             </div>
           ) : (
@@ -680,15 +917,19 @@ export const LeavesHolidays = () => {
                     <th style={{ padding: '10px 16px' }}>Days</th>
                     <th style={{ padding: '10px 16px' }}>Reason</th>
                     <th style={{ padding: '10px 16px' }}>Applied Date</th>
-                    <th style={{ padding: '10px 16px', textAlign: 'right' }}>Decision</th>
+                    <th style={{ padding: '10px 16px', textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pendingRequests.map((req) => {
                     const empName = req.employee?.basicInfo?.fullName || req.employee?.name || 'Staff Member';
                     const empCode = req.employee?.basicInfo?.employeeCode || req.employee?.employeeCode || 'EMP';
-                    const fromStr = req.fromDate ? new Date(req.fromDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—';
-                    const toStr = req.toDate ? new Date(req.toDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+                    const fromStr = req.fromDate
+                      ? new Date(req.fromDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+                      : '—';
+                    const toStr = req.toDate
+                      ? new Date(req.toDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                      : '—';
                     const days = req.numberOfDays ?? req.totalDays ?? 1;
 
                     return (
@@ -700,22 +941,24 @@ export const LeavesHolidays = () => {
                         <td style={{ padding: '12px 16px' }}>
                           <Badge variant="primary">{req.leaveType?.name || 'Leave'}</Badge>
                         </td>
-                        <td style={{ padding: '12px 16px', fontWeight: 600 }}>
+                        <td style={{ padding: '12px 16px', fontWeight: 600, color: '#0f172a' }}>
                           {fromStr} &ndash; {toStr}
                         </td>
                         <td style={{ padding: '12px 16px' }}>
-                          <span style={{ fontWeight: 700, color: '#0284c7' }}>{days} Day(s)</span>
+                          <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{days} Day(s)</span>
                         </td>
                         <td style={{ padding: '12px 16px', maxWidth: 220 }}>
                           <div style={{ fontSize: '0.78rem', color: '#334155' }}>{req.reason}</div>
                         </td>
                         <td style={{ padding: '12px 16px', color: '#64748b' }}>
-                          {req.createdAt ? new Date(req.createdAt).toLocaleDateString('en-IN') : 'Today'}
+                          {req.appliedAt || req.createdAt
+                            ? new Date(req.appliedAt || req.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+                            : 'Today'}
                         </td>
                         <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                           <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                             <Button
-                              variant="primary"
+                              variant="success"
                               size="sm"
                               icon={Check}
                               loading={actingRequestId === req._id}
@@ -727,8 +970,7 @@ export const LeavesHolidays = () => {
                               variant="danger"
                               size="sm"
                               icon={X}
-                              loading={actingRequestId === req._id}
-                              onClick={() => handleRejectLeave(req._id)}
+                              onClick={() => handleOpenRejectModal(req)}
                             >
                               Reject
                             </Button>
@@ -744,23 +986,81 @@ export const LeavesHolidays = () => {
         </div>
       )}
 
-      {/* ================================================================== */}
-      {/* TAB 2: MY LEAVES */}
-      {/* ================================================================== */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* TAB 2: MY LEAVES (ALL STAFF)                                         */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'my_leaves' && (
         <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-          <div style={{ padding: '14px 18px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+          {/* Filter and Action Header */}
+          <div
+            style={{
+              padding: '14px 18px',
+              borderBottom: '1px solid #e2e8f0',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 12,
+            }}
+          >
             <div>
-              <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>
-                My Leave Application History
+              <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 700, color: '#0f172a' }}>
+                My Leave Submissions &amp; Status
               </h3>
               <p style={{ margin: '2px 0 0', fontSize: '0.76rem', color: '#64748b' }}>
                 Track your active, approved, and past leave submissions
               </p>
             </div>
-            <Button variant="primary" size="sm" icon={Plus} onClick={() => setApplyModalOpen(true)}>
-              Apply for Leave
-            </Button>
+
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              {/* Status Pill Filters */}
+              <div style={{ display: 'flex', gap: 4, background: '#f1f5f9', padding: 3, borderRadius: 8 }}>
+                {['ALL', 'PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'].map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setStatusFilter(st)}
+                    style={{
+                      border: 'none',
+                      padding: '4px 10px',
+                      borderRadius: 6,
+                      fontSize: '0.73rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      background: statusFilter === st ? 'var(--primary)' : 'transparent',
+                      color: statusFilter === st ? '#fff' : '#64748b',
+                      transition: 'all 0.12s',
+                    }}
+                  >
+                    {st}
+                  </button>
+                ))}
+              </div>
+
+              {/* Search */}
+              <div style={{ position: 'relative', width: 200 }}>
+                <Search size={14} color="#94a3b8" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)' }} />
+                <input
+                  type="text"
+                  placeholder="Search reason..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '6px 10px 6px 30px',
+                    fontSize: '0.8rem',
+                    borderRadius: 6,
+                    border: '1px solid #cbd5e1',
+                    boxSizing: 'border-box',
+                    outline: 'none',
+                  }}
+                />
+              </div>
+
+              <Button variant="primary" size="sm" icon={Plus} onClick={() => setApplyModalOpen(true)}>
+                Apply for Leave
+              </Button>
+            </div>
           </div>
 
           {loadingMyRequests ? (
@@ -768,12 +1068,16 @@ export const LeavesHolidays = () => {
               <Clock size={24} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 8px' }} />
               <div>Loading your leave applications...</div>
             </div>
-          ) : myRequests.length === 0 ? (
+          ) : filteredMyRequests.length === 0 ? (
             <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
-              <Calendar size={32} color="#94a3b8" style={{ margin: '0 auto 8px' }} />
-              <div style={{ fontWeight: 600 }}>No leave applications filed yet</div>
+              <Calendar size={36} color="#94a3b8" style={{ margin: '0 auto 8px' }} />
+              <div style={{ fontWeight: 700, fontSize: '0.92rem', color: '#0f172a' }}>
+                No leave applications found
+              </div>
               <div style={{ fontSize: '0.8rem', marginTop: 4 }}>
-                Click &ldquo;Apply for Leave&rdquo; above to submit a planned absence.
+                {statusFilter !== 'ALL'
+                  ? `No applications with status "${statusFilter}". Try selecting "ALL".`
+                  : 'Click "Apply for Leave" above to submit a planned leave.'}
               </div>
             </div>
           ) : (
@@ -787,33 +1091,49 @@ export const LeavesHolidays = () => {
                     <th style={{ padding: '10px 16px' }}>Duration</th>
                     <th style={{ padding: '10px 16px' }}>Reason</th>
                     <th style={{ padding: '10px 16px' }}>Status</th>
+                    <th style={{ padding: '10px 16px' }}>Remarks / Decision</th>
                     <th style={{ padding: '10px 16px', textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {myRequests.map((req) => {
-                    const fromStr = req.fromDate ? new Date(req.fromDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
-                    const toStr = req.toDate ? new Date(req.toDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+                  {filteredMyRequests.map((req) => {
+                    const fromStr = req.fromDate
+                      ? new Date(req.fromDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                      : '—';
+                    const toStr = req.toDate
+                      ? new Date(req.toDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                      : '—';
                     const days = req.numberOfDays ?? req.totalDays ?? 1;
                     const st = req.status || 'PENDING';
+                    const remark = req.approvalDecision?.remark || req.rejectionReason || req.remarks || '—';
 
                     return (
                       <tr key={req._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                         <td style={{ padding: '12px 16px' }}>
-                          <Badge variant="primary">{req.leaveType?.name || 'Leave Category'}</Badge>
+                          <Badge variant="primary">{req.leaveType?.name || 'Leave'}</Badge>
                         </td>
                         <td style={{ padding: '12px 16px', fontWeight: 600 }}>{fromStr}</td>
                         <td style={{ padding: '12px 16px', fontWeight: 600 }}>{toStr}</td>
                         <td style={{ padding: '12px 16px' }}>
-                          <span style={{ fontWeight: 700, color: '#0284c7' }}>{days} Day(s)</span>
+                          <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{days} Day(s)</span>
                         </td>
                         <td style={{ padding: '12px 16px', maxWidth: 220 }}>
                           <div style={{ fontSize: '0.78rem', color: '#334155' }}>{req.reason}</div>
                         </td>
                         <td style={{ padding: '12px 16px' }}>
-                          <Badge variant={st === 'APPROVED' ? 'success' : st === 'REJECTED' ? 'danger' : st === 'CANCELLED' ? 'secondary' : 'warning'}>
+                          <Badge
+                            variant={
+                              st === 'APPROVED' ? 'success'
+                              : st === 'REJECTED' ? 'danger'
+                              : st === 'CANCELLED' ? 'secondary'
+                              : 'warning'
+                            }
+                          >
                             {st}
                           </Badge>
+                        </td>
+                        <td style={{ padding: '12px 16px', color: '#64748b', fontSize: '0.78rem', maxWidth: 180 }}>
+                          {remark}
                         </td>
                         <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                           {st === 'PENDING' && (
@@ -821,8 +1141,9 @@ export const LeavesHolidays = () => {
                               variant="secondary"
                               size="sm"
                               icon={Ban}
-                              onClick={() => handleCancelLeave(req._id)}
+                              onClick={() => handleOpenCancelModal(req)}
                               style={{ color: '#dc2626' }}
+                              title="Withdraw this pending request"
                             >
                               Withdraw
                             </Button>
@@ -838,37 +1159,158 @@ export const LeavesHolidays = () => {
         </div>
       )}
 
-      {/* ================================================================== */}
-      {/* TAB 3: BALANCES & ACCRUAL */}
-      {/* ================================================================== */}
-      {activeTab === 'balances' && (
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* TAB 3A: MY BALANCES (FOR REGULAR EMPLOYEES)                          */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'my_balances' && !canApprove && (
+        <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 700, color: '#0f172a' }}>
+                My Personal Leave Entitlement &amp; Balances ({selectedYear})
+              </h3>
+              <p style={{ margin: '2px 0 0', fontSize: '0.76rem', color: '#64748b' }}>
+                Breakdown of allotted quotas, consumed leaves, and remaining balance
+              </p>
+            </div>
+            <Button variant="primary" size="sm" icon={Plus} onClick={() => setApplyModalOpen(true)}>
+              Apply for Leave
+            </Button>
+          </div>
+
+          {loadingMyBalance ? (
+            <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
+              <Clock size={24} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 8px' }} />
+              <div>Loading leave balances...</div>
+            </div>
+          ) : myBalances.length === 0 ? (
+            <div style={{ padding: 40, textAlign: 'center', color: '#64748b', background: '#f8fafc', borderRadius: 8, border: '1px dashed #cbd5e1' }}>
+              <ShieldCheck size={36} color="#94a3b8" style={{ margin: '0 auto 8px' }} />
+              <div style={{ fontWeight: 700, color: '#0f172a' }}>
+                Annual leave balance not yet initialized for {selectedYear}
+              </div>
+              <div style={{ fontSize: '0.8rem', marginTop: 4 }}>
+                When you submit your first leave application, your annual category quota will automatically be credited.
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+              {myBalances.map((b) => {
+                const typeName = b.leaveType?.name || 'Leave Category';
+                const typeCode = b.leaveType?.code || 'LV';
+                const entitled = b.entitledDays || 0;
+                const used = b.usedDays || 0;
+                const remaining = b.remainingDays != null ? b.remainingDays : entitled - used;
+                const carried = b.carriedForwardDays || 0;
+                const pct = entitled > 0 ? Math.min(100, Math.round((remaining / entitled) * 100)) : 0;
+
+                return (
+                  <div
+                    key={b._id}
+                    style={{
+                      background: '#f8fafc',
+                      borderRadius: 10,
+                      border: '1px solid #e2e8f0',
+                      padding: 16,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 12,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 700, fontSize: '0.92rem', color: '#0f172a' }}>{typeName}</span>
+                      <Badge variant="primary">{typeCode}</Badge>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                      <div>
+                        <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>ALLOTTED QUOTA</div>
+                        <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0f172a' }}>{entitled}d</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '0.72rem', color: '#dc2626', fontWeight: 600 }}>CONSUMED</div>
+                        <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#dc2626' }}>{used}d</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--logo-green, #8bc54a)', fontWeight: 600 }}>AVAILABLE</div>
+                        <div style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--logo-green, #8bc54a)' }}>{remaining}d</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '0.72rem', color: '#d97706', fontWeight: 600 }}>CARRIED OVER</div>
+                        <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#d97706' }}>{carried}d</div>
+                      </div>
+                    </div>
+
+                    {/* Progress Bar */}
+                    <div style={{ width: '100%', height: 6, background: '#e2e8f0', borderRadius: 3, overflow: 'hidden' }}>
+                      <div
+                        style={{
+                          width: `${pct}%`,
+                          height: '100%',
+                          background: remaining > 3 ? 'var(--logo-green, #8bc54a)' : remaining > 0 ? 'var(--logo-orange, #f5a532)' : '#dc2626',
+                          transition: 'width 0.3s',
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* TAB 3B: STAFF BALANCES & ACCRUAL (MANAGERS & HR)                     */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'balances' && canApprove && (
         <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', padding: 18, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, maxWidth: 440 }}>
-              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>Staff Member:</span>
-              <select
-                value={selectedBalanceEmpId}
-                onChange={(e) => {
-                  setSelectedBalanceEmpId(e.target.value);
-                  loadBalance(e.target.value);
-                }}
-                style={{ padding: '7px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', flex: 1 }}
-              >
-                {employees.map((emp) => {
-                  const name = emp.basicInfo?.fullName || emp.name || 'Staff Member';
-                  const code = emp.basicInfo?.employeeCode || emp.employeeCode || '';
-                  return (
-                    <option key={emp._id} value={emp._id}>{name} ({code})</option>
-                  );
-                })}
-              </select>
+          {/* Executive Employee Picker & Action Bar */}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 16,
+              background: '#f8fafc',
+              padding: '14px 18px',
+              borderRadius: 12,
+              border: '1px solid #e2e8f0',
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 260 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Layers size={18} color="var(--primary, #3f929a)" />
+                <span style={{ fontSize: '0.92rem', fontWeight: 700, color: '#0f172a' }}>
+                  Staff Leave Ledger & Quotas
+                </span>
+              </div>
+              <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                Select any employee to inspect live leave quotas, consumption, and entitlement
+              </span>
             </div>
 
-            {isManagerOrAdmin && (
-              <Button variant="primary" size="sm" icon={Plus} onClick={() => setAccrueModalOpen(true)}>
-                Accrue / Credit Leave Balance
-              </Button>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', flex: 1, justifyContent: 'flex-end' }}>
+              <div style={{ minWidth: 280, maxWidth: 420, flex: 1 }}>
+                <StaffPicker
+                  employees={employees}
+                  value={selectedBalanceEmpId}
+                  onChange={(empId) => {
+                    setSelectedBalanceEmpId(empId);
+                    loadBalance(empId);
+                    loadEmpRequests(empId);
+                  }}
+                  placeholder="Select staff member to inspect..."
+                />
+              </div>
+
+              {canManagePolicy && (
+                <Button variant="primary" size="md" icon={Plus} onClick={() => setAccrueModalOpen(true)}>
+                  Accrue / Credit Leave
+                </Button>
+              )}
+            </div>
           </div>
 
           {loadingBalance ? (
@@ -879,9 +1321,9 @@ export const LeavesHolidays = () => {
           ) : employeeBalances.length === 0 ? (
             <div style={{ padding: 40, textAlign: 'center', color: '#64748b', background: '#f8fafc', borderRadius: 8, border: '1px dashed #cbd5e1' }}>
               <ShieldCheck size={32} color="#94a3b8" style={{ margin: '0 auto 8px' }} />
-              <div style={{ fontWeight: 600 }}>No leave balance records found for {new Date().getFullYear()}</div>
+              <div style={{ fontWeight: 600 }}>No leave balance records found for selected employee ({selectedYear})</div>
               <div style={{ fontSize: '0.8rem', marginTop: 4 }}>
-                {isManagerOrAdmin ? 'Click "Accrue / Credit Leave Balance" above to initialize annual leave days for this employee.' : 'Contact HR Administration to credit your annual leave package.'}
+                Click &ldquo;Accrue / Credit Leave Balance&rdquo; above to initialize annual leave days for this staff member.
               </div>
             </div>
           ) : (
@@ -891,14 +1333,22 @@ export const LeavesHolidays = () => {
                 const typeCode = b.leaveType?.code || 'LV';
                 const entitled = b.entitledDays || 0;
                 const used = b.usedDays || 0;
-                const remaining = b.remainingDays != null ? b.remainingDays : (entitled - used);
+                const remaining = b.remainingDays != null ? b.remainingDays : entitled - used;
                 const carried = b.carriedForwardDays || 0;
 
                 return (
-                  <div key={b._id} style={{
-                    background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0',
-                    padding: 16, display: 'flex', flexDirection: 'column', gap: 10
-                  }}>
+                  <div
+                    key={b._id}
+                    style={{
+                      background: '#f8fafc',
+                      borderRadius: 8,
+                      border: '1px solid #e2e8f0',
+                      padding: 16,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 10,
+                    }}
+                  >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#0f172a' }}>{typeName}</span>
                       <Badge variant="primary">{typeCode}</Badge>
@@ -914,8 +1364,8 @@ export const LeavesHolidays = () => {
                         <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#dc2626' }}>{used}d</div>
                       </div>
                       <div>
-                        <div style={{ fontSize: '0.72rem', color: '#16a34a' }}>AVAILABLE</div>
-                        <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#16a34a' }}>{remaining}d</div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--logo-green, #8bc54a)' }}>AVAILABLE</div>
+                        <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--logo-green, #8bc54a)' }}>{remaining}d</div>
                       </div>
                       <div>
                         <div style={{ fontSize: '0.72rem', color: '#d97706' }}>CARRIED FORWARD</div>
@@ -927,48 +1377,157 @@ export const LeavesHolidays = () => {
               })}
             </div>
           )}
+
+          {/* Selected Staff Member Leave History */}
+          <div style={{ marginTop: 12, borderTop: '1px solid #e2e8f0', paddingTop: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 700, color: '#0f172a' }}>
+                  Employee Leave Request History
+                </h4>
+                <p style={{ margin: '2px 0 0', fontSize: '0.75rem', color: '#64748b' }}>
+                  Live application log and manager approvals for selected staff
+                </p>
+              </div>
+              <span style={{ fontSize: '0.76rem', color: '#64748b', fontWeight: 600 }}>
+                {employeeRequests.length} Application(s) Recorded
+              </span>
+            </div>
+
+            {loadingEmpRequests ? (
+              <div style={{ padding: 30, textAlign: 'center', color: '#64748b' }}>
+                <Clock size={20} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 6px' }} />
+                <div style={{ fontSize: '0.8rem' }}>Loading employee leave applications...</div>
+              </div>
+            ) : employeeRequests.length === 0 ? (
+              <div style={{ padding: 24, textAlign: 'center', color: '#64748b', background: '#f8fafc', borderRadius: 8, border: '1px dashed #cbd5e1' }}>
+                <FileText size={26} color="#94a3b8" style={{ margin: '0 auto 6px' }} />
+                <div style={{ fontWeight: 600, fontSize: '0.82rem' }}>No leave requests found for this staff member</div>
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', textAlign: 'left' }}>
+                      <th style={{ padding: '9px 14px' }}>Category</th>
+                      <th style={{ padding: '9px 14px' }}>Period</th>
+                      <th style={{ padding: '9px 14px' }}>Days</th>
+                      <th style={{ padding: '9px 14px' }}>Reason</th>
+                      <th style={{ padding: '9px 14px' }}>Status</th>
+                      <th style={{ padding: '9px 14px', textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {employeeRequests.map((req) => {
+                      const fromStr = req.fromDate
+                        ? new Date(req.fromDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+                        : '—';
+                      const toStr = req.toDate
+                        ? new Date(req.toDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                        : '—';
+                      const days = req.numberOfDays ?? req.totalDays ?? 1;
+                      const st = req.status || 'PENDING';
+
+                      return (
+                        <tr key={req._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '10px 14px' }}>
+                            <Badge variant="primary">{req.leaveType?.name || 'Leave'}</Badge>
+                          </td>
+                          <td style={{ padding: '10px 14px', fontWeight: 600 }}>{fromStr} &ndash; {toStr}</td>
+                          <td style={{ padding: '10px 14px' }}>
+                            <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{days} Day(s)</span>
+                          </td>
+                          <td style={{ padding: '10px 14px', maxWidth: 220 }}>
+                            <div style={{ fontSize: '0.76rem', color: '#334155' }}>{req.reason}</div>
+                          </td>
+                          <td style={{ padding: '10px 14px' }}>
+                            <Badge
+                              variant={
+                                st === 'APPROVED' ? 'success'
+                                : st === 'REJECTED' ? 'danger'
+                                : st === 'CANCELLED' ? 'secondary'
+                                : 'warning'
+                              }
+                            >
+                              {st}
+                            </Badge>
+                          </td>
+                          <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                            {st === 'PENDING' && canApprove && (
+                              <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                <Button
+                                  variant="success"
+                                  size="sm"
+                                  icon={Check}
+                                  loading={actingRequestId === req._id}
+                                  onClick={() => handleApproveLeave(req._id)}
+                                >
+                                  Approve
+                                </Button>
+                                <Button
+                                  variant="danger"
+                                  size="sm"
+                                  icon={X}
+                                  onClick={() => handleOpenRejectModal(req)}
+                                >
+                                  Reject
+                                </Button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {/* ================================================================== */}
-      {/* TAB 4: LEAVE TYPES CONFIGURATION */}
-      {/* ================================================================== */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* TAB 4: LEAVE POLICIES CONFIGURATION                                   */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'leave_types' && (
         <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-          <div style={{ padding: '14px 18px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+          <div
+            style={{
+              padding: '14px 18px',
+              borderBottom: '1px solid #e2e8f0',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 10,
+            }}
+          >
             <div>
-              <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>
-                Configured Organization Leave Categories
+              <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 700, color: '#0f172a' }}>
+                Organization Leave Categories &amp; Policy
               </h3>
               <p style={{ margin: '2px 0 0', fontSize: '0.76rem', color: '#64748b' }}>
-                Defines annual entitlement quotas, paid status, and rollover guidelines
+                Annual entitlement quotas, paid status, and rollover guidelines
               </p>
             </div>
-            {isManagerOrAdmin && (
-              <div style={{ display: 'flex', gap: 8 }}>
-                {leaveTypes.length === 0 && (
-                  <Button variant="secondary" size="sm" loading={submittingType} onClick={handleInitDefaultCategories}>
-                    Initialize Standard Categories
-                  </Button>
-                )}
-                <Button variant="primary" size="sm" icon={Plus} onClick={() => setTypeModalOpen(true)}>
-                  New Category
-                </Button>
-              </div>
+            {canManagePolicy && (
+              <Button variant="primary" size="sm" icon={Plus} onClick={() => setTypeModalOpen(true)}>
+                New Category
+              </Button>
             )}
           </div>
 
           {loadingTypes ? (
             <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
               <Clock size={24} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 8px' }} />
-              <div>Loading configured leave types...</div>
+              <div>Loading configured leave categories...</div>
             </div>
           ) : leaveTypes.length === 0 ? (
             <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
               <AlertCircle size={32} color="#94a3b8" style={{ margin: '0 auto 8px' }} />
-              <div style={{ fontWeight: 600 }}>No leave categories configured in database</div>
+              <div style={{ fontWeight: 600 }}>No leave categories configured</div>
               <div style={{ fontSize: '0.8rem', marginTop: 4 }}>
-                Click &ldquo;Initialize Standard Categories&rdquo; to populate Casual, Sick, and Paid leave categories.
+                {canManagePolicy ? 'Click "New Category" above to configure your leave types.' : 'Contact HR Admin.'}
               </div>
             </div>
           ) : (
@@ -979,9 +1538,10 @@ export const LeavesHolidays = () => {
                     <th style={{ padding: '10px 16px' }}>Category Name</th>
                     <th style={{ padding: '10px 16px' }}>Code</th>
                     <th style={{ padding: '10px 16px' }}>Annual Quota</th>
-                    <th style={{ padding: '10px 16px' }}>Paid / Unpaid</th>
+                    <th style={{ padding: '10px 16px' }}>Paid Status</th>
                     <th style={{ padding: '10px 16px' }}>Carry-Forward</th>
                     <th style={{ padding: '10px 16px' }}>Status</th>
+                    {canManagePolicy && <th style={{ padding: '10px 16px', textAlign: 'right' }}>Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -1005,8 +1565,17 @@ export const LeavesHolidays = () => {
                         {t.carryForwardAllowed ? `Allowed (Max ${t.maxCarryForwardDays || 0}d)` : 'Not Allowed'}
                       </td>
                       <td style={{ padding: '12px 16px' }}>
-                        <Badge variant="success">ACTIVE</Badge>
+                        <Badge variant={t.isActive === false ? 'danger' : 'success'}>
+                          {t.isActive === false ? 'INACTIVE' : 'ACTIVE'}
+                        </Badge>
                       </td>
+                      {canManagePolicy && (
+                        <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                          <Button variant="secondary" size="sm" icon={Edit2} onClick={() => handleOpenEditType(t)}>
+                            Edit
+                          </Button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -1016,91 +1585,9 @@ export const LeavesHolidays = () => {
         </div>
       )}
 
-      {/* ================================================================== */}
-      {/* TAB 5: HOLIDAY CALENDAR */}
-      {/* ================================================================== */}
-      {activeTab === 'holidays' && (
-        <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-          <div style={{ padding: '14px 18px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-            <div>
-              <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>
-                Corporate Holiday Calendar
-              </h3>
-              <p style={{ margin: '2px 0 0', fontSize: '0.76rem', color: '#64748b' }}>
-                Mandatory gazetted and optional company holidays automatically excluded from work shortfall
-              </p>
-            </div>
-            {isManagerOrAdmin && (
-              <Button variant="primary" size="sm" icon={Plus} onClick={() => setHolidayModalOpen(true)}>
-                Add Holiday
-              </Button>
-            )}
-          </div>
-
-          {loadingHolidays ? (
-            <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
-              <Clock size={24} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 8px' }} />
-              <div>Loading holiday calendar...</div>
-            </div>
-          ) : holidays.length === 0 ? (
-            <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
-              <CalendarOff size={32} color="#94a3b8" style={{ margin: '0 auto 8px' }} />
-              <div style={{ fontWeight: 600 }}>No holidays registered yet</div>
-              <div style={{ fontSize: '0.8rem', marginTop: 4 }}>
-                Click &ldquo;Add Holiday&rdquo; to register public or festival holidays.
-              </div>
-            </div>
-          ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
-                <thead>
-                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', textAlign: 'left' }}>
-                    <th style={{ padding: '10px 16px' }}>Holiday Name</th>
-                    <th style={{ padding: '10px 16px' }}>Date</th>
-                    <th style={{ padding: '10px 16px' }}>Type</th>
-                    <th style={{ padding: '10px 16px' }}>Classification</th>
-                    <th style={{ padding: '10px 16px', textAlign: 'right' }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {holidays.map((h) => {
-                    const dateStr = h.date ? new Date(h.date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '—';
-
-                    return (
-                      <tr key={h._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td style={{ padding: '12px 16px', fontWeight: 600, color: '#0f172a' }}>{h.name}</td>
-                        <td style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--primary)' }}>{dateStr}</td>
-                        <td style={{ padding: '12px 16px' }}>
-                          <Badge variant="neutral">{h.type || 'FESTIVAL'}</Badge>
-                        </td>
-                        <td style={{ padding: '12px 16px' }}>
-                          <Badge variant={h.isOptional ? 'warning' : 'success'}>
-                            {h.isOptional ? 'OPTIONAL' : 'MANDATORY'}
-                          </Badge>
-                        </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                          {isManagerOrAdmin && (
-                            <Button
-                              variant="danger"
-                              size="sm"
-                              icon={Trash2}
-                              onClick={() => handleDeleteHoliday(h._id)}
-                            />
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ================================================================== */}
-      {/* 4. MODAL: APPLY FOR LEAVE (POST /leave/requests) */}
-      {/* ================================================================== */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* MODAL 1: APPLY FOR LEAVE                                             */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
       {applyModalOpen && (
         <Modal
           isOpen={true}
@@ -1108,64 +1595,120 @@ export const LeavesHolidays = () => {
           title="Apply for Leave"
           maxWidth="500px"
         >
-          <form onSubmit={handleApplyLeave} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <form onSubmit={handleApplyLeave} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div>
-              <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Leave Category *</label>
+              <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                Leave Category *
+              </label>
               <select
                 value={leaveForm.leaveType}
                 onChange={(e) => setLeaveForm({ ...leaveForm, leaveType: e.target.value })}
                 required
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem' }}
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  borderRadius: 10,
+                  border: '1px solid #cbd5e1',
+                  fontSize: '0.84rem',
+                  background: '#ffffff',
+                  color: '#0f172a',
+                  outline: 'none',
+                  appearance: 'none',
+                  backgroundImage: `url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e")`,
+                  backgroundRepeat: 'no-repeat',
+                  backgroundPosition: 'right 12px center',
+                  backgroundSize: '16px',
+                  paddingRight: '36px',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+                }}
               >
-                {leaveTypes.map((t) => (
-                  <option key={t._id} value={t._id}>
-                    {t.name} ({t.code}) &bull; {t.annualEntitlement || 12}d/yr
-                  </option>
-                ))}
+                {leaveTypes
+                  .filter((t) => t.isActive !== false)
+                  .map((t) => (
+                    <option key={t._id} value={t._id}>
+                      {t.name} ({t.code}) &bull; {t.annualEntitlement || 12} days/year
+                    </option>
+                  ))}
               </select>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>From Date *</label>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                  From Date *
+                </label>
                 <input
                   type="date"
                   value={leaveForm.fromDate}
                   onChange={(e) => setLeaveForm({ ...leaveForm, fromDate: e.target.value })}
                   required
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
                 />
               </div>
 
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>To Date *</label>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                  To Date *
+                </label>
                 <input
                   type="date"
                   value={leaveForm.toDate}
                   onChange={(e) => setLeaveForm({ ...leaveForm, toDate: e.target.value })}
                   required
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
                 />
               </div>
             </div>
 
+            {/* Calculated Days Banner */}
+            <div
+              style={{
+                background: 'var(--primary-light, #edf7f8)',
+                border: '1px solid var(--primary-border, #b1dce1)',
+                padding: '10px 14px',
+                borderRadius: 8,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <span style={{ fontSize: '0.8rem', color: '#334155', fontWeight: 500 }}>
+                Total Leave Duration:
+              </span>
+              <span style={{ fontSize: '0.92rem', fontWeight: 800, color: 'var(--primary, #3f929a)' }}>
+                {calculatedDays} {calculatedDays === 1 ? 'Day' : 'Days'}
+              </span>
+            </div>
+
             <div>
-              <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Reason for Leave *</label>
+              <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                Reason for Leave *
+              </label>
               <textarea
                 rows={3}
-                placeholder="Provide clear rationale for planned leave"
+                placeholder="Explain the reason for your planned absence (e.g. Personal travel, health checkup, family wedding)"
                 value={leaveForm.reason}
                 onChange={(e) => setLeaveForm({ ...leaveForm, reason: e.target.value })}
                 required
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.84rem', boxSizing: 'border-box', resize: 'vertical' }}
               />
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
               <Button variant="secondary" onClick={() => setApplyModalOpen(false)}>
                 Cancel
               </Button>
-              <Button variant="primary" type="submit" loading={submittingApply}>
+              <Button
+                variant="primary"
+                type="submit"
+                loading={submittingApply}
+                style={{
+                  background: 'var(--primary)',
+                  borderColor: 'var(--primary)',
+                  color: '#fff',
+                  fontWeight: 700,
+                }}
+              >
                 Submit Application
               </Button>
             </div>
@@ -1173,73 +1716,169 @@ export const LeavesHolidays = () => {
         </Modal>
       )}
 
-      {/* ================================================================== */}
-      {/* 5. MODAL: ACCRUE LEAVE BALANCE (POST /leave/balances/accrue) */}
-      {/* ================================================================== */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* MODAL 2: REJECT LEAVE APPLICATION (WITH MANDATORY REMARK)            */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {rejectionModalOpen && rejectingRequest && (
+        <Modal
+          isOpen={true}
+          onClose={() => setRejectionModalOpen(false)}
+          title="Reject Leave Application"
+          maxWidth="460px"
+        >
+          <form onSubmit={handleSubmitReject} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', padding: '10px 14px', borderRadius: 8, display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <AlertTriangle size={18} color="#dc2626" style={{ marginTop: 2, flexShrink: 0 }} />
+              <div style={{ fontSize: '0.8rem', color: '#991b1b' }}>
+                You are rejecting the leave request from{' '}
+                <strong>{rejectingRequest.employee?.basicInfo?.fullName || rejectingRequest.employee?.name || 'Staff Member'}</strong>{' '}
+                ({rejectingRequest.numberOfDays || 1} days).
+              </div>
+            </div>
+
+            <div>
+              <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                Rejection Remark / Reason *
+              </label>
+              <textarea
+                rows={3}
+                placeholder="Explain why this leave application is being rejected..."
+                value={rejectionRemark}
+                onChange={(e) => setRejectionRemark(e.target.value)}
+                required
+                style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.84rem', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <Button variant="secondary" onClick={() => setRejectionModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="danger" type="submit" loading={submittingReject}>
+                Confirm Rejection
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* MODAL 3: WITHDRAW / CANCEL LEAVE APPLICATION                         */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {cancelModalOpen && cancellingRequest && (
+        <Modal
+          isOpen={true}
+          onClose={() => setCancelModalOpen(false)}
+          title="Withdraw Leave Application"
+          maxWidth="420px"
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              <div style={{ padding: 10, borderRadius: '50%', background: '#fee2e2', color: '#dc2626' }}>
+                <Ban size={22} />
+              </div>
+              <div style={{ fontSize: '0.88rem', color: '#0f172a' }}>
+                Are you sure you want to withdraw your pending leave application for{' '}
+                <strong>{cancellingRequest.leaveType?.name || 'Leave'}</strong> ({cancellingRequest.numberOfDays || 1} days)?
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+              <Button variant="secondary" onClick={() => setCancelModalOpen(false)}>
+                Keep Application
+              </Button>
+              <Button variant="danger" onClick={handleConfirmCancel} loading={submittingCancel}>
+                Withdraw Application
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* MODAL 4: ACCRUE LEAVE BALANCE                                        */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
       {accrueModalOpen && (
         <Modal
           isOpen={true}
           onClose={() => setAccrueModalOpen(false)}
-          title="Accrue / Credit Leave Balance"
+          title="Credit / Accrue Leave Quota"
           maxWidth="480px"
         >
-          <form onSubmit={handleAccrueBalance} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <form onSubmit={handleAccrueBalance} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div>
-              <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Select Staff Member *</label>
-              <select
-                value={accrueForm.employeeId}
-                onChange={(e) => setAccrueForm({ ...accrueForm, employeeId: e.target.value })}
+              <StaffPicker
+                label="Select Staff Member"
                 required
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem' }}
-              >
-                {employees.map((emp) => (
-                  <option key={emp._id} value={emp._id}>
-                    {emp.basicInfo?.fullName || emp.name} ({emp.basicInfo?.employeeCode || emp.employeeCode})
-                  </option>
-                ))}
-              </select>
+                employees={employees}
+                value={accrueForm.employeeId}
+                onChange={(empId) => setAccrueForm((prev) => ({ ...prev, employeeId: empId }))}
+                placeholder="Choose staff member to credit..."
+              />
             </div>
 
             <div>
-              <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Leave Category *</label>
+              <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                Leave Category *
+              </label>
               <select
                 value={accrueForm.leaveType}
                 onChange={(e) => setAccrueForm({ ...accrueForm, leaveType: e.target.value })}
                 required
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem' }}
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  borderRadius: 10,
+                  border: '1px solid #cbd5e1',
+                  fontSize: '0.84rem',
+                  background: '#ffffff',
+                  color: '#0f172a',
+                  outline: 'none',
+                  appearance: 'none',
+                  backgroundImage: `url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e")`,
+                  backgroundRepeat: 'no-repeat',
+                  backgroundPosition: 'right 12px center',
+                  backgroundSize: '16px',
+                  paddingRight: '36px',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+                }}
               >
                 {leaveTypes.map((t) => (
                   <option key={t._id} value={t._id}>
-                    {t.name} ({t.code})
+                    {t.name} ({t.code}) &bull; Standard: {t.annualEntitlement || 12}d
                   </option>
                 ))}
               </select>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Entitled Days *</label>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                  Entitled Days *
+                </label>
                 <input
                   type="number"
                   value={accrueForm.entitledDays}
                   onChange={(e) => setAccrueForm({ ...accrueForm, entitledDays: Number(e.target.value) })}
                   required
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
                 />
               </div>
 
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Carried Forward</label>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                  Carried Forward Days
+                </label>
                 <input
                   type="number"
                   value={accrueForm.carriedForwardDays}
                   onChange={(e) => setAccrueForm({ ...accrueForm, carriedForwardDays: Number(e.target.value) })}
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
                 />
               </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
               <Button variant="secondary" onClick={() => setAccrueModalOpen(false)}>
                 Cancel
               </Button>
@@ -1251,9 +1890,9 @@ export const LeavesHolidays = () => {
         </Modal>
       )}
 
-      {/* ================================================================== */}
-      {/* 6. MODAL: ADD LEAVE TYPE (POST /leave-types) */}
-      {/* ================================================================== */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* MODAL 5: CREATE LEAVE CATEGORY                                       */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
       {typeModalOpen && (
         <Modal
           isOpen={true}
@@ -1261,45 +1900,51 @@ export const LeavesHolidays = () => {
           title="Create New Leave Category"
           maxWidth="480px"
         >
-          <form onSubmit={handleCreateLeaveType} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <form onSubmit={handleCreateLeaveType} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div>
-              <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Category Name *</label>
+              <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                Category Name *
+              </label>
               <input
                 type="text"
-                placeholder="e.g. Bereavement Leave, Marriage Leave"
+                placeholder="e.g. Paternity Leave, Marriage Leave"
                 value={newTypeForm.name}
                 onChange={(e) => setNewTypeForm({ ...newTypeForm, name: e.target.value })}
                 required
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
               />
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Code *</label>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                  Code *
+                </label>
                 <input
                   type="text"
-                  placeholder="e.g. BL"
+                  placeholder="e.g. ML"
                   value={newTypeForm.code}
                   onChange={(e) => setNewTypeForm({ ...newTypeForm, code: e.target.value })}
                   required
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
                 />
               </div>
 
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Annual Entitlement *</label>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                  Annual Quota (Days) *
+                </label>
                 <input
                   type="number"
                   value={newTypeForm.annualEntitlement}
                   onChange={(e) => setNewTypeForm({ ...newTypeForm, annualEntitlement: Number(e.target.value) })}
                   required
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
                 />
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginTop: 4 }}>
+            <div style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
               <label style={{ fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                 <input
                   type="checkbox"
@@ -1319,7 +1964,7 @@ export const LeavesHolidays = () => {
               </label>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
               <Button variant="secondary" onClick={() => setTypeModalOpen(false)}>
                 Cancel
               </Button>
@@ -1331,63 +1976,107 @@ export const LeavesHolidays = () => {
         </Modal>
       )}
 
-      {/* ================================================================== */}
-      {/* 7. MODAL: ADD HOLIDAY (POST /holidays) */}
-      {/* ================================================================== */}
-      {holidayModalOpen && (
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* MODAL 6: EDIT LEAVE CATEGORY                                         */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {editTypeModalOpen && (
         <Modal
           isOpen={true}
-          onClose={() => setHolidayModalOpen(false)}
-          title="Add Holiday to Calendar"
-          maxWidth="460px"
+          onClose={() => {
+            setEditTypeModalOpen(false);
+            setEditingType(null);
+          }}
+          title={`Edit Leave Category: ${editingType?.name || ''}`}
+          maxWidth="480px"
         >
-          <form onSubmit={handleCreateHoliday} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <form onSubmit={handleUpdateLeaveType} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div>
-              <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Holiday Name *</label>
+              <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                Category Name *
+              </label>
               <input
                 type="text"
-                placeholder="e.g. Diwali, Republic Day"
-                value={holidayForm.name}
-                onChange={(e) => setHolidayForm({ ...holidayForm, name: e.target.value })}
+                value={editTypeForm.name}
+                onChange={(e) => setEditTypeForm({ ...editTypeForm, name: e.target.value })}
                 required
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
               />
             </div>
 
-            <div>
-              <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Date *</label>
-              <input
-                type="date"
-                value={holidayForm.date}
-                onChange={(e) => setHolidayForm({ ...holidayForm, date: e.target.value })}
-                required
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
-              />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                  Code *
+                </label>
+                <input
+                  type="text"
+                  value={editTypeForm.code}
+                  onChange={(e) => setEditTypeForm({ ...editTypeForm, code: e.target.value })}
+                  required
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                  Annual Quota (Days) *
+                </label>
+                <input
+                  type="number"
+                  value={editTypeForm.annualEntitlement}
+                  onChange={(e) => setEditTypeForm({ ...editTypeForm, annualEntitlement: Number(e.target.value) })}
+                  required
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                />
+              </div>
             </div>
 
-            <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
               <label style={{ fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                 <input
                   type="checkbox"
-                  checked={holidayForm.isOptional}
-                  onChange={(e) => setHolidayForm({ ...holidayForm, isOptional: e.target.checked })}
+                  checked={editTypeForm.isPaid}
+                  onChange={(e) => setEditTypeForm({ ...editTypeForm, isPaid: e.target.checked })}
                 />
-                Optional / Floating Holiday
+                Paid Leave
+              </label>
+
+              <label style={{ fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={editTypeForm.carryForwardAllowed}
+                  onChange={(e) => setEditTypeForm({ ...editTypeForm, carryForwardAllowed: e.target.checked })}
+                />
+                Carry-Forward Allowed
+              </label>
+
+              <label style={{ fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={editTypeForm.isActive}
+                  onChange={(e) => setEditTypeForm({ ...editTypeForm, isActive: e.target.checked })}
+                />
+                Status Active
               </label>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-              <Button variant="secondary" onClick={() => setHolidayModalOpen(false)}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setEditTypeModalOpen(false);
+                  setEditingType(null);
+                }}
+              >
                 Cancel
               </Button>
-              <Button variant="primary" type="submit" loading={submittingHoliday}>
-                Save Holiday
+              <Button variant="primary" type="submit" loading={submittingType}>
+                Save Changes
               </Button>
             </div>
           </form>
         </Modal>
       )}
-
     </div>
   );
 };

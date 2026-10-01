@@ -35,7 +35,8 @@ export const extractApiData = (res, ...fallbackKeys) => {
     'items', 'docs', 'list', 'records', 'results', 'rows',
     'projects', 'tasks', 'holidays', 'leaveTypes', 'leaveRequests', 'pendingRequests',
     'assets', 'claims', 'employees', 'users', 'companies', 'branches', 'departments',
-    'designations', 'roles', 'candidates', 'runs', 'payslips', 'configs'
+    'designations', 'roles', 'candidates', 'jobOpenings', 'jobs', 'templates', 'letterTemplates',
+    'runs', 'payrollRuns', 'lineItems', 'payslips', 'payments', 'salaryPayments', 'structures', 'salaryStructures', 'configs', 'decisions', 'approvalTiers'
   ];
   if (res?.data && typeof res.data === 'object') {
     for (const ck of commonKeys) {

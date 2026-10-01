@@ -18,6 +18,8 @@ import {
   LogIn,
   LogOut,
   AlertTriangle,
+  AlertCircle,
+  MapPin,
   XCircle,
   Loader2,
   Camera,
@@ -105,7 +107,7 @@ export const Dashboard = () => {
   const initialLoadedRef = useRef(false);
   const lastFetchTimeRef = useRef(0);
 
-  // Work Type detection (OFFICE vs FIELD)
+  // Work Type detection (OFFICE vs FIELD vs HYBRID)
   const userWorkType = useMemo(() => {
     const raw = String(
       user?.employee?.employmentInfo?.workType ||
@@ -114,11 +116,14 @@ export const Dashboard = () => {
       user?.workType ||
       ''
     ).toUpperCase();
+    if (raw.includes('HYBRID')) return 'HYBRID';
     if (raw.includes('FIELD') || raw.includes('SITE')) return 'FIELD';
     return 'OFFICE';
   }, [user]);
 
-  const isFieldStaffUser = userWorkType === 'FIELD';
+  const isHybridUser = userWorkType === 'HYBRID';
+  const [hybridPunchMode, setHybridPunchMode] = useState('OFFICE'); // 'OFFICE' | 'FIELD'
+  const isFieldStaffUser = userWorkType === 'FIELD' || (isHybridUser && hybridPunchMode === 'FIELD');
 
   // Auto-capture GPS location on mount
   useEffect(() => {
@@ -216,7 +221,7 @@ export const Dashboard = () => {
               : attendanceApi.getMyOfficeAttendance({ date: todayStr }).catch(() => [])
             : Promise.resolve([]),
           canAccessModule('leaves')
-            ? isOrgAdmin
+            ? (isSuperAdmin || isDirector || isHrAdmin)
               ? leaveHolidayApi.getPendingLeaveApprovals().catch(() => leaveHolidayApi.getMyLeaves().catch(() => []))
               : leaveHolidayApi.getMyLeaves().catch(() => [])
             : Promise.resolve([]),
@@ -232,13 +237,13 @@ export const Dashboard = () => {
         const todayAttList = extractApiData(attDataVal, 'attendance', 'records', 'sessions');
 
         const leaveDataVal = leaveRes.status === 'fulfilled' ? leaveRes.value : {};
-        const leavesList = extractApiData(leaveDataVal, 'leaves', 'leaveRequests');
+        const leavesList = extractApiData(leaveDataVal, 'leaves', 'leaveRequests', 'pendingRequests', 'requests');
 
         setStats((prev) => ({
           ...prev,
           employees: totalEmps,
           todayAttendance: todayAttList.length,
-          pendingLeaves: leavesList.length,
+          pendingLeaves: leaveDataVal?.count ?? leavesList.length,
         }));
 
         if (canAccessModule('employees')) {
@@ -550,18 +555,18 @@ export const Dashboard = () => {
       if (isFieldStaffUser) {
         if (punchMode === 'CHECK_IN') {
           await attendanceApi.fieldCheckIn(checkInPayload);
-          showToast('✓ Site-In successfully recorded! Face & GPS location verified.', 'success');
+          showToast('Site-In successfully recorded! Face & GPS location verified.', 'success');
         } else {
           await attendanceApi.fieldCheckOut(checkOutPayload);
-          showToast('✓ Site-Out successfully recorded! Face & GPS location verified.', 'success');
+          showToast('Site-Out successfully recorded! Face & GPS location verified.', 'success');
         }
       } else {
         if (punchMode === 'CHECK_IN') {
           await attendanceApi.officeCheckIn(checkInPayload);
-          showToast('✓ Office Check-In successfully recorded! Face & location verified.', 'success');
+          showToast('Office Check-In successfully recorded! Face & location verified.', 'success');
         } else {
           await attendanceApi.officeCheckOut(checkOutPayload);
-          showToast('✓ Office Check-Out successfully recorded! Face & location verified.', 'success');
+          showToast('Office Check-Out successfully recorded! Face & location verified.', 'success');
         }
       }
 
@@ -650,11 +655,11 @@ export const Dashboard = () => {
 
   if (canAccessModule('leaves')) {
     statCards.push({
-      title: isEmployee && !isSuperAdmin && !isHrAdmin && !isBranchManager ? 'Leave Requests' : 'Pending Leave Requests',
+      title: isEmployee && !isSuperAdmin && !isHrAdmin && !isBranchManager ? 'My Leave Requests' : 'Pending Leave Approvals',
       value: stats.pendingLeaves,
       icon: CalendarOff,
-      color: '#d97706',
-      bg: 'rgba(217, 119, 6, 0.1)',
+      color: 'var(--logo-orange, #f5a532)',
+      bg: 'rgba(245, 165, 50, 0.12)',
       link: '/leaves',
     });
   }
@@ -664,8 +669,8 @@ export const Dashboard = () => {
       title: 'Open Job Vacancies',
       value: stats.openJobs,
       icon: Briefcase,
-      color: '#2563eb',
-      bg: 'rgba(37, 99, 235, 0.1)',
+      color: 'var(--primary, #3f929a)',
+      bg: 'rgba(63, 146, 154, 0.1)',
       link: '/recruitment/jobs',
     });
   }
@@ -686,8 +691,8 @@ export const Dashboard = () => {
       title: 'Assets & Custody',
       value: stats.assets || 'Active',
       icon: Shield,
-      color: '#0284c7',
-      bg: 'rgba(2, 132, 199, 0.1)',
+      color: 'var(--logo-orange, #f5a532)',
+      bg: 'rgba(245, 165, 50, 0.1)',
       link: '/assets-claims',
     });
   }
@@ -807,7 +812,7 @@ export const Dashboard = () => {
       label: 'Site Activity Logs',
       link: '/operations/site-logs',
       icon: FileText,
-      color: '#0284c7',
+      color: 'var(--primary, #3f929a)',
       canAccess: canAccessModule('site-logs'),
     },
     {
@@ -821,7 +826,7 @@ export const Dashboard = () => {
       label: 'Assets & Loans',
       link: '/assets-claims',
       icon: Shield,
-      color: '#0284c7',
+      color: 'var(--logo-orange, #f5a532)',
       canAccess: canAccessModule('assets-claims') || canAccessModule('assets'),
     },
     {
@@ -916,9 +921,13 @@ export const Dashboard = () => {
         const rawOutTime = myTodayAttendance?.lastCheckOutTime || myTodayAttendance?.checkOutTime;
         const todayCheckOutTimeStr = rawOutTime ? new Date(rawOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
 
-        const checkInTitle = isFieldStaffUser ? 'Site-In' : 'Office Check-In';
-        const checkOutTitle = isFieldStaffUser ? 'Site-Out' : 'Office Check-Out';
-        const cardTitle = isFieldStaffUser ? 'Daily Site Attendance (Field Staff)' : 'Daily Office Attendance';
+        const checkInTitle = isFieldStaffUser ? 'Field Check-In' : 'Office Check-In';
+        const checkOutTitle = isFieldStaffUser ? 'Field Check-Out' : 'Office Check-Out';
+        const cardTitle = isHybridUser
+          ? `Daily Attendance (Hybrid: ${hybridPunchMode === 'FIELD' ? 'Field Staff' : 'Office'})`
+          : isFieldStaffUser
+          ? 'Daily Field Staff Attendance'
+          : 'Daily Office Attendance';
 
         return (
           <div
@@ -946,11 +955,11 @@ export const Dashboard = () => {
                   width: 48,
                   height: 48,
                   borderRadius: '50%',
-                  backgroundColor: isCheckedIn ? '#dcfce7' : isCheckedOut ? '#dbeafe' : '#fef3c7',
+                  backgroundColor: isCheckedIn ? '#dcfce7' : isCheckedOut ? 'var(--primary-light, #edf7f8)' : '#fef3c7',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: isCheckedIn ? '#16a34a' : isCheckedOut ? '#2563eb' : '#d97706',
+                  color: isCheckedIn ? '#16a34a' : isCheckedOut ? 'var(--primary, #3f929a)' : '#d97706',
                   flexShrink: 0,
                 }}
               >
@@ -962,27 +971,43 @@ export const Dashboard = () => {
                     {cardTitle}
                   </span>
                   <Badge variant={isCheckedIn ? 'success' : isCheckedOut ? 'primary' : 'warning'}>
-                    {isCheckedIn
-                      ? `✓ On Duty • ${checkInTitle} Recorded`
-                      : isCheckedOut
-                      ? `✓ Shift Completed • ${checkOutTitle} Recorded`
-                      : '⚠️ Not Checked In Today'}
+                    {isCheckedIn ? (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <CheckCircle2 size={12} /> On Duty • {checkInTitle} Recorded
+                      </span>
+                    ) : isCheckedOut ? (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <CheckCircle2 size={12} /> Shift Completed • {checkOutTitle} Recorded
+                      </span>
+                    ) : (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <AlertCircle size={12} /> Not Checked In Today
+                      </span>
+                    )}
                   </Badge>
                   {myFaceStatus && (
                     <Badge variant={myFaceStatus.isEnrolled ? 'success' : 'danger'}>
-                      {myFaceStatus.isEnrolled ? 'Face Registered' : '⚠️ Face Not Registered by Admin'}
+                      {myFaceStatus.isEnrolled ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <CheckCircle2 size={12} /> Face Registered
+                        </span>
+                      ) : (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <AlertTriangle size={12} /> Face Not Registered
+                        </span>
+                      )}
                     </Badge>
                   )}
                   {coords && (
-                    <span style={{ fontSize: '0.74rem', background: '#f1f5f9', color: '#475569', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>
-                      📍 GPS Active ({coords.latitude.toFixed(3)}°, {coords.longitude.toFixed(3)}°)
+                    <span style={{ fontSize: '0.74rem', background: '#f1f5f9', color: '#475569', padding: '2px 8px', borderRadius: 6, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <MapPin size={12} color="#0d9488" /> GPS Active ({coords.latitude.toFixed(3)}°, {coords.longitude.toFixed(3)}°)
                     </span>
                   )}
                 </div>
                 <div style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginTop: 3 }}>
                   {!myFaceStatus?.isEnrolled ? (
-                    <span style={{ color: '#b91c1c', fontWeight: 600 }}>
-                      ⚠️ Face registration required: Super Admin must register your face photograph before you can check in.
+                    <span style={{ color: '#b91c1c', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <AlertCircle size={13} /> Face registration required: Super Admin must register your face photograph before you can check in.
                     </span>
                   ) : isCheckedIn ? (
                     <span>
@@ -1000,6 +1025,50 @@ export const Dashboard = () => {
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              {isHybridUser && (
+                <div style={{ display: 'inline-flex', background: '#e2e8f0', borderRadius: 6, padding: 2 }}>
+                  <button
+                    type="button"
+                    onClick={() => setHybridPunchMode('OFFICE')}
+                    style={{
+                      border: 'none',
+                      borderRadius: 5,
+                      padding: '5px 10px',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      background: hybridPunchMode === 'OFFICE' ? 'var(--primary)' : 'transparent',
+                      color: hybridPunchMode === 'OFFICE' ? '#ffffff' : '#64748b',
+                      transition: 'all 0.15s ease',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    <Building2 size={12} /> Office
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHybridPunchMode('FIELD')}
+                    style={{
+                      border: 'none',
+                      borderRadius: 5,
+                      padding: '5px 10px',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      background: hybridPunchMode === 'FIELD' ? 'var(--primary)' : 'transparent',
+                      color: hybridPunchMode === 'FIELD' ? '#ffffff' : '#64748b',
+                      transition: 'all 0.15s ease',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    <MapPin size={12} /> Field
+                  </button>
+                </div>
+              )}
               {/* Check-In / Check-Out Dynamic Primary Button */}
               {!isCheckedIn && !isCheckedOut ? (
                 <button
@@ -1014,7 +1083,7 @@ export const Dashboard = () => {
                     fontWeight: 600,
                     fontSize: '0.88rem',
                     borderRadius: 8,
-                    boxShadow: '0 2px 8px rgba(13, 148, 136, 0.25)',
+                    boxShadow: '0 2px 8px rgba(63, 146, 154, 0.25)',
                   }}
                 >
                   <LogIn size={16} /> {checkInTitle} (Face Match)
@@ -1459,9 +1528,17 @@ export const Dashboard = () => {
                     <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> Checking enrollment...
                   </span>
                 ) : myFaceStatus?.isEnrolled ? (
-                  <Badge variant="success">✓ Face Enrolled &amp; Ready</Badge>
+                  <Badge variant="success">
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <CheckCircle2 size={12} /> Face Enrolled &amp; Ready
+                    </span>
+                  </Badge>
                 ) : (
-                  <Badge variant="danger">⚠️ Face Not Enrolled</Badge>
+                  <Badge variant="danger">
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <AlertTriangle size={12} /> Face Not Enrolled
+                    </span>
+                  </Badge>
                 )}
               </div>
             </div>

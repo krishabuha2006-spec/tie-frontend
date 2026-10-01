@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import masterApi from '../../api/masterApi';
 import geoApi from '../../api/geoApi';
 import { useToast } from '../../context/ToastContext';
 import { validateEmail, validatePhone } from '../../utils/validation';
-import { Plus, Edit2, Trash2, MapPin, Compass } from 'lucide-react';
+import { Plus, Edit2, Trash2, MapPin, Compass, Search, CheckCircle, ShieldCheck, X } from 'lucide-react';
 import Table from '../../components/common/Table';
 import Modal from '../../components/common/Modal';
 import Button from '../../components/common/Button';
@@ -19,6 +19,9 @@ export const Branches = () => {
   const [branches, setBranches] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [companyFilter, setCompanyFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingBranch, setEditingBranch] = useState(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -64,6 +67,40 @@ export const Branches = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  // Quick Stats
+  const stats = useMemo(() => {
+    const total = branches.length;
+    const active = branches.filter((b) => b.isActive !== false).length;
+    const geoFenced = branches.filter((b) => {
+      const gf = b.geoFence;
+      const lat = gf?.latitude || b.latitude;
+      const lon = gf?.longitude || b.longitude;
+      return Boolean(lat && lon);
+    }).length;
+    return { total, active, geoFenced };
+  }, [branches]);
+
+  // Client-Filtered Branches
+  const filteredBranches = useMemo(() => {
+    return branches.filter((b) => {
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        const matchesName = b.name?.toLowerCase().includes(q);
+        const matchesCode = b.code?.toLowerCase().includes(q);
+        const matchesEmail = b.email?.toLowerCase().includes(q);
+        const matchesCity = b.address?.city?.toLowerCase().includes(q);
+        if (!matchesName && !matchesCode && !matchesEmail && !matchesCity) return false;
+      }
+      if (companyFilter) {
+        const compId = b.company?._id || b.company;
+        if (String(compId) !== String(companyFilter)) return false;
+      }
+      if (statusFilter === 'ACTIVE' && b.isActive === false) return false;
+      if (statusFilter === 'INACTIVE' && b.isActive !== false) return false;
+      return true;
+    });
+  }, [branches, search, companyFilter, statusFilter]);
 
   const openAddModal = () => {
     setEditingBranch(null);
@@ -148,12 +185,13 @@ export const Branches = () => {
     const lon = formData.longitude ? Number(formData.longitude) : undefined;
     const radius = Number(formData.radiusInMeters) || 500;
 
+    const compId = typeof formData.company === 'object' ? formData.company?._id : (formData.company || undefined);
     const payload = {
-      company: formData.company,
-      name: formData.name,
-      code: formData.code.toUpperCase(),
-      email: formData.email,
-      phone: formData.phone,
+      company: compId,
+      name: formData.name.trim(),
+      code: formData.code.trim().toUpperCase(),
+      email: formData.email?.trim() || undefined,
+      phone: formData.phone?.trim() || undefined,
       latitude: lat,
       longitude: lon,
       radiusInMeters: radius,
@@ -225,16 +263,39 @@ export const Branches = () => {
     }
   };
 
+  const handleToggleStatus = async (branch) => {
+    const nextStatus = branch.isActive === false;
+    try {
+      await masterApi.updateBranch(branch._id, { isActive: nextStatus });
+      showToast(`Branch marked as ${nextStatus ? 'Active' : 'Inactive'}`, 'success');
+      loadData();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to update branch status', 'error');
+    }
+  };
+
   const handleDelete = async () => {
     if (!branchToDelete) return;
     setSubmitting(true);
     try {
       await masterApi.deleteBranch(branchToDelete._id);
-      showToast('Branch deactivated successfully', 'success');
+      showToast('Branch deleted successfully', 'success');
       setDeleteConfirmOpen(false);
       loadData();
     } catch (err) {
-      showToast(err.response?.data?.message || err.message || 'Failed to deactivate branch', 'error');
+      if (err.response?.status === 409 || err.status === 409) {
+        try {
+          await masterApi.updateBranch(branchToDelete._id, { isActive: false });
+          showToast('Branch has associated records, so it was marked as Inactive instead.', 'info');
+          setDeleteConfirmOpen(false);
+          loadData();
+          return;
+        } catch (deactErr) {
+          showToast(deactErr.response?.data?.message || 'Failed to deactivate branch', 'error');
+          return;
+        }
+      }
+      showToast(err.response?.data?.message || err.message || 'Failed to delete branch', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -294,26 +355,43 @@ export const Branches = () => {
     {
       header: 'Status',
       key: 'isActive',
-      render: (r) => <Badge variant={r.isActive ? 'success' : 'danger'}>{r.isActive ? 'Active' : 'Inactive'}</Badge>,
+      render: (r) => (
+        <Badge
+          variant={r.isActive !== false ? 'success' : 'danger'}
+          onClick={() => handleToggleStatus(r)}
+          style={{ cursor: 'pointer' }}
+          title="Click to toggle Active/Inactive"
+        >
+          {r.isActive !== false ? 'Active' : 'Inactive'}
+        </Badge>
+      ),
     },
     {
       header: 'Actions',
       key: 'actions',
       render: (r) => (
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button className="btn btn-secondary btn-sm" onClick={() => openEditModal(r)} title="Edit">
-            <Edit2 size={14} />
-          </button>
-          <button
-            className="btn btn-outline-danger btn-sm"
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => openEditModal(r)}
+            title="Edit Branch"
+            style={{ color: 'var(--primary)' }}
+          >
+            <Edit2 size={15} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => {
               setBranchToDelete(r);
               setDeleteConfirmOpen(true);
             }}
-            title="Deactivate"
+            title="Deactivate Branch"
+            style={{ color: '#dc2626' }}
           >
-            <Trash2 size={14} />
-          </button>
+            <Trash2 size={15} />
+          </Button>
         </div>
       ),
     },
@@ -321,18 +399,135 @@ export const Branches = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Navigation */}
       <ModuleSubNav items={mastersNav} />
+
+      {/* Header & Quick Action */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>Branch Locations</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 10,
+              backgroundColor: 'var(--primary-light, #f0f7f8)',
+              color: 'var(--primary)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <MapPin size={22} />
+          </div>
+          <div>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>
+              Branch Locations Master
+            </h2>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+              Branch management with 500m GeoFence support
+            </div>
+          </div>
         </div>
-        <Button variant="primary" icon={Plus} onClick={openAddModal}>
-          Add New Branch
-        </Button>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Button variant="primary" icon={Plus} onClick={openAddModal}>
+            Add New Branch
+          </Button>
+        </div>
+      </div>
+
+      {/* Quick Stats Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+        <div className="card" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 8, backgroundColor: 'rgba(46, 123, 133, 0.1)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <MapPin size={18} />
+          </div>
+          <div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-main)', lineHeight: 1 }}>{stats.total}</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>Total Branches</div>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 8, backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <CheckCircle size={18} />
+          </div>
+          <div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-main)', lineHeight: 1 }}>{stats.active}</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>Active Branches</div>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 8, backgroundColor: 'rgba(99, 102, 241, 0.1)', color: '#6366f1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Compass size={18} />
+          </div>
+          <div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-main)', lineHeight: 1 }}>{stats.geoFenced}</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>500m GeoFenced</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Filter & Search Bar */}
+      <div className="card" style={{ padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ position: 'relative', width: 260, maxWidth: '100%' }}>
+          <Input
+            icon={Search}
+            placeholder="Search by branch name, code, city..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            inputStyle={{ height: 36, fontSize: '0.84rem' }}
+            style={{ marginBottom: 0 }}
+          />
+        </div>
+
+        {companies.length > 1 && (
+          <div style={{ width: 200 }}>
+            <Select
+              value={companyFilter}
+              onChange={(e) => setCompanyFilter(e.target.value)}
+              options={[
+                { value: '', label: 'All Companies' },
+                ...companies.map((c) => ({ value: c._id, label: c.name })),
+              ]}
+              style={{ height: 36, fontSize: '0.84rem', marginBottom: 0 }}
+            />
+          </div>
+        )}
+
+        <div style={{ width: 140 }}>
+          <Select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            options={[
+              { value: 'ALL', label: 'All Status' },
+              { value: 'ACTIVE', label: 'Active Only' },
+              { value: 'INACTIVE', label: 'Inactive Only' },
+            ]}
+            style={{ height: 36, fontSize: '0.84rem', marginBottom: 0 }}
+          />
+        </div>
+
+        {(search || companyFilter || statusFilter !== 'ALL') && (
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={X}
+            onClick={() => {
+              setSearch('');
+              setCompanyFilter('');
+              setStatusFilter('ALL');
+            }}
+            style={{ fontSize: '0.8rem', height: 36 }}
+          >
+            Clear Filters
+          </Button>
+        )}
       </div>
 
       <div className="card">
-        <Table columns={columns} data={branches} loading={loading} emptyMessage="No branches configured." />
+        <Table columns={columns} data={filteredBranches} loading={loading} emptyMessage="No branches matching criteria." />
       </div>
 
       {/* Add / Edit Modal */}

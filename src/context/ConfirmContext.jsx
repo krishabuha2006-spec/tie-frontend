@@ -80,10 +80,10 @@ export const ConfirmProvider = ({ children }) => {
       case 'info':
       default:
         return {
-          bg: '#E0F2FE',
-          border: '#BAE6FD',
-          color: '#0284C7',
-          icon: <Info size={24} color="#0284C7" />,
+          bg: 'var(--primary-light, #edf7f8)',
+          border: 'var(--primary-border, #b1dce1)',
+          color: 'var(--primary, #3f929a)',
+          icon: <Info size={24} color="#3f929a" />,
           btnVariant: 'primary',
         };
     }

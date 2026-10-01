@@ -43,6 +43,8 @@ import Tasks from '../pages/operations/Tasks';
 
 // Leaves, Payroll, Assets & Performance
 import LeavesHolidays from '../pages/leaves/LeavesHolidays';
+import HolidayManagement from '../pages/holidays/HolidayManagement';
+import AttendanceCalendar from '../pages/calendar/AttendanceCalendar';
 import PayrollPayslips from '../pages/payroll/PayrollPayslips';
 import AssetsClaimsLoans from '../pages/assets-claims/AssetsClaimsLoans';
 import PerformanceReviews from '../pages/performance/PerformanceReviews';
@@ -76,7 +78,10 @@ export const AppRoutes = () => {
         <Route path="hrm" element={<Navigate to="/employees" replace />} />
         <Route path="hrm/employees" element={<Navigate to="/employees" replace />} />
         <Route path="hrm/attendance" element={<Navigate to="/attendance" replace />} />
+        <Route path="hrm/calendar" element={<Navigate to="/calendar" replace />} />
+        <Route path="attendance/calendar" element={<Navigate to="/calendar" replace />} />
         <Route path="hrm/leaves" element={<Navigate to="/leaves" replace />} />
+        <Route path="hrm/holidays" element={<Navigate to="/holidays" replace />} />
         <Route path="hrm/payroll" element={<Navigate to="/payroll" replace />} />
         <Route path="hrm/recruitment" element={<Navigate to="/recruitment/jobs" replace />} />
         <Route path="hrm/assets-claims" element={<Navigate to="/assets-claims" replace />} />
@@ -85,7 +90,9 @@ export const AppRoutes = () => {
         <Route path="hrms" element={<Navigate to="/employees" replace />} />
         <Route path="hrms/employees" element={<Navigate to="/employees" replace />} />
         <Route path="hrms/attendance" element={<Navigate to="/attendance" replace />} />
+        <Route path="hrms/calendar" element={<Navigate to="/calendar" replace />} />
         <Route path="hrms/leaves" element={<Navigate to="/leaves" replace />} />
+        <Route path="hrms/holidays" element={<Navigate to="/holidays" replace />} />
         <Route path="hrms/payroll" element={<Navigate to="/payroll" replace />} />
         <Route path="hrms/kra" element={<Navigate to="/performance" replace />} />
         <Route path="hrms/assets" element={<Navigate to="/assets-claims" replace />} />
@@ -290,7 +297,15 @@ export const AppRoutes = () => {
           }
         />
 
-        {/* Leaves, Payroll, Assets & Performance */}
+        {/* Calendar, Leaves, Payroll, Assets & Performance */}
+        <Route
+          path="calendar"
+          element={
+            <ProtectedRoute module="attendance">
+              <AttendanceCalendar />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="leaves"
           element={
@@ -300,10 +315,42 @@ export const AppRoutes = () => {
           }
         />
         <Route
+          path="holidays"
+          element={
+            <ProtectedRoute module="holidays">
+              <HolidayManagement />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="payroll"
           element={
             <ProtectedRoute module="payroll">
-              <PayrollPayslips />
+              <PayrollPayslips defaultTab="runs" />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="payroll/runs"
+          element={
+            <ProtectedRoute module="payroll">
+              <PayrollPayslips defaultTab="runs" />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="payroll/approvals"
+          element={
+            <ProtectedRoute module="payroll">
+              <PayrollPayslips defaultTab="approvals" />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="payroll/payments"
+          element={
+            <ProtectedRoute module="payroll">
+              <PayrollPayslips defaultTab="payments" />
             </ProtectedRoute>
           }
         />
@@ -312,6 +359,22 @@ export const AppRoutes = () => {
           element={
             <ProtectedRoute module="payroll">
               <PayrollPayslips defaultTab="payslips" />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="payroll/templates"
+          element={
+            <ProtectedRoute module="payroll">
+              <PayrollPayslips defaultTab="templates" />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="payroll/structures"
+          element={
+            <ProtectedRoute module="payroll">
+              <PayrollPayslips defaultTab="structures" />
             </ProtectedRoute>
           }
         />
@@ -354,6 +417,8 @@ export const AppRoutes = () => {
           }
         />
         <Route path="hrm/reports" element={<Navigate to="/reports" replace />} />
+
+
 
         {/* HRMS Cross-Module Integration Layer (Module 24) */}
         <Route

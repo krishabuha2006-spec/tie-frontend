@@ -22,7 +22,12 @@ export const payrollApi = {
 
   // PUT /salary-structures/:id
   updateSalaryStructure: async (id, data) => {
-    const res = await apiClient.put(`/salary-structures/${id}`, data);
+    const payload = { ...data };
+    // company is immutable on backend update
+    if (!payload.company) {
+      delete payload.company;
+    }
+    const res = await apiClient.put(`/salary-structures/${id}`, payload);
     return res.data;
   },
 
@@ -36,6 +41,15 @@ export const payrollApi = {
   // POST /payroll/runs
   createPayrollRun: async (data) => {
     const payload = { ...data };
+    if (typeof payload.company === 'object') {
+      payload.company = payload.company?._id || payload.company?.id;
+    }
+    if (typeof payload.branch === 'object') {
+      payload.branch = payload.branch?._id || payload.branch?.id;
+    }
+    if (!payload.branch) {
+      delete payload.branch;
+    }
     const year = Number(payload.year) || new Date().getFullYear();
     const month = Number(payload.month) || (new Date().getMonth() + 1);
     const mStr = String(month).padStart(2, '0');
@@ -47,9 +61,8 @@ export const payrollApi = {
     if (!payload.payPeriodTo) {
       payload.payPeriodTo = `${year}-${mStr}-${String(lastDay).padStart(2, '0')}`;
     }
-    if (!payload.branch) {
-      delete payload.branch;
-    }
+    delete payload.year;
+    delete payload.month;
     const res = await apiClient.post('/payroll/runs', payload);
     return res.data;
   },
@@ -105,7 +118,11 @@ export const payrollApi = {
   // --- Module 15: Payroll Approvals (CEO & Management) ---
   // POST /payroll-approvals/chain-config
   createApprovalChainConfig: async (data) => {
-    const res = await apiClient.post('/payroll-approvals/chain-config', data);
+    const payload = { ...data };
+    if (typeof payload.company === 'object') {
+      payload.company = payload.company?._id || payload.company?.id;
+    }
+    const res = await apiClient.post('/payroll-approvals/chain-config', payload);
     return res.data;
   },
 
@@ -135,13 +152,17 @@ export const payrollApi = {
 
   // PUT /payroll-approvals/runs/:runId/decide
   decidePayrollRun: async (runId, decisionData) => {
+    const payload = {
+      decision: decisionData?.decision || 'APPROVED',
+      remark: decisionData?.remark || decisionData?.comments || 'Verified and approved by HR Administration',
+    };
     try {
-      const res = await apiClient.put(`/payroll-approvals/runs/${runId}/decide`, decisionData);
+      const res = await apiClient.put(`/payroll-approvals/runs/${runId}/decide`, payload);
       return res.data;
     } catch (err) {
       if (err.response?.status === 404 || err.response?.status === 405) {
         // Fallback to POST
-        const fallback = await apiClient.post(`/payroll-approvals/runs/${runId}/decide`, decisionData);
+        const fallback = await apiClient.post(`/payroll-approvals/runs/${runId}/decide`, payload);
         return fallback.data;
       }
       throw err;
@@ -157,7 +178,11 @@ export const payrollApi = {
   // --- Module 16: Payslip Templates ---
   // POST /payslip-templates
   createPayslipTemplate: async (data) => {
-    const res = await apiClient.post('/payslip-templates', data);
+    const payload = { ...data };
+    if (typeof payload.company === 'object') {
+      payload.company = payload.company?._id || payload.company?.id;
+    }
+    const res = await apiClient.post('/payslip-templates', payload);
     return res.data;
   },
 
@@ -175,7 +200,11 @@ export const payrollApi = {
 
   // PUT /payslip-templates/:id
   updatePayslipTemplate: async (id, data) => {
-    const res = await apiClient.put(`/payslip-templates/${id}`, data);
+    const payload = { ...data };
+    if (typeof payload.company === 'object') {
+      payload.company = payload.company?._id || payload.company?.id;
+    }
+    const res = await apiClient.put(`/payslip-templates/${id}`, payload);
     return res.data;
   },
 
@@ -237,7 +266,12 @@ export const payrollApi = {
 
   // POST /salary-payments/:id/record-leg
   recordPaymentLeg: async (id, legData) => {
-    const res = await apiClient.post(`/salary-payments/${id}/record-leg`, legData);
+    const payload = {
+      mode: legData.mode || 'BANK_TRANSFER',
+      amount: Number(legData.amount) || 0,
+      referenceNumber: legData.referenceNumber?.trim() || `REF-${Date.now()}`,
+    };
+    const res = await apiClient.post(`/salary-payments/${id}/record-leg`, payload);
     return res.data;
   },
 

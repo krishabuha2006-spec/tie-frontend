@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
+import MobileBottomNav from './MobileBottomNav';
 
 export const AppLayout = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -27,7 +28,8 @@ export const AppLayout = () => {
     if (pathname.includes('/operations/projects')) return 'Project Sites & Fences';
     if (pathname.includes('/operations/site-logs')) return 'Site Activity Logs';
     if (pathname.includes('/operations/tasks')) return 'Employee Tasks Management';
-    if (pathname.includes('/leaves')) return 'Leaves & Holidays Calendar';
+    if (pathname.includes('/leaves')) return 'Leaves Management';
+    if (pathname.includes('/holidays')) return 'Holiday Calendar & Weekly-Off';
     if (pathname.includes('/payroll')) return 'Payroll Runs & Payslips';
     if (pathname.includes('/assets-claims')) return 'Assets, Claims & Loans';
     return 'TIE HRMS Portal';
@@ -47,6 +49,8 @@ export const AppLayout = () => {
         <main className="app-content">
           <Outlet />
         </main>
+        {/* Native Mobile Experience: Thumb Navigation Bar (< 768px) */}
+        <MobileBottomNav onToggleSidebar={() => setMobileOpen(true)} />
       </div>
     </div>
   );

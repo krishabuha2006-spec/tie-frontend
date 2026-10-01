@@ -244,7 +244,7 @@ export const OfficeCheckOut = () => {
           matchResult: 'MATCHED',
           reason: `Face verified successfully (${comp.confidencePct}% biometric match).`,
         });
-        showToast(`✓ Face verified (${comp.confidencePct}% match)`, 'success');
+        showToast(`Face verified (${comp.confidencePct}% match)`, 'success');
       }
     } catch (err) {
       setFaceResult({
@@ -460,7 +460,7 @@ export const OfficeCheckOut = () => {
                 value={selectedEmpId}
                 onChange={(e) => { setSelectedEmpId(e.target.value); setCapturedPhoto(null); setFaceResult(null); setCheckoutResult(null); }}
                 options={employees.map((e) => {
-                  const statusTag = e.isFaceEnrolled ? '✓ ' : '⚠️ [Pending Face] ';
+                  const statusTag = e.isFaceEnrolled ? '[Enrolled] ' : '[Pending Face] ';
                   return { value: e._id, label: `${statusTag}${getEmpCode(e)} — ${getEmpName(e)} (${getEmpDept(e)})` };
                 })}
                 required
@@ -533,7 +533,7 @@ export const OfficeCheckOut = () => {
             {/* GPS */}
             <div>
               <label className="form-label" style={{ fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <MapPin size={14} color="#0284c7" /> GPS Location
+                <MapPin size={14} color="var(--primary)" /> GPS Location
               </label>
               <GeoLocationPicker
                 targetLocation={branchLocation}

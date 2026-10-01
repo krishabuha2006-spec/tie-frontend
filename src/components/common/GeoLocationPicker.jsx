@@ -162,8 +162,8 @@ export const GeoLocationPicker = ({ onLocationChange, targetLocation = null }) =
               }}
             >
               {isWithinRadius
-                ? `✓ Within Range (${liveDistance}m away)`
-                : `⚠️ Outside Range (${liveDistance}m away)`}
+                ? `Within Range (${liveDistance}m away)`
+                : `Outside Range (${liveDistance}m away)`}
             </span>
           ) : (
             <span style={{ color: 'var(--text-muted)' }}>Calculating distance...</span>

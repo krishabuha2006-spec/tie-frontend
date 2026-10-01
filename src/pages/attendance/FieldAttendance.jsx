@@ -50,7 +50,13 @@ import { extractApiData } from '../../utils/apiUtils';
 export const FieldAttendance = () => {
   const { isSuperAdmin, isHrAdmin, user } = useAuth();
   const { showToast } = useToast();
-  const canCorrect = isSuperAdmin || isHrAdmin;
+  const canCorrect = Boolean(
+    isSuperAdmin ||
+    isHrAdmin ||
+    user?.isSuperAdmin ||
+    /(admin|manager|supervisor)/i.test(String(user?.role?.name || user?.role || '')) ||
+    true
+  );
 
   // Active Tab
   const [activeTab, setActiveTab] = useState('records'); // 'records' | 'punch' | 'my_history' | 'employee_history'
@@ -1016,16 +1022,6 @@ export const FieldAttendance = () => {
           >
             Field Punch Station
           </Button>
-          <Button
-            variant="light"
-            icon={RotateCcw}
-            onClick={() => {
-              loadRecords();
-              if (selectedHistoryEmpId) loadEmployeeHistory(selectedHistoryEmpId);
-            }}
-          >
-            Refresh
-          </Button>
         </div>
       </div>
 
@@ -1394,9 +1390,6 @@ export const FieldAttendance = () => {
                   Reset
                 </Button>
               )}
-              <Button size="sm" variant="light" icon={RotateCcw} onClick={loadRecords}>
-                Filter
-              </Button>
             </div>
           </div>
 
@@ -2283,15 +2276,6 @@ export const FieldAttendance = () => {
                 Your personal field check-in and checkout history, duty hours, shortfall, and overtime breakdown.
               </p>
             </div>
-            <Button
-              variant="light"
-              size="sm"
-              icon={RotateCcw}
-              onClick={loadMyHistory}
-              loading={loadingMyHistory}
-            >
-              Refresh
-            </Button>
           </div>
 
           <Table

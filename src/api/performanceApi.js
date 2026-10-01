@@ -24,14 +24,19 @@ export const performanceApi = {
       description: item.description || '',
       weightPercent: Number(item.weightPercent ?? item.weight ?? 0),
       metricType: item.metricType || 'MANUAL_RATING',
+      ...(item.systemMetricSource ? { systemMetricSource: item.systemMetricSource } : {}),
+      ...(item.targetValue !== undefined && item.targetValue !== '' ? { targetValue: Number(item.targetValue) } : {}),
     }));
 
     const payload = {
       name: String(data.name || '').trim(),
       kraItems: cleanItems,
+      isActive: data.isActive !== undefined ? Boolean(data.isActive) : true,
     };
     if (data.company) payload.company = data.company;
-    if (Array.isArray(data.applicableDesignations)) payload.applicableDesignations = data.applicableDesignations;
+    if (Array.isArray(data.applicableDesignations) && data.applicableDesignations.length > 0) {
+      payload.applicableDesignations = data.applicableDesignations;
+    }
     if (data.requireSelfAssessment !== undefined) payload.requireSelfAssessment = Boolean(data.requireSelfAssessment);
 
     const res = await apiClient.post('/kra-templates', payload);
@@ -52,14 +57,19 @@ export const performanceApi = {
       description: item.description || '',
       weightPercent: Number(item.weightPercent ?? item.weight ?? 0),
       metricType: item.metricType || 'MANUAL_RATING',
+      ...(item.systemMetricSource ? { systemMetricSource: item.systemMetricSource } : {}),
+      ...(item.targetValue !== undefined && item.targetValue !== '' ? { targetValue: Number(item.targetValue) } : {}),
     }));
 
     const payload = {
       name: String(data.name || '').trim(),
       kraItems: cleanItems,
+      isActive: data.isActive !== undefined ? Boolean(data.isActive) : true,
     };
     if (data.company) payload.company = data.company;
-    if (Array.isArray(data.applicableDesignations)) payload.applicableDesignations = data.applicableDesignations;
+    if (Array.isArray(data.applicableDesignations) && data.applicableDesignations.length > 0) {
+      payload.applicableDesignations = data.applicableDesignations;
+    }
     if (data.requireSelfAssessment !== undefined) payload.requireSelfAssessment = Boolean(data.requireSelfAssessment);
 
     const res = await apiClient.put(`/kra-templates/${id}`, payload);
@@ -78,7 +88,14 @@ export const performanceApi = {
 
   // POST /performance-reviews/cycles/initiate
   initiateReviewCycle: async (data) => {
-    const res = await apiClient.post('/performance-reviews/cycles/initiate', data);
+    const payload = {
+      reviewCycle: data.reviewCycle || 'Q3-2026',
+      cycleStart: data.cycleStart,
+      cycleEnd: data.cycleEnd,
+      kraTemplate: data.kraTemplate,
+      ...(data.scope ? { scope: data.scope } : {}),
+    };
+    const res = await apiClient.post('/performance-reviews/cycles/initiate', payload);
     return res.data;
   },
 
@@ -135,13 +152,29 @@ export const performanceApi = {
 
   // PUT /performance-reviews/:id/self-assessment
   submitSelfAssessment: async (id, data) => {
-    const res = await apiClient.put(`/performance-reviews/${id}/self-assessment`, data);
+    const payload = {
+      selfRatings: (data.selfRatings || []).map((r) => ({
+        kraItemName: r.kraItemName || r.name,
+        selfRating: Number(r.selfRating) || 3,
+      })),
+      ...data,
+    };
+    const res = await apiClient.put(`/performance-reviews/${id}/self-assessment`, payload);
     return res.data;
   },
 
   // PUT /performance-reviews/:id/manager-review
   submitManagerReview: async (id, data) => {
-    const res = await apiClient.put(`/performance-reviews/${id}/manager-review`, data);
+    const payload = {
+      managerRatings: (data.managerRatings || []).map((r) => ({
+        kraItemName: r.kraItemName || r.name,
+        managerRating: Number(r.managerRating) || 3,
+        managerComment: r.managerComment || r.comment || r.remarks || '',
+      })),
+      overallComment: data.overallComment || data.remarks || data.comment || 'Performance appraisal review completed.',
+      ...data,
+    };
+    const res = await apiClient.put(`/performance-reviews/${id}/manager-review`, payload);
     return res.data;
   },
 };

@@ -1,24 +1,32 @@
 import apiClient from './client';
 
 export const userApi = {
-  // Step 2 & Self-Service: Get logged-in user profile (GET /auth/me)
+  // Step 2 & Self-Service: Get logged-in user profile (GET /api/users/profile with /auth/me fallback)
   getProfile: async () => {
-    const res = await apiClient.get('/auth/me');
-    return res.data;
+    try {
+      const res = await apiClient.get('/users/profile');
+      return res.data;
+    } catch {
+      const res = await apiClient.get('/auth/me');
+      return res.data;
+    }
   },
 
-  // Self-Service: Update profile details (name, phone)
+  // Self-Service: Update profile details (PUT /api/users/profile with /auth/me and /users/:id fallbacks)
   updateProfile: async (data, userId) => {
-    if (userId) {
-      try {
-        const res = await apiClient.put(`/users/${userId}`, data);
-        return res.data;
-      } catch {
-        // Fallback to /auth/me
+    try {
+      const res = await apiClient.put('/users/profile', data);
+      return res.data;
+    } catch {
+      if (userId) {
+        try {
+          const res = await apiClient.put(`/users/${userId}`, data);
+          return res.data;
+        } catch {}
       }
+      const res = await apiClient.put('/auth/me', data);
+      return res.data;
     }
-    const res = await apiClient.put('/auth/me', data);
-    return res.data;
   },
 
   // Self-Service: Change password (currentPassword, newPassword)

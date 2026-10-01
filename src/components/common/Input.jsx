@@ -16,6 +16,8 @@ export const Input = ({
   disabled = false,
   className = '',
   style,
+  inputStyle,
+  icon: Icon,
   isPhone = false,
   ...props
 }) => {
@@ -31,8 +33,8 @@ export const Input = ({
   const defaultPlaceholder = isPhoneType
     ? '10-digit mobile number'
     : isEmailType
-    ? 'e.g. name@example.com'
-    : placeholder;
+      ? 'e.g. name@example.com'
+      : placeholder;
 
   const handleChange = (e) => {
     if (isPhoneType) {
@@ -58,7 +60,23 @@ export const Input = ({
           )}
         </label>
       )}
-      <div style={{ position: 'relative', width: '100%' }}>
+      <div style={{ position: 'relative', width: '100%', display: 'flex', alignItems: 'center' }}>
+        {Icon && (
+          <div
+            style={{
+              position: 'absolute',
+              left: 10,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              display: 'flex',
+              alignItems: 'center',
+              pointerEvents: 'none',
+              color: 'var(--text-muted, #64748b)',
+            }}
+          >
+            <Icon size={15} />
+          </div>
+        )}
         <input
           id={inputId}
           name={name}
@@ -72,7 +90,11 @@ export const Input = ({
           disabled={disabled}
           required={required}
           className={`form-control ${error ? 'error' : ''}`}
-          style={isPassword ? { paddingRight: '40px' } : undefined}
+          style={{
+            ...(Icon ? { paddingLeft: '32px' } : {}),
+            ...(isPassword ? { paddingRight: '40px' } : {}),
+            ...inputStyle,
+          }}
           {...props}
         />
         {isPassword && (

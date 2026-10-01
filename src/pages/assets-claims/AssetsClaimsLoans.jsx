@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import assetsLoansApi from '../../api/assetsLoansApi';
 import employeeApi from '../../api/employeeApi';
 import masterApi from '../../api/masterApi';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
+import { useConfirm } from '../../context/ConfirmContext';
 import {
   getEmployeeName,
   getEmployeeCode,
@@ -33,6 +34,12 @@ import {
   Edit2,
   Trash2,
   Calendar,
+  Search,
+  Filter,
+  CheckCircle2,
+  Building2,
+  Printer,
+  Download,
 } from 'lucide-react';
 import Table from '../../components/common/Table';
 import Modal from '../../components/common/Modal';
@@ -46,13 +53,15 @@ export const AssetsClaimsLoans = () => {
   const { user, isSuperAdmin, isHrAdmin } = useAuth();
   const canManage = isSuperAdmin || isHrAdmin;
   const { showToast } = useToast();
+  const confirm = useConfirm();
 
-  // Active Tab: 'assets' | 'claims' | 'categories' | 'loans'
+  // Active Tab: 'assets' | 'clearance' | 'claims' | 'categories' | 'loans'
   const [activeTab, setActiveTab] = useState('assets');
 
   // Master Data
   const [employees, setEmployees] = useState([]);
   const [companies, setCompanies] = useState([]);
+  const [branches, setBranches] = useState([]);
 
   // =========================================================================
   // TAB 1: ASSET MANAGEMENT (Module 20)
@@ -69,14 +78,29 @@ export const AssetsClaimsLoans = () => {
     serialNumber: '',
     model: '',
     purchaseValue: '',
+    purchaseDate: new Date().toISOString().split('T')[0],
     company: '',
+    branch: '',
   });
+
+  // Asset Search & Filters
+  const [assetSearchTerm, setAssetSearchTerm] = useState('');
+  const [assetCategoryFilter, setAssetCategoryFilter] = useState('ALL');
+  const [assetStatusFilter, setAssetStatusFilter] = useState('ALL');
+  const [assetCompanyFilter, setAssetCompanyFilter] = useState('ALL');
+
+  // View Asset Details Modal (GET /assets/:id)
+  const [viewAssetModalOpen, setViewAssetModalOpen] = useState(false);
+  const [viewingAsset, setViewingAsset] = useState(null);
+  const [loadingAssetDetail, setLoadingAssetDetail] = useState(false);
 
   // Assign Asset Modal
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [targetAsset, setTargetAsset] = useState(null);
   const [assignForm, setAssignForm] = useState({
     employeeId: '',
+    conditionAtIssue: 'Brand new, good working condition',
+    expectedReturnDate: '',
     notes: '',
   });
   const [submittingAssign, setSubmittingAssign] = useState(false);
@@ -110,25 +134,51 @@ export const AssetsClaimsLoans = () => {
     decisionRemark: '',
   });
   const [submittingRecovery, setSubmittingRecovery] = useState(false);
+  const [submittingOutsideRecovery, setSubmittingOutsideRecovery] = useState(false);
 
   // =========================================================================
-  // TAB 2: REIMBURSEMENTS & EXPENSE CLAIMS (Module 18)
+  // TAB: EMPLOYEE CLEARANCES & NO-DUE (Module 20 Clearance & Recovery Link)
+  // =========================================================================
+  const [selectedClearanceEmployeeId, setSelectedClearanceEmployeeId] = useState('');
+  const [clearanceCert, setClearanceCert] = useState(null);
+  const [clearanceAssignments, setClearanceAssignments] = useState([]);
+  const [clearancePendingRecoveries, setClearancePendingRecoveries] = useState([]);
+  const [loadingClearance, setLoadingClearance] = useState(false);
+
+  // =========================================================================
+  // TAB 2: REIMBURSEMENTS & EXPENSE CLAIMS (Module 19)
   // =========================================================================
   const [claimsViewMode, setClaimsViewMode] = useState('my'); // 'my' | 'pending' | 'all'
   const [claims, setClaims] = useState([]);
   const [loadingClaims, setLoadingClaims] = useState(false);
+  const [claimSearchTerm, setClaimSearchTerm] = useState('');
+  const [claimStatusFilter, setClaimStatusFilter] = useState('ALL');
+  const [claimMethodFilter, setClaimMethodFilter] = useState('ALL');
+
+  // View Claim Details Modal (GET /reimbursements/claims/:id)
+  const [viewClaimModalOpen, setViewClaimModalOpen] = useState(false);
+  const [viewingClaim, setViewingClaim] = useState(null);
+  const [loadingClaimDetail, setLoadingClaimDetail] = useState(false);
+
+  // Submit Claim Modal (POST /reimbursements/claims)
   const [claimModalOpen, setClaimModalOpen] = useState(false);
   const [submittingClaim, setSubmittingClaim] = useState(false);
   const [claimForm, setClaimForm] = useState({
-    category: '',
     title: '',
-    amount: '',
-    description: '',
-    receiptUrl: '',
-    settlementType: 'PAYROLL', // 'PAYROLL' | 'DIRECT_PAYMENT'
+    disbursementMethod: 'PAYROLL', // 'PAYROLL' | 'DIRECT_PAYMENT'
+    project: '',
+    lineItems: [
+      {
+        category: '',
+        description: '',
+        amount: '',
+        expenseDate: new Date().toISOString().split('T')[0],
+        receiptUrl: '',
+      },
+    ],
   });
 
-  // Decide Claim Modal
+  // Decide Claim Modal (PUT /reimbursements/claims/:id/decide)
   const [claimDecideModalOpen, setClaimDecideModalOpen] = useState(false);
   const [selectedClaim, setSelectedClaim] = useState(null);
   const [claimDecision, setClaimDecision] = useState('APPROVED'); // 'APPROVED' | 'PARTIALLY_APPROVED' | 'REJECTED'
@@ -136,17 +186,16 @@ export const AssetsClaimsLoans = () => {
   const [decisionRemark, setDecisionRemark] = useState('');
   const [submittingClaimDecision, setSubmittingClaimDecision] = useState(false);
 
-  // Direct Payment Settlement Modal
+  // Direct Payment Settlement Modal (PUT /reimbursements/claims/:id/record-direct-payment)
   const [directPaymentModalOpen, setDirectPaymentModalOpen] = useState(false);
   const [directPaymentForm, setDirectPaymentForm] = useState({
-    paymentMode: 'BANK_TRANSFER', // 'BANK_TRANSFER' | 'CASH' | 'UPI'
-    referenceNumber: '',
-    paymentDate: new Date().toISOString().split('T')[0],
+    paymentReference: '',
+    paidAt: new Date().toISOString().split('T')[0],
   });
   const [submittingDirectPayment, setSubmittingDirectPayment] = useState(false);
 
   // =========================================================================
-  // TAB 3: REIMBURSEMENT CATEGORIES (Module 18)
+  // TAB 3: REIMBURSEMENT CATEGORIES (Module 19)
   // =========================================================================
   const [categories, setCategories] = useState([]);
   const [loadingCategories, setLoadingCategories] = useState(false);
@@ -155,32 +204,80 @@ export const AssetsClaimsLoans = () => {
   const [categoryForm, setCategoryForm] = useState({
     name: '',
     code: '',
-    maxLimit: '',
-    requiresReceipt: true,
-    description: '',
+    monthlyCap: 10000,
+    isCapHardEnforced: false,
+    company: '',
+    isActive: true,
   });
   const [submittingCategory, setSubmittingCategory] = useState(false);
 
   // =========================================================================
-  // TAB 4: LOANS & ADVANCES (Module 19)
+  // TAB 4: LOANS & ADVANCES (Module 20)
   // =========================================================================
-  const [loansViewMode, setLoansViewMode] = useState('all'); // 'all' | 'me'
+  const [loansViewMode, setLoansViewMode] = useState('all'); // 'all' | 'pending' | 'me' | 'loan_types'
   const [loans, setLoans] = useState([]);
   const [loadingLoans, setLoadingLoans] = useState(false);
+  const [loanSearchTerm, setLoanSearchTerm] = useState('');
+  const [loanStatusFilter, setLoanStatusFilter] = useState('ALL');
+  const [loanTypeFilter, setLoanTypeFilter] = useState('ALL');
+
+  // Loan Types State (GET/POST/PUT/DELETE /loan-types)
+  const [loanTypes, setLoanTypes] = useState([]);
+  const [loadingLoanTypes, setLoadingLoanTypes] = useState(false);
+  const [loanTypeModalOpen, setLoanTypeModalOpen] = useState(false);
+  const [editingLoanTypeId, setEditingLoanTypeId] = useState(null);
+  const [submittingLoanType, setSubmittingLoanType] = useState(false);
+  const [loanTypeForm, setLoanTypeForm] = useState({
+    name: '',
+    category: 'ADVANCE', // 'ADVANCE' | 'LOAN'
+    company: '',
+    maxAmount: 50000,
+    maxTenureMonths: 6,
+    interestRatePercent: 0,
+    minimumServiceMonthsRequired: 0,
+    isActive: true,
+  });
+
+  // Apply Loan Modal (POST /loans/requests)
   const [loanModalOpen, setLoanModalOpen] = useState(false);
   const [loanForm, setLoanForm] = useState({
-    amount: '',
-    tenureMonths: '',
-    purpose: '',
     employeeId: '',
+    loanTypeId: '',
+    amount: '',
+    tenureMonths: 6,
+    purpose: '',
   });
   const [submittingLoan, setSubmittingLoan] = useState(false);
 
-  // Loan EMI Schedule Modal
+  // View Loan Details Modal (GET /loans/requests/:id)
+  const [viewLoanModalOpen, setViewLoanModalOpen] = useState(false);
+  const [viewingLoan, setViewingLoan] = useState(null);
+  const [loadingLoanDetail, setLoadingLoanDetail] = useState(false);
+
+  // Decide Loan Modal (PUT /loans/requests/:id/decide)
+  const [loanDecideModalOpen, setLoanDecideModalOpen] = useState(false);
+  const [selectedLoanForDecision, setSelectedLoanForDecision] = useState(null);
+  const [loanDecision, setLoanDecision] = useState('APPROVED'); // 'APPROVED' | 'REJECTED'
+  const [approvedLoanAmount, setApprovedLoanAmount] = useState('');
+  const [approvedLoanTenure, setApprovedLoanTenure] = useState('');
+  const [loanDecisionRemark, setLoanDecisionRemark] = useState('');
+  const [submittingLoanDecision, setSubmittingLoanDecision] = useState(false);
+
+  // Disburse Loan Modal (POST /loans/requests/:id/disburse)
+  const [disburseModalOpen, setDisburseModalOpen] = useState(false);
+  const [selectedLoanForDisburse, setSelectedLoanForDisburse] = useState(null);
+  const [disburseForm, setDisburseForm] = useState({
+    disbursementReference: '',
+    disbursedAt: new Date().toISOString().split('T')[0],
+  });
+  const [submittingDisburse, setSubmittingDisburse] = useState(false);
+
+  // Loan EMI Schedule Modal (GET /loans/:id/emi-schedule)
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [emiSchedule, setEmiSchedule] = useState([]);
   const [activeLoanForSchedule, setActiveLoanForSchedule] = useState(null);
   const [loadingSchedule, setLoadingSchedule] = useState(false);
+  const [submittingMarkPaid, setSubmittingMarkPaid] = useState({});
 
   // -------------------------------------------------------------------------
   // INITIAL LOAD
@@ -191,35 +288,63 @@ export const AssetsClaimsLoans = () => {
 
   useEffect(() => {
     if (activeTab === 'assets') loadAssets();
+    else if (activeTab === 'clearance') {
+      const empId = selectedClearanceEmployeeId || employees[0]?._id || employees[0]?.id;
+      if (empId) loadEmployeeClearance(empId);
+    }
     else if (activeTab === 'claims') loadClaims();
     else if (activeTab === 'categories') loadCategories();
-    else if (activeTab === 'loans') loadLoans();
+    else if (activeTab === 'loans') {
+      if (loansViewMode === 'loan_types') {
+        loadLoanTypes();
+      } else {
+        loadLoans();
+      }
+    }
   }, [activeTab, claimsViewMode, loansViewMode]);
 
   const loadMasters = async () => {
     try {
-      const [eRes, cRes, catRes] = await Promise.all([
+      const [eRes, cRes, bRes, catRes, ltRes] = await Promise.all([
         employeeApi.getEmployees({ limit: 200 }).catch(() => ({ data: [] })),
         masterApi.getCompanies().catch(() => ({ data: [] })),
+        masterApi.getBranches().catch(() => ({ data: [] })),
         assetsLoansApi.getReimbursementCategories().catch(() => ({ data: [] })),
+        assetsLoansApi.getLoanTypes().catch(() => ({ data: [] })),
       ]);
       const empList = extractEmployeeList(eRes);
       const compList = Array.isArray(cRes) ? cRes : cRes?.data || [];
+      const branchList = Array.isArray(bRes) ? bRes : bRes?.data || [];
       const catList = Array.isArray(catRes) ? catRes : catRes?.data || [];
+      const ltList = Array.isArray(ltRes) ? ltRes : ltRes?.data || ltRes?.loanTypes || [];
 
       setEmployees(empList);
       setCompanies(compList);
+      setBranches(branchList);
       setCategories(catList);
+      setLoanTypes(ltList);
 
       if (compList.length > 0) {
-        setAssetForm((prev) => ({ ...prev, company: compList[0]._id }));
+        setAssetForm((prev) => ({
+          ...prev,
+          company: compList[0]._id,
+          branch: branchList[0]?._id || '',
+        }));
       }
       if (catList.length > 0) {
         setClaimForm((prev) => ({ ...prev, category: catList[0]._id }));
       }
       if (empList.length > 0) {
-        setAssignForm((prev) => ({ ...prev, employeeId: empList[0]._id || empList[0].id }));
-        setLoanForm((prev) => ({ ...prev, employeeId: empList[0]._id || empList[0].id }));
+        const firstEmpId = empList[0]._id || empList[0].id;
+        setAssignForm((prev) => ({ ...prev, employeeId: firstEmpId }));
+        setSelectedClearanceEmployeeId(firstEmpId);
+        setLoanForm((prev) => ({
+          ...prev,
+          employeeId: firstEmpId,
+          loanTypeId: ltList[0]?._id || '',
+          amount: ltList[0]?.maxAmount || 25000,
+          tenureMonths: ltList[0]?.maxTenureMonths || 6,
+        }));
       }
     } catch (err) {
       console.error('Failed to load masters:', err);
@@ -247,6 +372,128 @@ export const AssetsClaimsLoans = () => {
     return asset.currentStatus || asset.status || (asset.currentAssignment ? 'ASSIGNED' : 'UNASSIGNED');
   };
 
+  // Memoized search & filter for assets
+  const filteredAssets = useMemo(() => {
+    return assets.filter((item) => {
+      // 1. Text search across name, tag, serial, model, custodian
+      if (assetSearchTerm.trim()) {
+        const q = assetSearchTerm.toLowerCase();
+        const matchesName = (item.name || '').toLowerCase().includes(q);
+        const matchesTag = (item.assetTag || '').toLowerCase().includes(q);
+        const matchesSerial = (item.serialNumber || '').toLowerCase().includes(q);
+        const matchesModel = (item.model || '').toLowerCase().includes(q);
+        const emp = item.currentAssignment?.employee || item.assignment?.employee;
+        const matchesEmp = emp ? getEmployeeName(emp).toLowerCase().includes(q) : false;
+        if (!matchesName && !matchesTag && !matchesSerial && !matchesModel && !matchesEmp) {
+          return false;
+        }
+      }
+      // 2. Category filter
+      if (assetCategoryFilter !== 'ALL' && item.category !== assetCategoryFilter) {
+        return false;
+      }
+      // 3. Status filter
+      if (assetStatusFilter !== 'ALL') {
+        const s = getAssetStatus(item);
+        if (assetStatusFilter === 'UNASSIGNED') {
+          if (s !== 'UNASSIGNED' && s !== 'AVAILABLE') return false;
+        } else if (s !== assetStatusFilter) {
+          return false;
+        }
+      }
+      // 4. Company filter
+      if (assetCompanyFilter !== 'ALL') {
+        const cId = item.company?._id || item.company;
+        if (cId !== assetCompanyFilter) return false;
+      }
+      return true;
+    });
+  }, [assets, assetSearchTerm, assetCategoryFilter, assetStatusFilter, assetCompanyFilter]);
+
+  // View Asset Details Modal (GET /assets/:id)
+  const openViewAssetModal = async (asset) => {
+    setViewAssetModalOpen(true);
+    setLoadingAssetDetail(true);
+    setViewingAsset(asset);
+    try {
+      const res = await assetsLoansApi.getAssetById(asset._id);
+      const detail = res?.data || res?.asset || res || asset;
+      setViewingAsset(detail);
+    } catch (err) {
+      console.error('Failed to load asset details:', err);
+      setViewingAsset(asset);
+    } finally {
+      setLoadingAssetDetail(false);
+    }
+  };
+
+  // Mark Cost Recovered Outside Payroll (PUT /assets/assignments/:id/mark-recovered-outside-payroll)
+  const handleMarkRecoveredOutsidePayroll = async (assignmentId) => {
+    const isConfirmed = await confirm({
+      title: 'Confirm Outside Recovery',
+      message: 'Mark this asset cost as fully recovered outside payroll (e.g. direct cash/cheque reimbursement)?',
+      confirmText: 'Mark Recovered',
+      cancelText: 'Cancel',
+      variant: 'info',
+    });
+    if (!isConfirmed) return;
+    setSubmittingOutsideRecovery(true);
+    try {
+      await assetsLoansApi.markRecoveredOutsidePayroll(assignmentId, {
+        remarks: 'Direct payment settled outside payroll',
+      });
+      showToast('Asset recovery recorded outside payroll!', 'success');
+      loadAssets();
+      if (selectedClearanceEmployeeId) {
+        loadEmployeeClearance(selectedClearanceEmployeeId);
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to mark recovered outside payroll', 'error');
+    } finally {
+      setSubmittingOutsideRecovery(false);
+    }
+  };
+
+  // Load Employee Clearance & No Due Certificate (Module 20 Endpoints)
+  const loadEmployeeClearance = async (empId) => {
+    if (!empId) return;
+    setLoadingClearance(true);
+    try {
+      const [certRes, assignRes, recRes] = await Promise.allSettled([
+        assetsLoansApi.getEmployeeNoDueClearance(empId),
+        assetsLoansApi.getEmployeeAssetAssignments(empId),
+        assetsLoansApi.getPendingRecovery(empId),
+      ]);
+
+      if (certRes.status === 'fulfilled') {
+        setClearanceCert(certRes.value?.data || certRes.value || null);
+      } else {
+        setClearanceCert(null);
+      }
+
+      if (assignRes.status === 'fulfilled') {
+        const list = extractApiData(assignRes.value, 'assignments', 'data');
+        setClearanceAssignments(Array.isArray(list) ? list : []);
+      } else {
+        setClearanceAssignments([]);
+      }
+
+      if (recRes.status === 'fulfilled') {
+        const val = recRes.value?.data || recRes.value || {};
+        const recList = Array.isArray(val)
+          ? val
+          : val.pendingRecoveries || val.recoveries || (Array.isArray(val.data) ? val.data : []);
+        setClearancePendingRecoveries(recList);
+      } else {
+        setClearancePendingRecoveries([]);
+      }
+    } catch (err) {
+      console.error('Failed to load employee clearance details:', err);
+    } finally {
+      setLoadingClearance(false);
+    }
+  };
+
   const openAssetModal = (asset = null) => {
     if (asset) {
       setEditingAssetId(asset._id);
@@ -257,20 +504,25 @@ export const AssetsClaimsLoans = () => {
         serialNumber: asset.serialNumber || '',
         model: asset.model || '',
         purchaseValue: asset.purchaseValue || '',
+        purchaseDate: asset.purchaseDate ? asset.purchaseDate.split('T')[0] : new Date().toISOString().split('T')[0],
         company: asset.company?._id || asset.company || companies[0]?._id || '',
+        branch: asset.branch?._id || asset.branch || branches[0]?._id || '',
         currentStatus: getAssetStatus(asset),
         condition: asset.condition || 'GOOD',
       });
     } else {
       setEditingAssetId(null);
+      const rand = Math.floor(100000 + Math.random() * 900000);
       setAssetForm({
         name: '',
         assetTag: `AST-${new Date().getFullYear()}-${String(assets.length + 1).padStart(3, '0')}`,
         category: 'LAPTOP',
-        serialNumber: '',
+        serialNumber: `LAP-${new Date().getFullYear()}-${rand}`,
         model: '',
         purchaseValue: '',
+        purchaseDate: new Date().toISOString().split('T')[0],
         company: companies[0]?._id || '',
+        branch: branches[0]?._id || '',
         currentStatus: 'UNASSIGNED',
         condition: 'NEW',
       });
@@ -280,13 +532,38 @@ export const AssetsClaimsLoans = () => {
 
   const handleSaveAsset = async (e) => {
     e.preventDefault();
+
+    const catPrefix = (assetForm.category || 'AST').slice(0, 3).toUpperCase();
+    const finalSerial = assetForm.serialNumber?.trim() || `${catPrefix}-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
+    const finalTag = assetForm.assetTag?.trim() || `AST-${new Date().getFullYear()}-${String(assets.length + 1).padStart(3, '0')}`;
+    const finalCategory = assetForm.category || 'LAPTOP';
+    const finalName = assetForm.name?.trim();
+
+    if (!finalName) {
+      showToast('Asset name is required', 'warning');
+      return;
+    }
+
     setSubmittingAsset(true);
     try {
+      const payload = {
+        name: finalName,
+        category: finalCategory,
+        serialNumber: finalSerial,
+        assetTag: finalTag,
+        model: assetForm.model?.trim() || undefined,
+        purchaseValue: Number(assetForm.purchaseValue) || 0,
+        purchaseDate: assetForm.purchaseDate,
+        company: assetForm.company || undefined,
+        branch: assetForm.branch || undefined,
+        condition: assetForm.condition || 'NEW',
+        currentStatus: assetForm.currentStatus || 'UNASSIGNED',
+      };
       if (editingAssetId) {
-        await assetsLoansApi.updateAsset(editingAssetId, assetForm);
+        await assetsLoansApi.updateAsset(editingAssetId, payload);
         showToast('Asset master record updated!', 'success');
       } else {
-        await assetsLoansApi.createAsset(assetForm);
+        await assetsLoansApi.createAsset(payload);
         showToast('New asset registered in inventory!', 'success');
       }
       setAssetModalOpen(false);
@@ -299,7 +576,14 @@ export const AssetsClaimsLoans = () => {
   };
 
   const handleRetireAsset = async (id) => {
-    if (!window.confirm('Retire and write off this asset from active service?')) return;
+    const isConfirmed = await confirm({
+      title: 'Retire Asset',
+      message: 'Retire and write off this asset from active service? It will no longer be available for assignment.',
+      confirmText: 'Retire Asset',
+      cancelText: 'Cancel',
+      variant: 'danger',
+    });
+    if (!isConfirmed) return;
     try {
       await assetsLoansApi.retireAsset(id);
       showToast('Asset marked as RETIRED', 'info');
@@ -310,7 +594,14 @@ export const AssetsClaimsLoans = () => {
   };
 
   const handleReactivateAsset = async (id) => {
-    if (!window.confirm('Reactivate this retired asset and return it to available inventory stock?')) return;
+    const isConfirmed = await confirm({
+      title: 'Reactivate Asset',
+      message: 'Reactivate this retired asset and return it to available inventory stock?',
+      confirmText: 'Reactivate',
+      cancelText: 'Cancel',
+      variant: 'info',
+    });
+    if (!isConfirmed) return;
     try {
       await assetsLoansApi.reactivateAsset(id);
       showToast('Asset reactivated successfully and available for assignment!', 'success');
@@ -489,16 +780,135 @@ export const AssetsClaimsLoans = () => {
     }
   };
 
+  // Filtered claims for instant dynamic search and filtering
+  const filteredClaims = useMemo(() => {
+    return claims.filter((claim) => {
+      // 1. Search filter
+      if (claimSearchTerm.trim()) {
+        const q = claimSearchTerm.toLowerCase();
+        const matchesTitle = (claim.title || '').toLowerCase().includes(q);
+        const matchesDesc = (claim.description || '').toLowerCase().includes(q);
+        const matchesEmp = claim.employee ? getEmployeeName(claim.employee).toLowerCase().includes(q) : false;
+        const matchesCat = claim.category?.name ? claim.category.name.toLowerCase().includes(q) : false;
+        const matchesRef = (claim.directPaymentReference || '').toLowerCase().includes(q);
+        if (!matchesTitle && !matchesDesc && !matchesEmp && !matchesCat && !matchesRef) {
+          return false;
+        }
+      }
+      // 2. Status filter
+      if (claimStatusFilter !== 'ALL') {
+        const s = claim.status || 'PENDING';
+        if (s !== claimStatusFilter) return false;
+      }
+      // 3. Disbursement method filter
+      if (claimMethodFilter !== 'ALL') {
+        const m = claim.disbursementMethod || claim.settlementType || 'PAYROLL';
+        if (m !== claimMethodFilter) return false;
+      }
+      return true;
+    });
+  }, [claims, claimSearchTerm, claimStatusFilter, claimMethodFilter]);
+
+  // View Claim Details Modal (GET /reimbursements/claims/:id)
+  const openViewClaimModal = async (claim) => {
+    setViewClaimModalOpen(true);
+    setLoadingClaimDetail(true);
+    setViewingClaim(claim);
+    try {
+      const res = await assetsLoansApi.getClaimById(claim._id);
+      const detail = res?.data || res?.claim || res || claim;
+      setViewingClaim(detail);
+    } catch (err) {
+      console.error('Failed to load full claim details:', err);
+      setViewingClaim(claim);
+    } finally {
+      setLoadingClaimDetail(false);
+    }
+  };
+
+  // Line item helpers for expense claim submission
+  const handleAddClaimLineItem = () => {
+    setClaimForm((prev) => ({
+      ...prev,
+      lineItems: [
+        ...prev.lineItems,
+        {
+          category: categories[0]?._id || '',
+          description: '',
+          amount: '',
+          expenseDate: new Date().toISOString().split('T')[0],
+          receiptUrl: '',
+        },
+      ],
+    }));
+  };
+
+  const handleRemoveClaimLineItem = (index) => {
+    if (claimForm.lineItems.length <= 1) {
+      showToast('A claim must have at least one receipt item', 'warning');
+      return;
+    }
+    setClaimForm((prev) => ({
+      ...prev,
+      lineItems: prev.lineItems.filter((_, idx) => idx !== index),
+    }));
+  };
+
+  const handleClaimLineItemChange = (index, field, value) => {
+    setClaimForm((prev) => {
+      const updated = [...prev.lineItems];
+      updated[index] = { ...updated[index], [field]: value };
+      return { ...prev, lineItems: updated };
+    });
+  };
+
   const handleCreateClaim = async (e) => {
     e.preventDefault();
     setSubmittingClaim(true);
     try {
-      await assetsLoansApi.createClaim({
-        ...claimForm,
-        amount: Number(claimForm.amount),
-      });
-      showToast('Expense claim filed successfully!', 'success');
+      // Validate line items
+      const validLineItems = claimForm.lineItems.map((item) => ({
+        category: item.category || categories[0]?._id,
+        description: item.description || 'Out-of-pocket expense',
+        amount: Number(item.amount) || 0,
+        expenseDate: item.expenseDate || new Date().toISOString().split('T')[0],
+        receiptUrl: item.receiptUrl || 'https://res.cloudinary.com/demo/image/upload/v1234/receipt1.jpg',
+      }));
+
+      const totalAmount = validLineItems.reduce((acc, it) => acc + it.amount, 0);
+      if (totalAmount <= 0) {
+        showToast('Please enter valid expense amounts greater than ₹0', 'warning');
+        setSubmittingClaim(false);
+        return;
+      }
+
+      const payload = {
+        disbursementMethod: claimForm.disbursementMethod || 'PAYROLL',
+        project: claimForm.project || undefined,
+        lineItems: validLineItems,
+        // Backward compatibility
+        title: claimForm.title || validLineItems[0]?.description || 'Reimbursement Claim',
+        amount: totalAmount,
+      };
+
+      await assetsLoansApi.createClaim(payload);
+      showToast('Expense claim filed successfully with receipts!', 'success');
       setClaimModalOpen(false);
+      // Reset form
+      setClaimForm({
+        title: '',
+        disbursementMethod: 'PAYROLL',
+        project: '',
+        lineItems: [
+          {
+            category: categories[0]?._id || '',
+            description: '',
+            amount: '',
+            expenseDate: new Date().toISOString().split('T')[0],
+            receiptUrl: '',
+          },
+        ],
+      });
       loadClaims();
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to file claim', 'error');
@@ -510,7 +920,7 @@ export const AssetsClaimsLoans = () => {
   const openClaimDecideModal = (claim, decision) => {
     setSelectedClaim(claim);
     setClaimDecision(decision);
-    setApprovedAmount(claim.amount || 0);
+    setApprovedAmount(claim.approvedAmount || claim.totalClaimedAmount || claim.amount || 0);
     setDecisionRemark(decision === 'APPROVED' ? 'Bills verified and claim approved' : '');
     setClaimDecideModalOpen(true);
   };
@@ -522,6 +932,7 @@ export const AssetsClaimsLoans = () => {
       await assetsLoansApi.decideClaim(selectedClaim._id, {
         decision: claimDecision,
         approvedAmount: Number(approvedAmount),
+        remark: decisionRemark,
         remarks: decisionRemark,
       });
       showToast(`Expense claim has been ${claimDecision}!`, 'success');
@@ -535,7 +946,14 @@ export const AssetsClaimsLoans = () => {
   };
 
   const handleCancelClaim = async (claimId) => {
-    if (!window.confirm('Cancel this pending claim?')) return;
+    const isConfirmed = await confirm({
+      title: 'Cancel Reimbursement Claim',
+      message: 'Are you sure you want to cancel this pending reimbursement claim?',
+      confirmText: 'Cancel Claim',
+      cancelText: 'Keep Claim',
+      variant: 'danger',
+    });
+    if (!isConfirmed) return;
     try {
       await assetsLoansApi.cancelClaim(claimId);
       showToast('Claim cancelled', 'info');
@@ -548,9 +966,8 @@ export const AssetsClaimsLoans = () => {
   const openDirectPaymentModal = (claim) => {
     setSelectedClaim(claim);
     setDirectPaymentForm({
-      paymentMode: 'BANK_TRANSFER',
-      referenceNumber: `TXN-${Date.now().toString().slice(-6)}`,
-      paymentDate: new Date().toISOString().split('T')[0],
+      paymentReference: `IMPS-${Date.now().toString().slice(-8)}`,
+      paidAt: new Date().toISOString().split('T')[0],
     });
     setDirectPaymentModalOpen(true);
   };
@@ -559,8 +976,11 @@ export const AssetsClaimsLoans = () => {
     e.preventDefault();
     setSubmittingDirectPayment(true);
     try {
-      await assetsLoansApi.recordDirectPayment(selectedClaim._id, directPaymentForm);
-      showToast('Direct payment settlement recorded!', 'success');
+      await assetsLoansApi.recordDirectPayment(selectedClaim._id, {
+        paymentReference: directPaymentForm.paymentReference,
+        paidAt: new Date(directPaymentForm.paidAt).toISOString(),
+      });
+      showToast('Direct payment settlement recorded successfully!', 'success');
       setDirectPaymentModalOpen(false);
       loadClaims();
     } catch (err) {
@@ -592,18 +1012,20 @@ export const AssetsClaimsLoans = () => {
       setCategoryForm({
         name: cat.name || '',
         code: cat.code || '',
-        maxLimit: cat.maxLimit || 10000,
-        requiresReceipt: cat.requiresReceipt ?? true,
-        description: cat.description || '',
+        monthlyCap: cat.monthlyCap ?? cat.maxLimit ?? 10000,
+        isCapHardEnforced: cat.isCapHardEnforced ?? false,
+        company: cat.company?._id || cat.company || companies[0]?._id || '',
+        isActive: cat.isActive !== undefined ? cat.isActive : true,
       });
     } else {
       setEditingCategoryId(null);
       setCategoryForm({
         name: '',
         code: '',
-        maxLimit: 10000,
-        requiresReceipt: true,
-        description: '',
+        monthlyCap: 10000,
+        isCapHardEnforced: false,
+        company: companies[0]?._id || '',
+        isActive: true,
       });
     }
     setCategoryModalOpen(true);
@@ -613,12 +1035,20 @@ export const AssetsClaimsLoans = () => {
     e.preventDefault();
     setSubmittingCategory(true);
     try {
+      const payload = {
+        name: categoryForm.name,
+        code: (categoryForm.code || categoryForm.name || '').toUpperCase().replace(/\s+/g, '_'),
+        monthlyCap: Number(categoryForm.monthlyCap) || 10000,
+        isCapHardEnforced: Boolean(categoryForm.isCapHardEnforced),
+        company: categoryForm.company || undefined,
+        isActive: Boolean(categoryForm.isActive),
+      };
       if (editingCategoryId) {
-        await assetsLoansApi.updateReimbursementCategory(editingCategoryId, categoryForm);
-        showToast('Category updated!', 'success');
+        await assetsLoansApi.updateReimbursementCategory(editingCategoryId, payload);
+        showToast('Category updated successfully!', 'success');
       } else {
-        await assetsLoansApi.createReimbursementCategory(categoryForm);
-        showToast('Category created!', 'success');
+        await assetsLoansApi.createReimbursementCategory(payload);
+        showToast('New reimbursement category created!', 'success');
       }
       setCategoryModalOpen(false);
       loadCategories();
@@ -636,7 +1066,9 @@ export const AssetsClaimsLoans = () => {
     setLoadingLoans(true);
     try {
       let res;
-      if (loansViewMode === 'me') {
+      if (loansViewMode === 'pending') {
+        res = await assetsLoansApi.getPendingApprovalLoans();
+      } else if (loansViewMode === 'me') {
         res = await assetsLoansApi.getMyLoans();
       } else {
         res = await assetsLoansApi.getAllLoans();
@@ -650,12 +1082,83 @@ export const AssetsClaimsLoans = () => {
     }
   };
 
+  const loadLoanTypes = async () => {
+    setLoadingLoanTypes(true);
+    try {
+      const res = await assetsLoansApi.getLoanTypes();
+      const list = Array.isArray(res) ? res : res?.data || res?.loanTypes || [];
+      setLoanTypes(list);
+    } catch (err) {
+      showToast('Failed to load loan types', 'error');
+    } finally {
+      setLoadingLoanTypes(false);
+    }
+  };
+
+  // Filtered loans memo
+  const filteredLoans = useMemo(() => {
+    return loans.filter((item) => {
+      // 1. Text search across employee name, code, loan type, reason, and disbursement reference
+      if (loanSearchTerm.trim()) {
+        const q = loanSearchTerm.toLowerCase();
+        const empName = getEmployeeName(item.employee).toLowerCase();
+        const empCode = getEmployeeCode(item.employee).toLowerCase();
+        const typeName = (item.loanType?.name || item.loanType || '').toLowerCase();
+        const reason = (item.reason || item.purpose || '').toLowerCase();
+        const ref = (item.disbursementReference || '').toLowerCase();
+        if (
+          !empName.includes(q) &&
+          !empCode.includes(q) &&
+          !typeName.includes(q) &&
+          !reason.includes(q) &&
+          !ref.includes(q)
+        ) {
+          return false;
+        }
+      }
+
+      // 2. Status filter
+      if (loanStatusFilter !== 'ALL') {
+        const s = item.status || 'PENDING';
+        if (s !== loanStatusFilter) return false;
+      }
+
+      // 3. Loan Type filter
+      if (loanTypeFilter !== 'ALL') {
+        const tId = item.loanType?._id || item.loanType;
+        if (tId !== loanTypeFilter) return false;
+      }
+
+      return true;
+    });
+  }, [loans, loanSearchTerm, loanStatusFilter, loanTypeFilter]);
+
+  // View Loan Details Modal (GET /loans/requests/:id)
+  const openViewLoanModal = async (loan) => {
+    setViewLoanModalOpen(true);
+    setLoadingLoanDetail(true);
+    setViewingLoan(loan);
+    try {
+      const res = await assetsLoansApi.getLoanRequestById(loan._id);
+      const detail = res?.data || res?.request || res || loan;
+      setViewingLoan(detail);
+    } catch (err) {
+      console.error('Failed to load loan request details:', err);
+      setViewingLoan(loan);
+    } finally {
+      setLoadingLoanDetail(false);
+    }
+  };
+
+  // Open Apply for Loan Modal (POST /loans/requests)
   const openLoanModal = () => {
+    const selectedType = loanTypes[0];
     setLoanForm({
-      amount: '',
-      tenureMonths: 12,
-      purpose: '',
       employeeId: loanForm.employeeId || employees[0]?._id || employees[0]?.id || '',
+      loanTypeId: selectedType?._id || '',
+      amount: selectedType?.maxAmount ? Math.min(25000, selectedType.maxAmount) : 25000,
+      tenureMonths: selectedType?.maxTenureMonths ? Math.min(6, selectedType.maxTenureMonths) : 6,
+      purpose: '',
     });
     setLoanModalOpen(true);
   };
@@ -664,33 +1167,248 @@ export const AssetsClaimsLoans = () => {
     e.preventDefault();
     setSubmittingLoan(true);
     try {
-      await assetsLoansApi.createLoanRequest({
-        ...loanForm,
-        amount: Number(loanForm.amount),
-        tenureMonths: Number(loanForm.tenureMonths),
-      });
+      const selectedType = loanTypes.find((lt) => lt._id === loanForm.loanTypeId);
+      const requestedAmt = Number(loanForm.amount);
+      const requestedTenure = Number(loanForm.tenureMonths);
+
+      if (selectedType) {
+        if (selectedType.maxAmount && requestedAmt > selectedType.maxAmount) {
+          showToast(`Amount exceeds policy maximum of ₹${selectedType.maxAmount.toLocaleString()}`, 'warning');
+          setSubmittingLoan(false);
+          return;
+        }
+        if (selectedType.maxTenureMonths && requestedTenure > selectedType.maxTenureMonths) {
+          showToast(`Tenure exceeds policy maximum of ${selectedType.maxTenureMonths} months`, 'warning');
+          setSubmittingLoan(false);
+          return;
+        }
+      }
+
+      const payload = {
+        employee: loanForm.employeeId || (user?._id || user?.id),
+        loanType: loanForm.loanTypeId || (loanTypes[0]?._id),
+        requestedAmount: requestedAmt,
+        requestedTenureMonths: requestedTenure,
+        reason: loanForm.purpose || 'Salary Advance / Loan Request',
+      };
+
+      await assetsLoansApi.createLoanRequest(payload);
       showToast('Loan request submitted successfully!', 'success');
       setLoanModalOpen(false);
       loadLoans();
     } catch (err) {
-      showToast(err.response?.data?.message || 'Failed to apply for loan', 'error');
+      showToast(err.response?.data?.message || 'Failed to submit loan request', 'error');
     } finally {
       setSubmittingLoan(false);
     }
   };
 
+  // Open Decide Modal (PUT /loans/requests/:id/decide)
+  const openLoanDecideModal = (loan, decision) => {
+    setSelectedLoanForDecision(loan);
+    setLoanDecision(decision);
+    setApprovedLoanAmount(loan.approvedAmount || loan.requestedAmount || loan.amount || '');
+    setApprovedLoanTenure(loan.approvedTenureMonths || loan.requestedTenureMonths || loan.tenureMonths || 6);
+    setLoanDecisionRemark(decision === 'APPROVED' ? 'Approved for disbursement subject to standard payroll recovery' : '');
+    setLoanDecideModalOpen(true);
+  };
+
+  const handleSaveLoanDecision = async (e) => {
+    e.preventDefault();
+    setSubmittingLoanDecision(true);
+    try {
+      await assetsLoansApi.decideLoanRequest(selectedLoanForDecision._id, {
+        decision: loanDecision,
+        approvedAmount: Number(approvedLoanAmount),
+        approvedTenureMonths: Number(approvedLoanTenure),
+        remark: loanDecisionRemark,
+      });
+      showToast(`Loan request has been ${loanDecision}!`, 'success');
+      setLoanDecideModalOpen(false);
+      loadLoans();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to decide loan request', 'error');
+    } finally {
+      setSubmittingLoanDecision(false);
+    }
+  };
+
+  // Cancel Loan Request (PUT /loans/requests/:id/cancel)
+  const handleCancelLoan = async (loanId) => {
+    const isConfirmed = await confirm({
+      title: 'Cancel Loan Request',
+      message: 'Are you sure you want to cancel this pending loan request?',
+      confirmText: 'Cancel Loan',
+      cancelText: 'Keep Loan',
+      variant: 'danger',
+    });
+    if (!isConfirmed) return;
+    try {
+      await assetsLoansApi.cancelLoanRequest(loanId);
+      showToast('Loan request has been cancelled', 'info');
+      loadLoans();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to cancel loan request', 'error');
+    }
+  };
+
+  // Open Disburse Modal (POST /loans/requests/:id/disburse)
+  const openDisburseModal = (loan) => {
+    setSelectedLoanForDisburse(loan);
+    setDisburseForm({
+      disbursementReference: `BANK-TRF-LN-${Date.now().toString().slice(-6)}`,
+      disbursedAt: new Date().toISOString().split('T')[0],
+    });
+    setDisburseModalOpen(true);
+  };
+
+  const handleDisburseLoan = async (e) => {
+    e.preventDefault();
+    setSubmittingDisburse(true);
+    try {
+      await assetsLoansApi.disburseLoan(selectedLoanForDisburse._id, {
+        disbursementReference: disburseForm.disbursementReference,
+        disbursedAt: new Date(disburseForm.disbursedAt).toISOString(),
+      });
+      showToast('Loan disbursed successfully! Repayment schedule created.', 'success');
+      setDisburseModalOpen(false);
+      loadLoans();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to disburse loan', 'error');
+    } finally {
+      setSubmittingDisburse(false);
+    }
+  };
+
+  // Open EMI Schedule Modal (GET /loans/:id/emi-schedule)
   const handleOpenSchedule = async (loan) => {
     setActiveLoanForSchedule(loan);
     setScheduleModalOpen(true);
     setLoadingSchedule(true);
     try {
-      const res = await assetsLoansApi.getLoanEmiSchedule(loan._id);
-      const list = Array.isArray(res) ? res : res?.data || res?.schedule || [];
+      const loanTargetId = loan.loan?._id || loan.loanId || loan._id;
+      const res = await assetsLoansApi.getLoanEmiSchedule(loanTargetId);
+      const list = Array.isArray(res) ? res : res?.data || res?.schedule || res?.emiSchedule || [];
       setEmiSchedule(list);
     } catch (err) {
-      showToast('Failed to load EMI schedule', 'error');
+      console.warn('EMI schedule endpoint error, falling back to details:', err);
+      try {
+        const detailRes = await assetsLoansApi.getLoanRequestById(loan._id);
+        const req = detailRes?.data || detailRes?.request || detailRes;
+        if (req?.emiSchedule || req?.loan?.emiSchedule) {
+          setEmiSchedule(req.emiSchedule || req.loan.emiSchedule);
+        } else {
+          setEmiSchedule([]);
+        }
+      } catch {
+        setEmiSchedule([]);
+      }
     } finally {
       setLoadingSchedule(false);
+    }
+  };
+
+  // Mark an EMI installment as PAID (PUT /loans/:loanId/emi-schedule/:periodKey/mark-paid)
+  const handleMarkEmiPaid = async (periodKey, installmentNo) => {
+    if (!periodKey) {
+      showToast('Period identifier required to mark installment as paid', 'warning');
+      return;
+    }
+    const targetLoanId = activeLoanForSchedule?.loan?._id || activeLoanForSchedule?.loanId || activeLoanForSchedule?._id;
+    const actionKey = periodKey || installmentNo;
+    setSubmittingMarkPaid((prev) => ({ ...prev, [actionKey]: true }));
+    try {
+      await assetsLoansApi.markEmiPaid(targetLoanId, periodKey, {
+        paidAt: new Date().toISOString(),
+      });
+      showToast(`Installment (${periodKey}) marked as PAID!`, 'success');
+      // Refresh EMI schedule
+      const res = await assetsLoansApi.getLoanEmiSchedule(targetLoanId);
+      const list = Array.isArray(res) ? res : res?.data || res?.schedule || res?.emiSchedule || [];
+      setEmiSchedule(list);
+      loadLoans();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to mark installment as paid', 'error');
+    } finally {
+      setSubmittingMarkPaid((prev) => ({ ...prev, [actionKey]: false }));
+    }
+  };
+
+  // Loan Types Management Handlers (GET/POST/PUT/DELETE /loan-types)
+  const openLoanTypeModal = (type = null) => {
+    if (type) {
+      setEditingLoanTypeId(type._id);
+      setLoanTypeForm({
+        name: type.name || '',
+        category: type.category || 'ADVANCE',
+        company: type.company?._id || type.company || companies[0]?._id || '',
+        maxAmount: type.maxAmount ?? 50000,
+        maxTenureMonths: type.maxTenureMonths ?? 6,
+        interestRatePercent: type.interestRatePercent ?? 0,
+        minimumServiceMonthsRequired: type.minimumServiceMonthsRequired ?? 0,
+        isActive: type.isActive !== undefined ? type.isActive : true,
+      });
+    } else {
+      setEditingLoanTypeId(null);
+      setLoanTypeForm({
+        name: '',
+        category: 'ADVANCE',
+        company: companies[0]?._id || '',
+        maxAmount: 50000,
+        maxTenureMonths: 6,
+        interestRatePercent: 0,
+        minimumServiceMonthsRequired: 0,
+        isActive: true,
+      });
+    }
+    setLoanTypeModalOpen(true);
+  };
+
+  const handleSaveLoanType = async (e) => {
+    e.preventDefault();
+    setSubmittingLoanType(true);
+    try {
+      const payload = {
+        name: loanTypeForm.name,
+        category: loanTypeForm.category,
+        company: loanTypeForm.company || companies[0]?._id,
+        maxAmount: Number(loanTypeForm.maxAmount),
+        maxTenureMonths: Number(loanTypeForm.maxTenureMonths),
+        interestRatePercent: Number(loanTypeForm.interestRatePercent) || 0,
+        minimumServiceMonthsRequired: Number(loanTypeForm.minimumServiceMonthsRequired) || 0,
+        isActive: Boolean(loanTypeForm.isActive),
+      };
+      if (editingLoanTypeId) {
+        await assetsLoansApi.updateLoanType(editingLoanTypeId, payload);
+        showToast('Loan type updated successfully!', 'success');
+      } else {
+        await assetsLoansApi.createLoanType(payload);
+        showToast('New loan type created successfully!', 'success');
+      }
+      setLoanTypeModalOpen(false);
+      loadLoanTypes();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to save loan type', 'error');
+    } finally {
+      setSubmittingLoanType(false);
+    }
+  };
+
+  const handleDeleteLoanType = async (id) => {
+    const isConfirmed = await confirm({
+      title: 'Deactivate Loan Type',
+      message: 'Are you sure you want to deactivate/delete this loan type?',
+      confirmText: 'Deactivate',
+      cancelText: 'Cancel',
+      variant: 'danger',
+    });
+    if (!isConfirmed) return;
+    try {
+      await assetsLoansApi.deleteLoanType(id);
+      showToast('Loan type removed/deactivated', 'info');
+      loadLoanTypes();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to remove loan type', 'error');
     }
   };
 
@@ -781,6 +1499,7 @@ export const AssetsClaimsLoans = () => {
 
         return (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <Button size="sm" variant="outline" icon={Eye} title="View Asset Details" onClick={() => openViewAssetModal(r)} />
             {isAvailable && (
               <Button size="sm" variant="primary" icon={UserCheck} onClick={() => openAssignModal(r)}>
                 Assign
@@ -798,6 +1517,17 @@ export const AssetsClaimsLoans = () => {
                 </Button>
                 <Button size="sm" variant="outline" icon={AlertTriangle} title="Report Damage / Loss" onClick={() => openDamageModal(r)} />
                 <Button size="sm" variant="outline" icon={DollarSign} title="Cost Recovery Decision" onClick={() => openRecoveryModal(r)} />
+                {(r.currentAssignment?.recoveryDecision || r.currentAssignment?.damageReported) && (
+                  <Button
+                    size="sm"
+                    variant="light"
+                    icon={CheckCircle2}
+                    title="Mark Cost Recovered Outside Payroll (Cash / Cheque)"
+                    onClick={() => handleMarkRecoveredOutsidePayroll(r.currentAssignment?._id || r._id)}
+                  >
+                    Outside Settlement
+                  </Button>
+                )}
               </>
             )}
             <Button size="sm" variant="outline" icon={History} title="Custody History" onClick={() => openHistoryModal(r)} />
@@ -885,8 +1615,11 @@ export const AssetsClaimsLoans = () => {
       render: (r) => {
         const isPending = r.status === 'PENDING';
         const isApproved = r.status === 'APPROVED' || r.status === 'PARTIALLY_APPROVED';
+        const isDirect = (r.disbursementMethod === 'DIRECT_PAYMENT' || r.settlementType === 'DIRECT_PAYMENT');
+        const isDirectPaid = Boolean(r.directPaymentPaidAt || r.paymentStatus === 'PAID');
         return (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <Button size="sm" variant="outline" icon={Eye} title="View Claim Details & Receipts" onClick={() => openViewClaimModal(r)} />
             {isPending && canManage && (
               <>
                 <Button size="sm" variant="primary" icon={Check} onClick={() => openClaimDecideModal(r, 'APPROVED')}>
@@ -902,7 +1635,7 @@ export const AssetsClaimsLoans = () => {
                 Cancel
               </Button>
             )}
-            {isApproved && r.settlementType === 'DIRECT_PAYMENT' && r.paymentStatus !== 'PAID' && (
+            {isApproved && isDirect && !isDirectPaid && (
               <Button size="sm" variant="primary" icon={DollarSign} onClick={() => openDirectPaymentModal(r)}>
                 Settle Payment
               </Button>
@@ -931,16 +1664,28 @@ export const AssetsClaimsLoans = () => {
       render: (r) => <code>{r.code || '-'}</code>,
     },
     {
-      header: 'Max Allowed Limit',
-      key: 'maxLimit',
-      render: (r) => (r.maxLimit ? `₹${r.maxLimit.toLocaleString()}` : 'No Limit'),
+      header: 'Monthly Limit / Cap',
+      key: 'monthlyCap',
+      render: (r) => {
+        const cap = r.monthlyCap ?? r.maxLimit;
+        return <span style={{ fontWeight: 600 }}>{cap ? `₹${Number(cap).toLocaleString()}` : 'No Cap'}</span>;
+      },
     },
     {
-      header: 'Receipt Mandatory',
-      key: 'requiresReceipt',
+      header: 'Cap Policy',
+      key: 'isCapHardEnforced',
       render: (r) => (
-        <Badge variant={r.requiresReceipt !== false ? 'primary' : 'secondary'}>
-          {r.requiresReceipt !== false ? 'Receipt Required' : 'Self-Declared'}
+        <Badge variant={r.isCapHardEnforced ? 'danger' : 'neutral'}>
+          {r.isCapHardEnforced ? 'Hard Cap (Strict)' : 'Flexible Cap'}
+        </Badge>
+      ),
+    },
+    {
+      header: 'Status',
+      key: 'isActive',
+      render: (r) => (
+        <Badge variant={r.isActive !== false ? 'success' : 'secondary'}>
+          {r.isActive !== false ? 'ACTIVE' : 'INACTIVE'}
         </Badge>
       ),
     },
@@ -949,7 +1694,7 @@ export const AssetsClaimsLoans = () => {
       key: 'actions',
       render: (r) => (
         <Button size="sm" variant="secondary" icon={Edit2} onClick={() => openCategoryModal(r)}>
-          Edit
+          Edit Category
         </Button>
       ),
     },
@@ -958,8 +1703,190 @@ export const AssetsClaimsLoans = () => {
   // Loans Table Columns
   const loanColumns = [
     {
-      header: 'Loan Details',
-      key: 'purpose',
+      header: 'Borrower',
+      key: 'employee',
+      render: (r) => (
+        <div>
+          <div style={{ fontWeight: 600 }}>{getEmployeeName(r.employee)}</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            {getEmployeeCode(r.employee) !== '-' ? `Code: ${getEmployeeCode(r.employee)}` : ''}
+            {r.employee?.department?.name ? ` • ${r.employee.department.name}` : ''}
+          </div>
+        </div>
+      ),
+    },
+    {
+      header: 'Loan Type & Purpose',
+      key: 'loanType',
+      render: (r) => {
+        const typeName = r.loanType?.name || (typeof r.loanType === 'string' ? r.loanType : 'Salary Advance / Loan');
+        const cat = r.loanType?.category || 'ADVANCE';
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: '8px',
+                backgroundColor: cat === 'ADVANCE' ? '#e6f7ff' : '#f6ffed',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: cat === 'ADVANCE' ? '#1890ff' : '#52c41a',
+              }}
+            >
+              <HandCoins size={20} />
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontWeight: 600 }}>{typeName}</span>
+                <Badge variant={cat === 'ADVANCE' ? 'primary' : 'success'}>{cat}</Badge>
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {r.reason || r.purpose || 'No purpose recorded'}
+              </div>
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      header: 'Requested & Terms',
+      key: 'amount',
+      render: (r) => {
+        const reqAmt = r.requestedAmount || r.amount || 0;
+        const reqTenure = r.requestedTenureMonths || r.tenureMonths || 6;
+        const appAmt = r.approvedAmount;
+        const appTenure = r.approvedTenureMonths;
+        const isApprovedOrDisbursed = r.status === 'APPROVED' || r.status === 'DISBURSED';
+        const finalAmt = isApprovedOrDisbursed && appAmt ? appAmt : reqAmt;
+        const finalTenure = isApprovedOrDisbursed && appTenure ? appTenure : reqTenure;
+        const monthlyEmi = finalTenure > 0 ? Math.round(finalAmt / finalTenure) : 0;
+
+        return (
+          <div>
+            <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>
+              ₹{finalAmt.toLocaleString()}
+              {isApprovedOrDisbursed && appAmt && appAmt !== reqAmt && (
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textDecoration: 'line-through', marginLeft: 6 }}>
+                  ₹{reqAmt.toLocaleString()}
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+              Tenure: {finalTenure} Mos • EMI: ~₹{monthlyEmi.toLocaleString()}/mo
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      header: 'Status',
+      key: 'status',
+      render: (r) => {
+        const s = r.status || 'PENDING';
+        const colors = {
+          PENDING: 'warning',
+          APPROVED: 'primary',
+          DISBURSED: 'success',
+          REJECTED: 'danger',
+          CANCELLED: 'secondary',
+          CLOSED: 'secondary',
+        };
+        return <Badge variant={colors[s] || 'secondary'}>{s}</Badge>;
+      },
+    },
+    {
+      header: 'Actions',
+      key: 'actions',
+      render: (r) => {
+        const isPending = r.status === 'PENDING';
+        const isApproved = r.status === 'APPROVED';
+        const isDisbursed = r.status === 'DISBURSED' || Boolean(r.disbursedAt);
+
+        return (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {/* View Details */}
+            <Button
+              size="sm"
+              variant="outline"
+              icon={Eye}
+              title="View Loan Details"
+              onClick={() => openViewLoanModal(r)}
+            />
+
+            {/* Admin Decision Actions */}
+            {isPending && canManage && (
+              <>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  icon={Check}
+                  title="Approve Loan Request"
+                  onClick={() => openLoanDecideModal(r, 'APPROVED')}
+                >
+                  Approve
+                </Button>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  icon={X}
+                  title="Reject Loan Request"
+                  onClick={() => openLoanDecideModal(r, 'REJECTED')}
+                >
+                  Reject
+                </Button>
+              </>
+            )}
+
+            {/* Cancel Pending Request */}
+            {isPending && (
+              <Button
+                size="sm"
+                variant="outline"
+                icon={Ban}
+                title="Cancel Request"
+                onClick={() => handleCancelLoan(r._id)}
+              />
+            )}
+
+            {/* Admin Disburse Action */}
+            {isApproved && canManage && (
+              <Button
+                size="sm"
+                variant="primary"
+                icon={DollarSign}
+                style={{ backgroundColor: '#52c41a', borderColor: '#52c41a' }}
+                title="Disburse Funds & Generate EMI Schedule"
+                onClick={() => openDisburseModal(r)}
+              >
+                Disburse
+              </Button>
+            )}
+
+            {/* EMI Schedule Viewer */}
+            {(isDisbursed || isApproved) && (
+              <Button
+                size="sm"
+                variant="secondary"
+                icon={Calendar}
+                title="View Repayment Schedule"
+                onClick={() => handleOpenSchedule(r)}
+              >
+                Schedule
+              </Button>
+            )}
+          </div>
+        );
+      },
+    },
+  ];
+
+  // Loan Types Table Columns
+  const loanTypeColumns = [
+    {
+      header: 'Loan / Advance Type',
+      key: 'name',
       render: (r) => (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div
@@ -977,54 +1904,68 @@ export const AssetsClaimsLoans = () => {
             <HandCoins size={20} />
           </div>
           <div>
-            <div style={{ fontWeight: 600 }}>{r.purpose || 'Personal Advance'}</div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-              Tenure: {r.tenureMonths || 12} Months • Monthly EMI: ₹{Math.round((r.amount || 0) / (r.tenureMonths || 12)).toLocaleString()}
+            <div style={{ fontWeight: 600 }}>{r.name}</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              Category: <strong>{r.category || 'ADVANCE'}</strong>
+              {r.company?.name ? ` • ${r.company.name}` : ''}
             </div>
           </div>
         </div>
       ),
     },
     {
-      header: 'Borrower',
-      key: 'employee',
+      header: 'Category',
+      key: 'category',
+      render: (r) => (
+        <Badge variant={r.category === 'ADVANCE' ? 'primary' : 'success'}>
+          {r.category || 'ADVANCE'}
+        </Badge>
+      ),
+    },
+    {
+      header: 'Limits & Policy',
+      key: 'limits',
       render: (r) => (
         <div>
-          <div style={{ fontWeight: 500 }}>
-            {getEmployeeName(r.employee)}
+          <div style={{ fontWeight: 600 }}>Max: ₹{(r.maxAmount || 0).toLocaleString()}</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            Max Tenure: {r.maxTenureMonths || 0} Months
           </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{getEmployeeCode(r.employee)}</div>
         </div>
       ),
     },
     {
-      header: 'Principal Amount',
-      key: 'amount',
-      render: (r) => <span style={{ fontWeight: 700 }}>₹{(r.amount || 0).toLocaleString()}</span>,
+      header: 'Interest & Service',
+      key: 'interest',
+      render: (r) => (
+        <div>
+          <div style={{ fontWeight: 500 }}>
+            {r.interestRatePercent ? `${r.interestRatePercent}% p.a.` : '0% Interest-Free'}
+          </div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            Min Service: {r.minimumServiceMonthsRequired || 0} Months
+          </div>
+        </div>
+      ),
     },
     {
       header: 'Status',
-      key: 'status',
-      render: (r) => {
-        const s = r.status || 'PENDING';
-        const colors = {
-          PENDING: 'warning',
-          APPROVED: 'success',
-          DISBURSED: 'primary',
-          REJECTED: 'danger',
-          COMPLETED: 'secondary',
-        };
-        return <Badge variant={colors[s] || 'secondary'}>{s}</Badge>;
-      },
+      key: 'isActive',
+      render: (r) => (
+        <Badge variant={r.isActive ? 'success' : 'secondary'}>
+          {r.isActive ? 'ACTIVE' : 'INACTIVE'}
+        </Badge>
+      ),
     },
     {
       header: 'Actions',
       key: 'actions',
       render: (r) => (
         <div style={{ display: 'flex', gap: 6 }}>
-          <Button size="sm" variant="secondary" icon={Calendar} onClick={() => handleOpenSchedule(r)}>
-            EMI Schedule
+          <Button size="sm" variant="secondary" icon={Edit2} onClick={() => openLoanTypeModal(r)}>
+            Edit
           </Button>
+          <Button size="sm" variant="danger" icon={Trash2} onClick={() => handleDeleteLoanType(r._id)} />
         </div>
       ),
     },
@@ -1066,9 +2007,16 @@ export const AssetsClaimsLoans = () => {
             </Button>
           )}
           {activeTab === 'loans' && (
-            <Button variant="primary" icon={Plus} onClick={openLoanModal}>
-              Apply for Loan
-            </Button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {canManage && (
+                <Button variant="secondary" icon={Settings} onClick={() => openLoanTypeModal()}>
+                  New Loan Type
+                </Button>
+              )}
+              <Button variant="primary" icon={Plus} onClick={openLoanModal}>
+                Apply for Loan
+              </Button>
+            </div>
           )}
         </div>
       </div>
@@ -1089,6 +2037,7 @@ export const AssetsClaimsLoans = () => {
       >
         {[
           { key: 'assets', label: `Physical Assets (${assets.length})`, icon: Laptop },
+          { key: 'clearance', label: 'Employee Asset Clearance & No-Due', icon: ShieldCheck },
           { key: 'claims', label: `Reimbursements & Claims (${claims.length})`, icon: Receipt },
           { key: 'categories', label: `Expense Categories (${categories.length})`, icon: Settings },
           { key: 'loans', label: `Loans & Advances (${loans.length})`, icon: HandCoins },
@@ -1124,75 +2073,752 @@ export const AssetsClaimsLoans = () => {
 
       {/* TAB 1: ASSETS CONTENT */}
       {activeTab === 'assets' && (
-        <div className="card">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Quick Metrics Bar */}
           <div
             style={{
-              padding: '14px 16px',
-              borderBottom: '1px solid var(--border-color)',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              backgroundColor: 'var(--bg-subtle)',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              gap: 12,
             }}
           >
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-              Hardware custody tracking, serial tags, condition returns, and damage recovery.
+            <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: '#e6f4ff', color: '#1677ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Laptop size={22} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Total Inventory</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700 }}>{assets.length}</div>
+              </div>
             </div>
-            <Button size="sm" variant="secondary" icon={RefreshCw} onClick={loadAssets}>
-              Refresh Assets
+
+            <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: '#f6ffed', color: '#52c41a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <CheckCircle2 size={22} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Available in Stock</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#52c41a' }}>
+                  {assets.filter((a) => {
+                    const s = getAssetStatus(a);
+                    return (s === 'UNASSIGNED' || s === 'AVAILABLE') && !a.currentAssignment;
+                  }).length}
+                </div>
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: '#f0f5ff', color: '#2f54eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <UserCheck size={22} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Issued / In Custody</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#2f54eb' }}>
+                  {assets.filter((a) => getAssetStatus(a) === 'ASSIGNED' || Boolean(a.currentAssignment)).length}
+                </div>
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: '#fffbe6', color: '#faad14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <AlertTriangle size={22} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>In Repair / Damaged</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#d48806' }}>
+                  {assets.filter((a) => {
+                    const s = getAssetStatus(a);
+                    return s === 'IN_REPAIR' || s === 'DAMAGED' || s === 'LOST';
+                  }).length}
+                </div>
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: '#fff1f0', color: '#f5222d', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Ban size={22} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Retired</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#cf1322' }}>
+                  {assets.filter((a) => getAssetStatus(a) === 'RETIRED').length}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            {/* Search & Filters Bar */}
+            <div
+              style={{
+                padding: '12px 16px',
+                borderBottom: '1px solid var(--border-color)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 12,
+                backgroundColor: 'var(--bg-subtle)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 260 }}>
+                <div style={{ position: 'relative', width: '100%', maxWidth: 320 }}>
+                  <Search
+                    size={16}
+                    style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}
+                  />
+                  <input
+                    type="text"
+                    value={assetSearchTerm}
+                    onChange={(e) => setAssetSearchTerm(e.target.value)}
+                    placeholder="Search name, tag, serial, employee..."
+                    style={{
+                      width: '100%',
+                      padding: '7px 10px 7px 32px',
+                      borderRadius: 6,
+                      border: '1px solid var(--border-color)',
+                      fontSize: '0.84rem',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+
+                <select
+                  value={assetCategoryFilter}
+                  onChange={(e) => setAssetCategoryFilter(e.target.value)}
+                  style={{
+                    padding: '7px 12px',
+                    borderRadius: 6,
+                    border: '1px solid var(--border-color)',
+                    fontSize: '0.84rem',
+                    background: '#fff',
+                    outline: 'none',
+                  }}
+                >
+                  <option value="ALL">All Categories</option>
+                  <option value="LAPTOP">Laptop</option>
+                  <option value="MOBILE">Mobile</option>
+                  <option value="ID_CARD">ID Card</option>
+                  <option value="TOOL">Tool</option>
+                  <option value="VEHICLE">Vehicle</option>
+                  <option value="UNIFORM">Uniform</option>
+                  <option value="OFFICE_EQUIPMENT">Office Equipment</option>
+                  <option value="OTHER">Other</option>
+                </select>
+
+                <select
+                  value={assetStatusFilter}
+                  onChange={(e) => setAssetStatusFilter(e.target.value)}
+                  style={{
+                    padding: '7px 12px',
+                    borderRadius: 6,
+                    border: '1px solid var(--border-color)',
+                    fontSize: '0.84rem',
+                    background: '#fff',
+                    outline: 'none',
+                  }}
+                >
+                  <option value="ALL">All Statuses</option>
+                  <option value="UNASSIGNED">Available / In Stock</option>
+                  <option value="ASSIGNED">Assigned (In Custody)</option>
+                  <option value="IN_REPAIR">In Repair</option>
+                  <option value="DAMAGED">Damaged</option>
+                  <option value="LOST">Lost</option>
+                  <option value="RETIRED">Retired</option>
+                </select>
+
+                {companies.length > 1 && (
+                  <select
+                    value={assetCompanyFilter}
+                    onChange={(e) => setAssetCompanyFilter(e.target.value)}
+                    style={{
+                      padding: '7px 12px',
+                      borderRadius: 6,
+                      border: '1px solid var(--border-color)',
+                      fontSize: '0.84rem',
+                      background: '#fff',
+                      outline: 'none',
+                    }}
+                  >
+                    <option value="ALL">All Companies</option>
+                    {companies.map((c) => (
+                      <option key={c._id} value={c._id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                  Showing {filteredAssets.length} of {assets.length} assets
+                </span>
+                <Button size="sm" variant="secondary" icon={RefreshCw} onClick={loadAssets}>
+                  Refresh
+                </Button>
+              </div>
+            </div>
+            <Table columns={assetColumns} data={filteredAssets} loading={loadingAssets} emptyMessage="No matching assets found." />
+          </div>
+        </div>
+      )}
+
+      {/* TAB: EMPLOYEE ASSET CLEARANCE & NO-DUE (Module 20 Clearance & Recovery Link) */}
+      {activeTab === 'clearance' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Employee Selector Bar */}
+          <div
+            className="card"
+            style={{
+              padding: '16px 20px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 16,
+              background: '#fff',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 280 }}>
+              <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-color)', whiteSpace: 'nowrap' }}>
+                Employee to Audit:
+              </div>
+              <div style={{ flex: 1, maxWidth: 380 }}>
+                <Select
+                  value={selectedClearanceEmployeeId}
+                  onChange={(e) => {
+                    setSelectedClearanceEmployeeId(e.target.value);
+                    loadEmployeeClearance(e.target.value);
+                  }}
+                  options={employees.map((emp) => ({
+                    value: emp._id || emp.id,
+                    label: formatEmployeeOption(emp, true),
+                  }))}
+                  placeholder="Select Employee..."
+                />
+              </div>
+            </div>
+
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={RefreshCw}
+              loading={loadingClearance}
+              onClick={() => loadEmployeeClearance(selectedClearanceEmployeeId)}
+            >
+              Refresh Clearance Audit
             </Button>
           </div>
-          <Table columns={assetColumns} data={assets} loading={loadingAssets} emptyMessage="No assets registered yet." />
+
+          {/* No Due Clearance Status Banner */}
+          {clearanceCert && (
+            <div
+              style={{
+                padding: '18px 22px',
+                borderRadius: 12,
+                background: (clearanceCert.isCleared || clearanceCert.clearanceStatus === 'CLEARED')
+                  ? 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)'
+                  : 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+                border: `1px solid ${(clearanceCert.isCleared || clearanceCert.clearanceStatus === 'CLEARED') ? '#a7f3d0' : '#fed7aa'}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 14,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <div
+                  style={{
+                    width: 48,
+                    height: 48,
+                    borderRadius: '50%',
+                    backgroundColor: (clearanceCert.isCleared || clearanceCert.clearanceStatus === 'CLEARED') ? '#059669' : '#ea580c',
+                    color: '#fff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                  }}
+                >
+                  {(clearanceCert.isCleared || clearanceCert.clearanceStatus === 'CLEARED') ? (
+                    <ShieldCheck size={28} />
+                  ) : (
+                    <AlertTriangle size={28} />
+                  )}
+                </div>
+                <div>
+                  <div
+                    style={{
+                      fontSize: '1.05rem',
+                      fontWeight: 700,
+                      color: (clearanceCert.isCleared || clearanceCert.clearanceStatus === 'CLEARED') ? '#065f46' : '#9a3412',
+                    }}
+                  >
+                    {(clearanceCert.isCleared || clearanceCert.clearanceStatus === 'CLEARED')
+                      ? 'No Due Clearance: APPROVED (Ready for Exit / F&F Settlement)'
+                      : 'No Due Clearance: ON HOLD (Pending Asset Dues / Unreturned Items)'}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: '0.85rem',
+                      color: (clearanceCert.isCleared || clearanceCert.clearanceStatus === 'CLEARED') ? '#047857' : '#c2410c',
+                      marginTop: 3,
+                    }}
+                  >
+                    {clearanceCert.message || (
+                      (clearanceCert.isCleared || clearanceCert.clearanceStatus === 'CLEARED')
+                        ? 'Employee has zero pending asset dues and has returned all assigned physical equipment.'
+                        : 'Employee still has active hardware in custody or unrecovered damage liability.'
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <Badge variant={(clearanceCert.isCleared || clearanceCert.clearanceStatus === 'CLEARED') ? 'success' : 'danger'}>
+                  {clearanceCert.clearanceStatus || (clearanceCert.isCleared ? 'CLEARED' : 'PENDING')}
+                </Badge>
+              </div>
+            </div>
+          )}
+
+          {/* Metrics summary */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: 12,
+            }}
+          >
+            <div className="card" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ width: 42, height: 42, borderRadius: 8, background: '#f0f5ff', color: '#2f54eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Laptop size={22} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>Active Assets in Hand</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#2f54eb' }}>
+                  {clearanceAssignments.filter((a) => a.status === 'ISSUED').length}
+                </div>
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ width: 42, height: 42, borderRadius: 8, background: '#f6ffed', color: '#52c41a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <CheckCircle2 size={22} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>Returned Assets</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#52c41a' }}>
+                  {clearanceAssignments.filter((a) => a.status === 'RETURNED').length}
+                </div>
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ width: 42, height: 42, borderRadius: 8, background: '#fff2e8', color: '#fa541c', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <DollarSign size={22} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>Pending Cost Recovery</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#fa541c' }}>
+                  ₹{(clearancePendingRecoveries.reduce((sum, item) => sum + (Number(item.recoveryAmount || item.amount) || 0), 0)).toLocaleString()}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Table 1: Employee's Asset Assignments */}
+          <div className="card">
+            <div
+              style={{
+                padding: '14px 16px',
+                borderBottom: '1px solid var(--border-color)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                backgroundColor: 'var(--bg-subtle)',
+              }}
+            >
+              <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>
+                Asset Custody Assignments ({clearanceAssignments.length})
+              </div>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                Active and historical equipment issued to this employee
+              </span>
+            </div>
+
+            <Table
+              loading={loadingClearance}
+              data={clearanceAssignments}
+              emptyMessage="No equipment assignments found for this employee."
+              columns={[
+                {
+                  header: 'Asset Name & Tag',
+                  key: 'asset',
+                  render: (r) => {
+                    const ast = r.asset || {};
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ width: 34, height: 34, borderRadius: 6, background: '#e6f4ff', color: '#1677ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Laptop size={18} />
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: 600 }}>{ast.name || 'Equipment'}</div>
+                          <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                            Tag: <strong>{ast.assetTag || r.assetTag || '-'}</strong> • Category: {ast.category || '-'}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  },
+                },
+                {
+                  header: 'Issued Date',
+                  key: 'issuedAt',
+                  render: (r) => (
+                    <div>
+                      <div>{r.issuedAt ? new Date(r.issuedAt).toLocaleDateString() : '-'}</div>
+                      <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                        Condition: {r.conditionAtIssue || 'GOOD'}
+                      </div>
+                    </div>
+                  ),
+                },
+                {
+                  header: 'Return Details',
+                  key: 'returnedAt',
+                  render: (r) => (
+                    <div>
+                      <div>{r.returnedAt ? new Date(r.returnedAt).toLocaleDateString() : <span style={{ color: '#fa8c16' }}>Not Returned</span>}</div>
+                      {r.conditionAtReturn && (
+                        <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                          Condition: {r.conditionAtReturn}
+                        </div>
+                      )}
+                    </div>
+                  ),
+                },
+                {
+                  header: 'Status',
+                  key: 'status',
+                  render: (r) => {
+                    const st = r.status || (r.returnedAt ? 'RETURNED' : 'ISSUED');
+                    const colorMap = {
+                      ISSUED: 'primary',
+                      RETURNED: 'success',
+                      DAMAGED: 'warning',
+                      LOST: 'danger',
+                    };
+                    return <Badge variant={colorMap[st] || 'secondary'}>{st}</Badge>;
+                  },
+                },
+                {
+                  header: 'Clearance Actions',
+                  key: 'actions',
+                  render: (r) => {
+                    const isIssued = r.status === 'ISSUED' && !r.returnedAt;
+                    const assetObj = r.asset || { _id: r.assetId, name: 'Asset' };
+                    return (
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {isIssued && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              icon={RotateCcw}
+                              onClick={() => {
+                                setTargetAsset(assetObj);
+                                setTargetAssignment(r);
+                                setReturnCondition('GOOD');
+                                setReturnRemarks('Returned for clearance process');
+                                setReturnModalOpen(true);
+                              }}
+                            >
+                              Process Return
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              icon={AlertTriangle}
+                              title="Report Damage or Loss"
+                              onClick={() => {
+                                setTargetAsset(assetObj);
+                                setTargetAssignment(r);
+                                setDamageForm({
+                                  incidentType: 'DAMAGED',
+                                  estimatedCost: 5000,
+                                  incidentDescription: '',
+                                });
+                                setDamageModalOpen(true);
+                              }}
+                            />
+                          </>
+                        )}
+                        {(r.status === 'DAMAGED' || r.status === 'LOST') && (
+                          <Button
+                            size="sm"
+                            variant="light"
+                            icon={CheckCircle2}
+                            title="Mark Recovered Outside Payroll"
+                            onClick={() => handleMarkRecoveredOutsidePayroll(r._id)}
+                          >
+                            Outside Settlement
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  },
+                },
+              ]}
+            />
+          </div>
+
+          {/* Table 2: Pending Cost Recoveries */}
+          {clearancePendingRecoveries.length > 0 && (
+            <div className="card">
+              <div
+                style={{
+                  padding: '14px 16px',
+                  borderBottom: '1px solid var(--border-color)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  backgroundColor: '#fff7e6',
+                }}
+              >
+                <div style={{ fontWeight: 600, fontSize: '0.9rem', color: '#d46b08' }}>
+                  Pending Cost Recoveries ({clearancePendingRecoveries.length})
+                </div>
+                <span style={{ fontSize: '0.8rem', color: '#d46b08' }}>
+                  Forward linked with Module 14 (Payroll deductions) or settled outside payroll
+                </span>
+              </div>
+
+              <Table
+                data={clearancePendingRecoveries}
+                columns={[
+                  {
+                    header: 'Description',
+                    key: 'description',
+                    render: (r) => (
+                      <div>
+                        <div style={{ fontWeight: 600 }}>{r.description || r.incidentDescription || 'Asset Cost Recovery'}</div>
+                        <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                          Asset: {r.asset?.name || r.assetName || 'Hardware Asset'}
+                        </div>
+                      </div>
+                    ),
+                  },
+                  {
+                    header: 'Amount',
+                    key: 'recoveryAmount',
+                    render: (r) => (
+                      <span style={{ fontWeight: 700, color: '#cf1322' }}>
+                        ₹{(Number(r.recoveryAmount || r.amount) || 0).toLocaleString()}
+                      </span>
+                    ),
+                  },
+                  {
+                    header: 'Recovery Mode',
+                    key: 'recoveryMode',
+                    render: (r) => <Badge variant="secondary">{r.recoveryMode || 'PAYROLL_DEDUCTION'}</Badge>,
+                  },
+                  {
+                    header: 'Status',
+                    key: 'status',
+                    render: (r) => <Badge variant="warning">{r.status || 'PENDING'}</Badge>,
+                  },
+                  {
+                    header: 'Actions',
+                    key: 'actions',
+                    render: (r) => (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        icon={CheckCircle2}
+                        loading={submittingOutsideRecovery}
+                        onClick={() => handleMarkRecoveredOutsidePayroll(r._id || r.assignmentId || r.assignment)}
+                      >
+                        Settle Outside Payroll
+                      </Button>
+                    ),
+                  },
+                ]}
+              />
+            </div>
+          )}
         </div>
       )}
 
       {/* TAB 2: CLAIMS CONTENT */}
       {activeTab === 'claims' && (
-        <div className="card">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Claims Metrics Bar */}
           <div
             style={{
-              padding: '14px 16px',
-              borderBottom: '1px solid var(--border-color)',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: 10,
-              backgroundColor: 'var(--bg-subtle)',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: 12,
             }}
           >
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => setClaimsViewMode('my')}
-                className={`btn ${claimsViewMode === 'my' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-              >
-                My Submitted Claims
-              </button>
-              {canManage && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setClaimsViewMode('pending')}
-                    className={`btn ${claimsViewMode === 'pending' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-                  >
-                    Pending Approvals Queue
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setClaimsViewMode('all')}
-                    className={`btn ${claimsViewMode === 'all' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-                  >
-                    All Organization Claims
-                  </button>
-                </>
-              )}
+            <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: '#e6f4ff', color: '#1677ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Receipt size={22} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Total Claims Filed</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700 }}>{claims.length}</div>
+              </div>
             </div>
-            <Button size="sm" variant="secondary" icon={RefreshCw} onClick={loadClaims}>
-              Refresh Claims
-            </Button>
+
+            <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: '#fffbe6', color: '#faad14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Clock size={22} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Pending Approvals</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#d48806' }}>
+                  {claims.filter((c) => c.status === 'PENDING').length}
+                </div>
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: '#f6ffed', color: '#52c41a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <CheckCircle2 size={22} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Approved / Settled</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#52c41a' }}>
+                  {claims.filter((c) => c.status === 'APPROVED' || c.status === 'PAID').length}
+                </div>
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: '#f0f5ff', color: '#2f54eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <DollarSign size={22} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Total Claimed Value</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#2f54eb' }}>
+                  ₹{(claims.reduce((acc, c) => acc + (Number(c.totalClaimedAmount || c.amount) || 0), 0)).toLocaleString()}
+                </div>
+              </div>
+            </div>
           </div>
-          <Table columns={claimColumns} data={claims} loading={loadingClaims} emptyMessage="No expense claims filed." />
+
+          <div className="card">
+            {/* View Mode & Filter Controls */}
+            <div
+              style={{
+                padding: '12px 16px',
+                borderBottom: '1px solid var(--border-color)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 12,
+                backgroundColor: 'var(--bg-subtle)',
+              }}
+            >
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => setClaimsViewMode('my')}
+                  className={`btn ${claimsViewMode === 'my' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                >
+                  My Submitted Claims
+                </button>
+                {canManage && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setClaimsViewMode('pending')}
+                      className={`btn ${claimsViewMode === 'pending' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                    >
+                      Pending Approvals Queue
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setClaimsViewMode('all')}
+                      className={`btn ${claimsViewMode === 'all' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                    >
+                      All Organization Claims
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <div style={{ position: 'relative', width: 220 }}>
+                  <Search
+                    size={16}
+                    style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}
+                  />
+                  <input
+                    type="text"
+                    value={claimSearchTerm}
+                    onChange={(e) => setClaimSearchTerm(e.target.value)}
+                    placeholder="Search claims..."
+                    style={{
+                      width: '100%',
+                      padding: '6px 10px 6px 32px',
+                      borderRadius: 6,
+                      border: '1px solid var(--border-color)',
+                      fontSize: '0.82rem',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+
+                <select
+                  value={claimStatusFilter}
+                  onChange={(e) => setClaimStatusFilter(e.target.value)}
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: 6,
+                    border: '1px solid var(--border-color)',
+                    fontSize: '0.82rem',
+                    background: '#fff',
+                    outline: 'none',
+                  }}
+                >
+                  <option value="ALL">All Statuses</option>
+                  <option value="PENDING">Pending</option>
+                  <option value="APPROVED">Approved</option>
+                  <option value="PARTIALLY_APPROVED">Partially Approved</option>
+                  <option value="REJECTED">Rejected</option>
+                  <option value="PAID">Paid</option>
+                  <option value="CANCELLED">Cancelled</option>
+                </select>
+
+                <select
+                  value={claimMethodFilter}
+                  onChange={(e) => setClaimMethodFilter(e.target.value)}
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: 6,
+                    border: '1px solid var(--border-color)',
+                    fontSize: '0.82rem',
+                    background: '#fff',
+                    outline: 'none',
+                  }}
+                >
+                  <option value="ALL">All Routes</option>
+                  <option value="PAYROLL">Payroll Addition</option>
+                  <option value="DIRECT_PAYMENT">Direct Settlement</option>
+                </select>
+
+                <Button size="sm" variant="secondary" icon={RefreshCw} onClick={loadClaims}>
+                  Refresh
+                </Button>
+              </div>
+            </div>
+            <Table columns={claimColumns} data={filteredClaims} loading={loadingClaims} emptyMessage="No matching expense claims found." />
+          </div>
         </div>
       )}
 
@@ -1220,40 +2846,247 @@ export const AssetsClaimsLoans = () => {
         </div>
       )}
 
-      {/* TAB 4: LOANS CONTENT */}
+      {/* TAB 4: LOANS & ADVANCES CONTENT */}
       {activeTab === 'loans' && (
-        <div className="card">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Quick Metrics Bar */}
           <div
             style={{
-              padding: '14px 16px',
-              borderBottom: '1px solid var(--border-color)',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              backgroundColor: 'var(--bg-subtle)',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              gap: 12,
             }}
           >
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => setLoansViewMode('all')}
-                className={`btn ${loansViewMode === 'all' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-              >
-                All Loans
-              </button>
-              <button
-                type="button"
-                onClick={() => setLoansViewMode('me')}
-                className={`btn ${loansViewMode === 'me' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-              >
-                My Loans
-              </button>
+            <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: '#e6f7ff', color: '#1890ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <HandCoins size={22} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Total Requests</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700 }}>{loans.length}</div>
+              </div>
             </div>
-            <Button size="sm" variant="secondary" icon={RefreshCw} onClick={loadLoans}>
-              Refresh Loans
-            </Button>
+
+            <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: '#fffbe6', color: '#faad14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Clock size={22} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Pending Approvals</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#faad14' }}>
+                  {loans.filter((l) => l.status === 'PENDING').length}
+                </div>
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: '#f0f5ff', color: '#2f54eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <CheckCircle2 size={22} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Approved / Ready</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#2f54eb' }}>
+                  {loans.filter((l) => l.status === 'APPROVED').length}
+                </div>
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: '#f6ffed', color: '#52c41a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <DollarSign size={22} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Disbursed Active</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#52c41a' }}>
+                  {loans.filter((l) => l.status === 'DISBURSED' || Boolean(l.disbursedAt)).length}
+                </div>
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: '#f9f0ff', color: '#722ed1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <DollarSign size={22} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Disbursed Volume</div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#722ed1' }}>
+                  ₹{(loans.reduce((acc, l) => {
+                    if (l.status === 'DISBURSED' || Boolean(l.disbursedAt)) {
+                      return acc + (Number(l.approvedAmount || l.requestedAmount || l.amount) || 0);
+                    }
+                    return acc;
+                  }, 0)).toLocaleString()}
+                </div>
+              </div>
+            </div>
           </div>
-          <Table columns={loanColumns} data={loans} loading={loadingLoans} emptyMessage="No loan records found." />
+
+          <div className="card">
+            {/* View Mode & Filter Controls */}
+            <div
+              style={{
+                padding: '12px 16px',
+                borderBottom: '1px solid var(--border-color)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 12,
+                backgroundColor: 'var(--bg-subtle)',
+              }}
+            >
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => setLoansViewMode('all')}
+                  className={`btn ${loansViewMode === 'all' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                >
+                  All Requests
+                </button>
+                {canManage && (
+                  <button
+                    type="button"
+                    onClick={() => setLoansViewMode('pending')}
+                    className={`btn ${loansViewMode === 'pending' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                  >
+                    <span>Pending Approvals</span>
+                    {loans.filter((l) => l.status === 'PENDING').length > 0 && (
+                      <span
+                        style={{
+                          backgroundColor: '#faad14',
+                          color: '#fff',
+                          borderRadius: '10px',
+                          padding: '1px 6px',
+                          fontSize: '0.7rem',
+                          fontWeight: 700,
+                        }}
+                      >
+                        {loans.filter((l) => l.status === 'PENDING').length}
+                      </span>
+                    )}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setLoansViewMode('me')}
+                  className={`btn ${loansViewMode === 'me' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                >
+                  My Requests
+                </button>
+                {canManage && (
+                  <button
+                    type="button"
+                    onClick={() => setLoansViewMode('loan_types')}
+                    className={`btn ${loansViewMode === 'loan_types' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                  >
+                    <Settings size={14} />
+                    <span>Loan Types ({loanTypes.length})</span>
+                  </button>
+                )}
+              </div>
+
+              {loansViewMode !== 'loan_types' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <div style={{ position: 'relative', width: 220 }}>
+                    <Search
+                      size={16}
+                      style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}
+                    />
+                    <input
+                      type="text"
+                      value={loanSearchTerm}
+                      onChange={(e) => setLoanSearchTerm(e.target.value)}
+                      placeholder="Search borrower, type, purpose..."
+                      style={{
+                        width: '100%',
+                        padding: '6px 10px 6px 32px',
+                        borderRadius: 6,
+                        border: '1px solid var(--border-color)',
+                        fontSize: '0.82rem',
+                        outline: 'none',
+                      }}
+                    />
+                  </div>
+
+                  <select
+                    value={loanStatusFilter}
+                    onChange={(e) => setLoanStatusFilter(e.target.value)}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: 6,
+                      border: '1px solid var(--border-color)',
+                      fontSize: '0.82rem',
+                      background: '#fff',
+                      outline: 'none',
+                    }}
+                  >
+                    <option value="ALL">All Statuses</option>
+                    <option value="PENDING">Pending</option>
+                    <option value="APPROVED">Approved</option>
+                    <option value="DISBURSED">Disbursed</option>
+                    <option value="REJECTED">Rejected</option>
+                    <option value="CANCELLED">Cancelled</option>
+                  </select>
+
+                  {loanTypes.length > 0 && (
+                    <select
+                      value={loanTypeFilter}
+                      onChange={(e) => setLoanTypeFilter(e.target.value)}
+                      style={{
+                        padding: '6px 10px',
+                        borderRadius: 6,
+                        border: '1px solid var(--border-color)',
+                        fontSize: '0.82rem',
+                        background: '#fff',
+                        outline: 'none',
+                      }}
+                    >
+                      <option value="ALL">All Loan Types</option>
+                      {loanTypes.map((lt) => (
+                        <option key={lt._id} value={lt._id}>
+                          {lt.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
+                  <Button size="sm" variant="secondary" icon={RefreshCw} onClick={loadLoans}>
+                    Refresh
+                  </Button>
+                </div>
+              )}
+
+              {loansViewMode === 'loan_types' && (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Button size="sm" variant="primary" icon={Plus} onClick={() => openLoanTypeModal()}>
+                    New Loan Type
+                  </Button>
+                  <Button size="sm" variant="secondary" icon={RefreshCw} onClick={loadLoanTypes}>
+                    Refresh Types
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {/* Table Display */}
+            {loansViewMode === 'loan_types' ? (
+              <Table
+                columns={loanTypeColumns}
+                data={loanTypes}
+                loading={loadingLoanTypes}
+                emptyMessage="No loan types configured. Click 'New Loan Type' to create Salary Advance, Emergency Loan, etc."
+              />
+            ) : (
+              <Table
+                columns={loanColumns}
+                data={filteredLoans}
+                loading={loadingLoans}
+                emptyMessage="No loan or advance requests found."
+              />
+            )}
+          </div>
         </div>
       )}
 
@@ -1276,16 +3109,53 @@ export const AssetsClaimsLoans = () => {
             required
           />
           <div className="grid-2">
-            <Input
-              label="Asset Tag Code"
-              value={assetForm.assetTag}
-              onChange={(e) => setAssetForm({ ...assetForm, assetTag: e.target.value })}
-              required
-            />
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main, #0f172a)' }}>
+                  Asset Tag Code <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newTag = `AST-${new Date().getFullYear()}-${String(assets.length + 1).padStart(3, '0')}`;
+                    setAssetForm((prev) => ({ ...prev, assetTag: newTag }));
+                  }}
+                  style={{
+                    background: '#f1f5f9',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 4,
+                    color: 'var(--primary, #3f929a)',
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    padding: '2px 8px',
+                  }}
+                >
+                  Auto
+                </button>
+              </div>
+              <Input
+                value={assetForm.assetTag}
+                onChange={(e) => setAssetForm({ ...assetForm, assetTag: e.target.value })}
+                placeholder="e.g. AST-2026-001"
+                required
+              />
+            </div>
             <Select
               label="Category"
               value={assetForm.category}
-              onChange={(e) => setAssetForm({ ...assetForm, category: e.target.value })}
+              onChange={(e) => {
+                const newCat = e.target.value;
+                setAssetForm((prev) => {
+                  const prefix = (newCat || 'AST').slice(0, 3).toUpperCase();
+                  const currentSerial = prev.serialNumber;
+                  const isAutoFormatted = !currentSerial || /^[A-Z]{3}-\d{4}-\d+$/.test(currentSerial);
+                  const updatedSerial = (!editingAssetId && isAutoFormatted)
+                    ? `${prefix}-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`
+                    : currentSerial;
+                  return { ...prev, category: newCat, serialNumber: updatedSerial };
+                });
+              }}
               options={[
                 { value: 'LAPTOP', label: 'Laptop / Computer' },
                 { value: 'MOBILE', label: 'Mobile Device' },
@@ -1297,12 +3167,39 @@ export const AssetsClaimsLoans = () => {
             />
           </div>
           <div className="grid-2">
-            <Input
-              label="Serial Number"
-              value={assetForm.serialNumber}
-              onChange={(e) => setAssetForm({ ...assetForm, serialNumber: e.target.value })}
-              placeholder="e.g. SN-89218209"
-            />
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main, #0f172a)' }}>
+                  Serial Number <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const prefix = (assetForm.category || 'AST').slice(0, 3).toUpperCase();
+                    const newSerial = `${prefix}-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
+                    setAssetForm((prev) => ({ ...prev, serialNumber: newSerial }));
+                  }}
+                  style={{
+                    background: '#f1f5f9',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 4,
+                    color: 'var(--primary, #3f929a)',
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    padding: '2px 8px',
+                  }}
+                >
+                  Auto Generate
+                </button>
+              </div>
+              <Input
+                value={assetForm.serialNumber}
+                onChange={(e) => setAssetForm({ ...assetForm, serialNumber: e.target.value })}
+                placeholder="e.g. LAP-2026-892182"
+                required
+              />
+            </div>
             <Input
               label="Model / Make"
               value={assetForm.model}
@@ -1318,12 +3215,29 @@ export const AssetsClaimsLoans = () => {
               onChange={(e) => setAssetForm({ ...assetForm, purchaseValue: Number(e.target.value) })}
               required
             />
+            <Input
+              label="Purchase Date"
+              type="date"
+              value={assetForm.purchaseDate || ''}
+              onChange={(e) => setAssetForm({ ...assetForm, purchaseDate: e.target.value })}
+            />
+          </div>
+          <div className="grid-2">
             <Select
               label="Company"
               value={assetForm.company}
               onChange={(e) => setAssetForm({ ...assetForm, company: e.target.value })}
               options={companies.map((c) => ({ value: c._id, label: c.name }))}
               required
+            />
+            <Select
+              label="Branch"
+              value={assetForm.branch || ''}
+              onChange={(e) => setAssetForm({ ...assetForm, branch: e.target.value })}
+              options={[
+                { value: '', label: 'Select Branch (Optional)' },
+                ...branches.map((b) => ({ value: b._id, label: b.name })),
+              ]}
             />
           </div>
 
@@ -1617,58 +3531,353 @@ export const AssetsClaimsLoans = () => {
         )}
       </Modal>
 
-      {/* 7. SUBMIT CLAIM MODAL */}
+      {/* VIEW ASSET DETAILS MODAL (GET /assets/:id) */}
+      <Modal
+        isOpen={viewAssetModalOpen}
+        onClose={() => setViewAssetModalOpen(false)}
+        title="Asset Specification & Custody Status"
+        size="md"
+      >
+        {loadingAssetDetail ? (
+          <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>
+            <RefreshCw className="animate-spin" size={24} style={{ margin: '0 auto 8px' }} />
+            <div>Loading live asset specification...</div>
+          </div>
+        ) : viewingAsset ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Header Banner */}
+            <div
+              style={{
+                padding: '14px 18px',
+                borderRadius: 8,
+                background: 'var(--bg-subtle)',
+                border: '1px solid var(--border-color)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 8,
+                    background: '#e6f4ff',
+                    color: '#1677ff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Laptop size={22} />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>{viewingAsset.name}</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    Tag: <strong>{viewingAsset.assetTag || '-'}</strong> • Category: {viewingAsset.category || 'OTHER'}
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <Badge variant="primary">{getAssetStatus(viewingAsset)}</Badge>
+                <Badge variant="secondary">{viewingAsset.condition || 'GOOD'}</Badge>
+              </div>
+            </div>
+
+            {/* Specification Grid */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, 1fr)',
+                gap: 12,
+                fontSize: '0.85rem',
+              }}
+            >
+              <div style={{ padding: '10px 14px', borderRadius: 6, background: '#fafafa', border: '1px solid #f0f0f0' }}>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Serial Number</div>
+                <div style={{ fontWeight: 600, marginTop: 2 }}>{viewingAsset.serialNumber || 'N/A'}</div>
+              </div>
+
+              <div style={{ padding: '10px 14px', borderRadius: 6, background: '#fafafa', border: '1px solid #f0f0f0' }}>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Model / Make</div>
+                <div style={{ fontWeight: 600, marginTop: 2 }}>{viewingAsset.model || 'Standard'}</div>
+              </div>
+
+              <div style={{ padding: '10px 14px', borderRadius: 6, background: '#fafafa', border: '1px solid #f0f0f0' }}>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Purchase Value</div>
+                <div style={{ fontWeight: 700, color: 'var(--primary)', marginTop: 2 }}>
+                  ₹{(Number(viewingAsset.purchaseValue) || 0).toLocaleString()}
+                </div>
+              </div>
+
+              <div style={{ padding: '10px 14px', borderRadius: 6, background: '#fafafa', border: '1px solid #f0f0f0' }}>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Purchase Date</div>
+                <div style={{ fontWeight: 600, marginTop: 2 }}>
+                  {viewingAsset.purchaseDate ? new Date(viewingAsset.purchaseDate).toLocaleDateString() : 'Not Specified'}
+                </div>
+              </div>
+
+              <div style={{ padding: '10px 14px', borderRadius: 6, background: '#fafafa', border: '1px solid #f0f0f0' }}>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Company Entity</div>
+                <div style={{ fontWeight: 600, marginTop: 2 }}>
+                  {viewingAsset.company?.name || viewingAsset.company || 'Enterprise Head Office'}
+                </div>
+              </div>
+
+              <div style={{ padding: '10px 14px', borderRadius: 6, background: '#fafafa', border: '1px solid #f0f0f0' }}>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Branch / Location</div>
+                <div style={{ fontWeight: 600, marginTop: 2 }}>
+                  {viewingAsset.branch?.name || viewingAsset.branch || 'Central Warehouse / IT Depot'}
+                </div>
+              </div>
+            </div>
+
+            {/* Custody Information Box */}
+            <div
+              style={{
+                padding: '14px 16px',
+                borderRadius: 8,
+                border: '1px solid var(--border-color)',
+                backgroundColor: viewingAsset.currentAssignment ? '#f0f5ff' : '#f6ffed',
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: 6, color: viewingAsset.currentAssignment ? '#1d39c4' : '#389e0d' }}>
+                {viewingAsset.currentAssignment ? 'Current Active Custodian' : 'Stock & Availability Status'}
+              </div>
+
+              {viewingAsset.currentAssignment ? (
+                <div style={{ fontSize: '0.84rem', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div>
+                    <strong>Custodian: </strong>
+                    {getEmployeeName(viewingAsset.currentAssignment.employee)}{' '}
+                    ({getEmployeeCode(viewingAsset.currentAssignment.employee)})
+                  </div>
+                  <div>
+                    <strong>Issued At: </strong>
+                    {new Date(viewingAsset.currentAssignment.assignedAt || viewingAsset.currentAssignment.issuedAt || Date.now()).toLocaleDateString()}
+                  </div>
+                  {viewingAsset.currentAssignment.expectedReturnDate && (
+                    <div>
+                      <strong>Expected Return: </strong>
+                      {new Date(viewingAsset.currentAssignment.expectedReturnDate).toLocaleDateString()}
+                    </div>
+                  )}
+                  {viewingAsset.currentAssignment.conditionAtIssue && (
+                    <div>
+                      <strong>Condition at Issue: </strong>
+                      {viewingAsset.currentAssignment.conditionAtIssue}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ fontSize: '0.84rem', color: '#52c41a' }}>
+                  This equipment is currently unassigned in stock and available to be allocated to any employee.
+                </div>
+              )}
+            </div>
+
+            {/* Quick Actions Footer */}
+            <div className="modal-footer" style={{ margin: '10px -20px -20px', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {!viewingAsset.currentAssignment && getAssetStatus(viewingAsset) !== 'RETIRED' && (
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    icon={UserCheck}
+                    onClick={() => {
+                      setViewAssetModalOpen(false);
+                      openAssignModal(viewingAsset);
+                    }}
+                  >
+                    Assign to Employee
+                  </Button>
+                )}
+                {viewingAsset.currentAssignment && (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      icon={RotateCcw}
+                      onClick={() => {
+                        setViewAssetModalOpen(false);
+                        openReturnModal(viewingAsset);
+                      }}
+                    >
+                      Return
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      icon={AlertTriangle}
+                      onClick={() => {
+                        setViewAssetModalOpen(false);
+                        openDamageModal(viewingAsset);
+                      }}
+                    >
+                      Report Damage
+                    </Button>
+                  </>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  icon={History}
+                  onClick={() => {
+                    setViewAssetModalOpen(false);
+                    openHistoryModal(viewingAsset);
+                  }}
+                >
+                  History
+                </Button>
+              </div>
+
+              <Button variant="secondary" onClick={() => setViewAssetModalOpen(false)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      {/* 7. SUBMIT CLAIM MODAL (POST /reimbursements/claims) */}
       <Modal
         isOpen={claimModalOpen}
         onClose={() => setClaimModalOpen(false)}
         title="Submit Employee Reimbursement Claim"
+        size="md"
       >
         <form onSubmit={handleCreateClaim}>
-          <Select
-            label="Expense Category"
-            value={claimForm.category}
-            onChange={(e) => setClaimForm({ ...claimForm, category: e.target.value })}
-            options={categories.map((c) => ({ value: c._id, label: c.name }))}
-            required
-          />
-          <Input
-            label="Claim Title"
-            value={claimForm.title}
-            onChange={(e) => setClaimForm({ ...claimForm, title: e.target.value })}
-            placeholder="e.g. Site Visit Travel & Meals"
-            required
-          />
-          <div className="grid-2">
+          <div className="grid-2" style={{ marginBottom: 12 }}>
             <Input
-              label="Amount (₹)"
-              type="number"
-              value={claimForm.amount}
-              onChange={(e) => setClaimForm({ ...claimForm, amount: e.target.value })}
+              label="Claim Title / Subject"
+              value={claimForm.title}
+              onChange={(e) => setClaimForm({ ...claimForm, title: e.target.value })}
+              placeholder="e.g. Travel, Client Meetings & Supplies"
               required
             />
             <Select
               label="Disbursement Route"
-              value={claimForm.settlementType}
-              onChange={(e) => setClaimForm({ ...claimForm, settlementType: e.target.value })}
+              value={claimForm.disbursementMethod || 'PAYROLL'}
+              onChange={(e) => setClaimForm({ ...claimForm, disbursementMethod: e.target.value })}
               options={[
-                { value: 'PAYROLL', label: 'Include in Monthly Payroll' },
-                { value: 'DIRECT_PAYMENT', label: 'Direct Bank / Cash Settlement' },
+                { value: 'PAYROLL', label: 'Include in Monthly Payroll (Salary Addition)' },
+                { value: 'DIRECT_PAYMENT', label: 'Direct Payment Settlement (Bank / Cash)' },
               ]}
+              required
             />
           </div>
-          <Input
-            label="Description / Purpose"
-            value={claimForm.description}
-            onChange={(e) => setClaimForm({ ...claimForm, description: e.target.value })}
-            placeholder="Details of trip or expense"
-            required
-          />
-          <Input
-            label="Receipt / Bill Reference (URL or Voucher No.)"
-            value={claimForm.receiptUrl}
-            onChange={(e) => setClaimForm({ ...claimForm, receiptUrl: e.target.value })}
-            placeholder="e.g. REC-8921 or uploaded bill reference"
-          />
+
+          {/* Multi-line Receipts Container */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <label style={{ fontSize: '0.84rem', fontWeight: 600 }}>
+                Receipts &amp; Expense Line Items ({claimForm.lineItems.length})
+              </label>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                icon={Plus}
+                onClick={handleAddClaimLineItem}
+              >
+                Add Expense Item
+              </Button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 320, overflowY: 'auto', paddingRight: 4 }}>
+              {claimForm.lineItems.map((item, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 8,
+                    border: '1px solid var(--border-color)',
+                    background: 'var(--bg-subtle)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--primary)' }}>
+                      Item #{idx + 1}
+                    </span>
+                    {claimForm.lineItems.length > 1 && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="danger"
+                        icon={Trash2}
+                        onClick={() => handleRemoveClaimLineItem(idx)}
+                      />
+                    )}
+                  </div>
+
+                  <div className="grid-2">
+                    <Select
+                      label="Expense Category"
+                      value={item.category || categories[0]?._id}
+                      onChange={(e) => handleClaimLineItemChange(idx, 'category', e.target.value)}
+                      options={categories.map((c) => ({ value: c._id, label: c.name }))}
+                      required
+                    />
+                    <Input
+                      label="Expense Date"
+                      type="date"
+                      value={item.expenseDate}
+                      onChange={(e) => handleClaimLineItemChange(idx, 'expenseDate', e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="grid-2">
+                    <Input
+                      label="Amount (₹)"
+                      type="number"
+                      value={item.amount}
+                      onChange={(e) => handleClaimLineItemChange(idx, 'amount', e.target.value)}
+                      placeholder="0.00"
+                      required
+                    />
+                    <Input
+                      label="Description"
+                      value={item.description}
+                      onChange={(e) => handleClaimLineItemChange(idx, 'description', e.target.value)}
+                      placeholder="e.g. Flight ticket or meal bill"
+                      required
+                    />
+                  </div>
+
+                  <Input
+                    label="Receipt / Bill Link / URL"
+                    value={item.receiptUrl}
+                    onChange={(e) => handleClaimLineItemChange(idx, 'receiptUrl', e.target.value)}
+                    placeholder="https://... or uploaded bill reference"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Total Claim Summary */}
+          <div
+            style={{
+              padding: '12px 14px',
+              borderRadius: 8,
+              background: '#f6ffed',
+              border: '1px solid #b7eb8f',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: 16,
+            }}
+          >
+            <span style={{ fontWeight: 600, color: '#389e0d', fontSize: '0.9rem' }}>Total Claimed Amount:</span>
+            <span style={{ fontWeight: 800, fontSize: '1.2rem', color: '#52c41a' }}>
+              ₹{claimForm.lineItems.reduce((acc, it) => acc + (Number(it.amount) || 0), 0).toLocaleString()}
+            </span>
+          </div>
 
           <div className="modal-footer" style={{ margin: '20px -20px -20px' }}>
             <Button variant="secondary" onClick={() => setClaimModalOpen(false)}>
@@ -1679,6 +3888,249 @@ export const AssetsClaimsLoans = () => {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* VIEW CLAIM DETAILS MODAL (GET /reimbursements/claims/:id) */}
+      <Modal
+        isOpen={viewClaimModalOpen}
+        onClose={() => setViewClaimModalOpen(false)}
+        title="Expense Claim Audit &amp; Receipts"
+        size="md"
+      >
+        {loadingClaimDetail ? (
+          <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>
+            <RefreshCw className="animate-spin" size={24} style={{ margin: '0 auto 8px' }} />
+            <div>Loading live claim details...</div>
+          </div>
+        ) : viewingClaim ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Header info banner */}
+            <div
+              style={{
+                padding: '14px 18px',
+                borderRadius: 8,
+                background: 'var(--bg-subtle)',
+                border: '1px solid var(--border-color)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 8,
+                    background: '#fff7e6',
+                    color: '#fa8c16',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Receipt size={22} />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>{viewingClaim.title || 'Expense Claim'}</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    Filed By: <strong>{getEmployeeName(viewingClaim.employee)}</strong> ({getEmployeeCode(viewingClaim.employee)})
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <Badge variant={viewingClaim.status === 'APPROVED' ? 'success' : viewingClaim.status === 'REJECTED' ? 'danger' : 'warning'}>
+                  {viewingClaim.status || 'PENDING'}
+                </Badge>
+                <Badge variant="neutral">
+                  {viewingClaim.disbursementMethod || viewingClaim.settlementType || 'PAYROLL'}
+                </Badge>
+              </div>
+            </div>
+
+            {/* Financial Summary Grid */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: 10,
+              }}
+            >
+              <div style={{ padding: '10px 14px', borderRadius: 6, background: '#fafafa', border: '1px solid #f0f0f0' }}>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Claimed Amount</div>
+                <div style={{ fontWeight: 700, fontSize: '1rem', marginTop: 2 }}>
+                  ₹{(Number(viewingClaim.totalClaimedAmount || viewingClaim.amount) || 0).toLocaleString()}
+                </div>
+              </div>
+
+              <div style={{ padding: '10px 14px', borderRadius: 6, background: '#fafafa', border: '1px solid #f0f0f0' }}>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Approved Amount</div>
+                <div style={{ fontWeight: 700, fontSize: '1rem', color: '#52c41a', marginTop: 2 }}>
+                  ₹{(Number(viewingClaim.approvedAmount ?? (viewingClaim.totalClaimedAmount || viewingClaim.amount)) || 0).toLocaleString()}
+                </div>
+              </div>
+
+              <div style={{ padding: '10px 14px', borderRadius: 6, background: '#fafafa', border: '1px solid #f0f0f0' }}>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Applied Date</div>
+                <div style={{ fontWeight: 600, fontSize: '0.88rem', marginTop: 2 }}>
+                  {viewingClaim.appliedAt || viewingClaim.createdAt ? new Date(viewingClaim.appliedAt || viewingClaim.createdAt).toLocaleDateString() : 'Today'}
+                </div>
+              </div>
+            </div>
+
+            {/* Line Items Table */}
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: 8 }}>
+                Itemized Receipts &amp; Proofs ({viewingClaim.lineItems?.length || 1})
+              </div>
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: 8, overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.84rem' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--bg-subtle)', textAlign: 'left', borderBottom: '1px solid var(--border-color)' }}>
+                      <th style={{ padding: '8px 12px' }}>Description</th>
+                      <th style={{ padding: '8px 12px' }}>Category</th>
+                      <th style={{ padding: '8px 12px' }}>Expense Date</th>
+                      <th style={{ padding: '8px 12px' }}>Amount</th>
+                      <th style={{ padding: '8px 12px' }}>Receipt Proof</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(viewingClaim.lineItems && viewingClaim.lineItems.length > 0 ? viewingClaim.lineItems : [viewingClaim]).map((item, idx) => (
+                      <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                        <td style={{ padding: '8px 12px', fontWeight: 500 }}>{item.description || item.title || 'Expense'}</td>
+                        <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>
+                          {item.category?.name || item.category || 'General'}
+                        </td>
+                        <td style={{ padding: '8px 12px' }}>
+                          {item.expenseDate ? new Date(item.expenseDate).toLocaleDateString() : '-'}
+                        </td>
+                        <td style={{ padding: '8px 12px', fontWeight: 600 }}>
+                          ₹{(Number(item.amount) || 0).toLocaleString()}
+                        </td>
+                        <td style={{ padding: '8px 12px' }}>
+                          {item.receiptUrl ? (
+                            <a
+                              href={item.receiptUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ color: 'var(--primary)', textDecoration: 'underline', fontWeight: 500 }}
+                            >
+                              View Receipt
+                            </a>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)' }}>No URL</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Approval Decision Section */}
+            {viewingClaim.approvalDecision && (
+              <div
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: 8,
+                  background: viewingClaim.approvalDecision.decision === 'REJECTED' ? '#fff1f0' : '#f6ffed',
+                  border: `1px solid ${viewingClaim.approvalDecision.decision === 'REJECTED' ? '#ffccc7' : '#b7eb8f'}`,
+                  fontSize: '0.84rem',
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                  Decision: {viewingClaim.approvalDecision.decision} by {viewingClaim.approvalDecision.approver?.name || 'Management'}
+                </div>
+                {viewingClaim.approvalDecision.remark && (
+                  <div style={{ color: 'var(--text-muted)' }}>
+                    <strong>Remarks:</strong> {viewingClaim.approvalDecision.remark}
+                  </div>
+                )}
+                {viewingClaim.approvalDecision.decidedAt && (
+                  <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                    Decided on {new Date(viewingClaim.approvalDecision.decidedAt).toLocaleString()}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Direct Payment Settlement info */}
+            {viewingClaim.directPaymentReference && (
+              <div
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: 8,
+                  background: '#f0f5ff',
+                  border: '1px solid #adc6ff',
+                  fontSize: '0.84rem',
+                }}
+              >
+                <div style={{ fontWeight: 700, color: '#1d39c4', marginBottom: 2 }}>
+                  Direct Settlement Confirmed
+                </div>
+                <div>Payment Reference: <strong>{viewingClaim.directPaymentReference}</strong></div>
+                {viewingClaim.directPaymentPaidAt && (
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                    Paid on: {new Date(viewingClaim.directPaymentPaidAt).toLocaleString()}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Footer with actions */}
+            <div className="modal-footer" style={{ margin: '10px -20px -20px', display: 'flex', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {viewingClaim.status === 'PENDING' && canManage && (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      icon={Check}
+                      onClick={() => {
+                        setViewClaimModalOpen(false);
+                        openClaimDecideModal(viewingClaim, 'APPROVED');
+                      }}
+                    >
+                      Approve
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      icon={X}
+                      onClick={() => {
+                        setViewClaimModalOpen(false);
+                        openClaimDecideModal(viewingClaim, 'REJECTED');
+                      }}
+                    >
+                      Reject
+                    </Button>
+                  </>
+                )}
+                {(viewingClaim.disbursementMethod === 'DIRECT_PAYMENT' || viewingClaim.settlementType === 'DIRECT_PAYMENT') &&
+                  (viewingClaim.status === 'APPROVED' || viewingClaim.status === 'PARTIALLY_APPROVED') &&
+                  !viewingClaim.directPaymentPaidAt &&
+                  viewingClaim.paymentStatus !== 'PAID' && (
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      icon={DollarSign}
+                      onClick={() => {
+                        setViewClaimModalOpen(false);
+                        openDirectPaymentModal(viewingClaim);
+                      }}
+                    >
+                      Settle Payment
+                    </Button>
+                  )}
+              </div>
+
+              <Button variant="secondary" onClick={() => setViewClaimModalOpen(false)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </Modal>
 
       {/* 8. CLAIM DECISION MODAL */}
@@ -1790,7 +4242,7 @@ export const AssetsClaimsLoans = () => {
             label="Category Name"
             value={categoryForm.name}
             onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })}
-            placeholder="e.g. Travel & Conveyance"
+            placeholder="e.g. Local Travel & Fuel"
             required
           />
           <div className="grid-2">
@@ -1798,40 +4250,60 @@ export const AssetsClaimsLoans = () => {
               label="Category Code"
               value={categoryForm.code}
               onChange={(e) => setCategoryForm({ ...categoryForm, code: e.target.value.toUpperCase() })}
-              placeholder="e.g. TRV"
+              placeholder="e.g. TRAVEL"
               required
             />
             <Input
-              label="Max Limit (₹)"
+              label="Monthly Cap / Maximum Allowed (₹)"
               type="number"
-              value={categoryForm.maxLimit}
-              onChange={(e) => setCategoryForm({ ...categoryForm, maxLimit: Number(e.target.value) })}
+              value={categoryForm.monthlyCap}
+              onChange={(e) => setCategoryForm({ ...categoryForm, monthlyCap: Number(e.target.value) })}
+              required
             />
           </div>
-          <div style={{ margin: '12px 0' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}>
+
+          <div style={{ margin: '14px 0', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: 'pointer' }}>
               <input
                 type="checkbox"
-                checked={categoryForm.requiresReceipt}
+                checked={categoryForm.isCapHardEnforced}
                 onChange={(e) =>
-                  setCategoryForm({ ...categoryForm, requiresReceipt: e.target.checked })
+                  setCategoryForm({ ...categoryForm, isCapHardEnforced: e.target.checked })
                 }
               />
-              Mandatory Receipt / Tax Invoice
+              <span><strong>Hard Enforce Cap:</strong> Automatically block claims exceeding monthly cap limit</span>
+            </label>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={categoryForm.isActive}
+                onChange={(e) =>
+                  setCategoryForm({ ...categoryForm, isActive: e.target.checked })
+                }
+              />
+              <span><strong>Active Category:</strong> Available for employee claim filing</span>
             </label>
           </div>
-          <Input
-            label="Category Policy Description"
-            value={categoryForm.description}
-            onChange={(e) => setCategoryForm({ ...categoryForm, description: e.target.value })}
-          />
+
+          {companies.length > 0 && (
+            <Select
+              label="Assign to Company (Optional)"
+              value={categoryForm.company}
+              onChange={(e) => setCategoryForm({ ...categoryForm, company: e.target.value })}
+              options={[
+                { value: '', label: 'All Companies / Global' },
+                ...companies.map((c) => ({ value: c._id, label: c.name })),
+              ]}
+            />
+          )}
 
           <div className="modal-footer" style={{ margin: '20px -20px -20px' }}>
             <Button variant="secondary" onClick={() => setCategoryModalOpen(false)}>
               Cancel
             </Button>
             <Button variant="primary" type="submit" loading={submittingCategory}>
-              Save Category
+              {editingCategoryId ? 'Update Category' : 'Create Category'}
             </Button>
           </div>
         </form>
@@ -1857,9 +4329,41 @@ export const AssetsClaimsLoans = () => {
               required
             />
           )}
+
+          <div style={{ marginBottom: 14 }}>
+            <Select
+              label="Loan / Advance Type"
+              value={loanForm.loanTypeId}
+              onChange={(e) => {
+                const selected = loanTypes.find((lt) => lt._id === e.target.value);
+                setLoanForm({
+                  ...loanForm,
+                  loanTypeId: e.target.value,
+                  amount: selected?.maxAmount ? Math.min(Number(loanForm.amount) || 25000, selected.maxAmount) : loanForm.amount,
+                  tenureMonths: selected?.maxTenureMonths ? Math.min(Number(loanForm.tenureMonths) || 6, selected.maxTenureMonths) : loanForm.tenureMonths,
+                });
+              }}
+              options={loanTypes.map((lt) => ({
+                value: lt._id,
+                label: `${lt.name} (${lt.category || 'ADVANCE'}) - Max ₹${(lt.maxAmount || 0).toLocaleString()}`,
+              }))}
+              required
+            />
+            {(() => {
+              const activeType = loanTypes.find((lt) => lt._id === loanForm.loanTypeId);
+              if (!activeType) return null;
+              return (
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                  Policy: Max ₹{(activeType.maxAmount || 0).toLocaleString()} • Max {activeType.maxTenureMonths || 0} Mos •{' '}
+                  {activeType.interestRatePercent ? `${activeType.interestRatePercent}% interest` : 'Interest-Free'}
+                </div>
+              );
+            })()}
+          </div>
+
           <div className="grid-2">
             <Input
-              label="Principal Loan Amount (₹)"
+              label="Principal Requested Amount (₹)"
               type="number"
               value={loanForm.amount}
               onChange={(e) => setLoanForm({ ...loanForm, amount: Number(e.target.value) })}
@@ -1875,11 +4379,33 @@ export const AssetsClaimsLoans = () => {
               required
             />
           </div>
+
+          {/* Real-time Estimated EMI Calculation */}
+          {Number(loanForm.amount) > 0 && Number(loanForm.tenureMonths) > 0 && (
+            <div
+              style={{
+                padding: '10px 14px',
+                borderRadius: 8,
+                background: '#f6ffed',
+                border: '1px solid #b7eb8f',
+                marginBottom: 14,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <span style={{ fontSize: '0.82rem', color: '#389e0d', fontWeight: 600 }}>Estimated Monthly EMI:</span>
+              <span style={{ fontWeight: 800, color: '#52c41a', fontSize: '1rem' }}>
+                ₹{Math.round(Number(loanForm.amount) / Number(loanForm.tenureMonths)).toLocaleString()} / month
+              </span>
+            </div>
+          )}
+
           <Input
-            label="Purpose of Loan"
+            label="Purpose of Advance / Loan"
             value={loanForm.purpose}
             onChange={(e) => setLoanForm({ ...loanForm, purpose: e.target.value })}
-            placeholder="e.g. Medical emergency or home renovation"
+            placeholder="e.g. Home emergency, medical costs, relocation assistance"
             required
           />
 
@@ -1894,20 +4420,461 @@ export const AssetsClaimsLoans = () => {
         </form>
       </Modal>
 
-      {/* 12. EMI SCHEDULE MODAL */}
+      {/* 12. VIEW LOAN DETAILS MODAL (GET /loans/requests/:id) */}
+      <Modal
+        isOpen={viewLoanModalOpen}
+        onClose={() => setViewLoanModalOpen(false)}
+        title="Loan / Advance Request Audit"
+        size="md"
+      >
+        {loadingLoanDetail ? (
+          <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>
+            <RefreshCw className="animate-spin" size={24} style={{ margin: '0 auto 8px' }} />
+            <div>Loading live loan details...</div>
+          </div>
+        ) : viewingLoan ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Header Status Card */}
+            <div
+              style={{
+                padding: '14px 18px',
+                borderRadius: 8,
+                background: 'var(--bg-subtle)',
+                border: '1px solid var(--border-color)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 8,
+                    background: '#e6f7ff',
+                    color: '#1890ff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <HandCoins size={24} />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '1rem' }}>
+                    {viewingLoan.loanType?.name || 'Loan / Salary Advance'}
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    Borrower: <strong>{getEmployeeName(viewingLoan.employee)}</strong> ({getEmployeeCode(viewingLoan.employee)})
+                  </div>
+                </div>
+              </div>
+              <Badge
+                variant={
+                  viewingLoan.status === 'APPROVED'
+                    ? 'primary'
+                    : viewingLoan.status === 'DISBURSED'
+                    ? 'success'
+                    : viewingLoan.status === 'PENDING'
+                    ? 'warning'
+                    : 'danger'
+                }
+              >
+                {viewingLoan.status}
+              </Badge>
+            </div>
+
+            {/* Financial Overview Grid */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                gap: 10,
+              }}
+            >
+              <div style={{ padding: 10, borderRadius: 6, background: '#fafafa', border: '1px solid var(--border-color)' }}>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Requested Amount</div>
+                <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>
+                  ₹{(viewingLoan.requestedAmount || viewingLoan.amount || 0).toLocaleString()}
+                </div>
+              </div>
+
+              <div style={{ padding: 10, borderRadius: 6, background: '#fafafa', border: '1px solid var(--border-color)' }}>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Requested Tenure</div>
+                <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>
+                  {viewingLoan.requestedTenureMonths || viewingLoan.tenureMonths || 6} Months
+                </div>
+              </div>
+
+              {viewingLoan.approvedAmount !== undefined && (
+                <div style={{ padding: 10, borderRadius: 6, background: '#f6ffed', border: '1px solid #b7eb8f' }}>
+                  <div style={{ fontSize: '0.72rem', color: '#389e0d' }}>Approved Amount</div>
+                  <div style={{ fontWeight: 800, fontSize: '1.1rem', color: '#52c41a' }}>
+                    ₹{Number(viewingLoan.approvedAmount).toLocaleString()}
+                  </div>
+                </div>
+              )}
+
+              {viewingLoan.approvedTenureMonths !== undefined && (
+                <div style={{ padding: 10, borderRadius: 6, background: '#f6ffed', border: '1px solid #b7eb8f' }}>
+                  <div style={{ fontSize: '0.72rem', color: '#389e0d' }}>Approved Tenure</div>
+                  <div style={{ fontWeight: 800, fontSize: '1.1rem', color: '#52c41a' }}>
+                    {viewingLoan.approvedTenureMonths} Months
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Purpose & Remarks */}
+            <div style={{ fontSize: '0.85rem', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div>
+                <strong>Purpose:</strong> {viewingLoan.reason || viewingLoan.purpose || 'Personal advance'}
+              </div>
+              {viewingLoan.remark && (
+                <div style={{ padding: '8px 12px', background: '#fffbe6', borderRadius: 6, border: '1px solid #ffe58f' }}>
+                  <strong>Admin Remark:</strong> {viewingLoan.remark}
+                </div>
+              )}
+              {viewingLoan.disbursementReference && (
+                <div style={{ padding: '8px 12px', background: '#e6f7ff', borderRadius: 6, border: '1px solid #91d5ff' }}>
+                  <strong>Disbursement Reference:</strong> {viewingLoan.disbursementReference}
+                  {viewingLoan.disbursedAt && (
+                    <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                      Disbursed on {new Date(viewingLoan.disbursedAt).toLocaleDateString()}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Actions footer */}
+            <div className="modal-footer" style={{ margin: '10px -20px -20px', display: 'flex', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {viewingLoan.status === 'PENDING' && canManage && (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      icon={Check}
+                      onClick={() => {
+                        setViewLoanModalOpen(false);
+                        openLoanDecideModal(viewingLoan, 'APPROVED');
+                      }}
+                    >
+                      Approve
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      icon={X}
+                      onClick={() => {
+                        setViewLoanModalOpen(false);
+                        openLoanDecideModal(viewingLoan, 'REJECTED');
+                      }}
+                    >
+                      Reject
+                    </Button>
+                  </>
+                )}
+                {viewingLoan.status === 'APPROVED' && canManage && (
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    icon={DollarSign}
+                    style={{ backgroundColor: '#52c41a', borderColor: '#52c41a' }}
+                    onClick={() => {
+                      setViewLoanModalOpen(false);
+                      openDisburseModal(viewingLoan);
+                    }}
+                  >
+                    Disburse Funds
+                  </Button>
+                )}
+                {(viewingLoan.status === 'DISBURSED' || viewingLoan.status === 'APPROVED') && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon={Calendar}
+                    onClick={() => {
+                      setViewLoanModalOpen(false);
+                      handleOpenSchedule(viewingLoan);
+                    }}
+                  >
+                    View EMI Schedule
+                  </Button>
+                )}
+              </div>
+              <Button variant="secondary" onClick={() => setViewLoanModalOpen(false)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      {/* 13. DECIDE LOAN MODAL (PUT /loans/requests/:id/decide) */}
+      <Modal
+        isOpen={loanDecideModalOpen}
+        onClose={() => setLoanDecideModalOpen(false)}
+        title={`Decide Loan Request: ${getEmployeeName(selectedLoanForDecision?.employee)}`}
+      >
+        <form onSubmit={handleSaveLoanDecision}>
+          <div style={{ padding: 10, backgroundColor: 'var(--bg-subtle)', borderRadius: 6, marginBottom: 12 }}>
+            Requested: <strong>₹{(selectedLoanForDecision?.requestedAmount || selectedLoanForDecision?.amount || 0).toLocaleString()}</strong> for{' '}
+            <strong>{selectedLoanForDecision?.requestedTenureMonths || selectedLoanForDecision?.tenureMonths || 6} Months</strong>
+          </div>
+
+          <Select
+            label="Decision"
+            value={loanDecision}
+            onChange={(e) => setLoanDecision(e.target.value)}
+            options={[
+              { value: 'APPROVED', label: 'Approve Loan Request' },
+              { value: 'REJECTED', label: 'Reject Loan Request' },
+            ]}
+          />
+
+          {loanDecision === 'APPROVED' && (
+            <div className="grid-2">
+              <Input
+                label="Approved Principal Amount (₹)"
+                type="number"
+                value={approvedLoanAmount}
+                onChange={(e) => setApprovedLoanAmount(e.target.value)}
+                required
+              />
+              <Input
+                label="Approved Tenure (Months)"
+                type="number"
+                min="1"
+                max="36"
+                value={approvedLoanTenure}
+                onChange={(e) => setApprovedLoanTenure(e.target.value)}
+                required
+              />
+            </div>
+          )}
+
+          <Input
+            label="Decision Remarks / Conditions"
+            value={loanDecisionRemark}
+            onChange={(e) => setLoanDecisionRemark(e.target.value)}
+            placeholder="e.g. Approved subject to payroll recovery deductions"
+            required={loanDecision === 'REJECTED'}
+          />
+
+          <div className="modal-footer" style={{ margin: '20px -20px -20px' }}>
+            <Button variant="secondary" onClick={() => setLoanDecideModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant={loanDecision === 'REJECTED' ? 'danger' : 'primary'}
+              type="submit"
+              loading={submittingLoanDecision}
+            >
+              Confirm Decision
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* 14. DISBURSE LOAN MODAL (POST /loans/requests/:id/disburse) */}
+      <Modal
+        isOpen={disburseModalOpen}
+        onClose={() => setDisburseModalOpen(false)}
+        title="Disburse Approved Loan &amp; Generate Repayment Schedule"
+      >
+        <form onSubmit={handleDisburseLoan}>
+          <div style={{ padding: 12, backgroundColor: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 8, marginBottom: 14 }}>
+            <div style={{ fontWeight: 600, color: '#389e0d' }}>
+              Borrower: {getEmployeeName(selectedLoanForDisburse?.employee)}
+            </div>
+            <div style={{ fontSize: '0.84rem', marginTop: 2 }}>
+              Approved Amount: <strong>₹{(selectedLoanForDisburse?.approvedAmount || selectedLoanForDisburse?.requestedAmount || selectedLoanForDisburse?.amount || 0).toLocaleString()}</strong> •{' '}
+              Tenure: <strong>{selectedLoanForDisburse?.approvedTenureMonths || selectedLoanForDisburse?.requestedTenureMonths || 6} Months</strong>
+            </div>
+          </div>
+
+          <Input
+            label="Disbursement Reference (UTR / Bank Transaction / Cheque No.)"
+            value={disburseForm.disbursementReference}
+            onChange={(e) => setDisburseForm({ ...disburseForm, disbursementReference: e.target.value })}
+            placeholder="e.g. BANK-TRF-LN-99210 or UTR-202604018"
+            required
+          />
+
+          <Input
+            label="Disbursement Date"
+            type="date"
+            value={disburseForm.disbursedAt}
+            onChange={(e) => setDisburseForm({ ...disburseForm, disbursedAt: e.target.value })}
+            required
+          />
+
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 14 }}>
+            * Note: Disbursing will automatically generate the period-keyed monthly EMI repayment schedule linked directly to Module 14 Payroll Runs.
+          </div>
+
+          <div className="modal-footer" style={{ margin: '20px -20px -20px' }}>
+            <Button variant="secondary" onClick={() => setDisburseModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit" loading={submittingDisburse} style={{ backgroundColor: '#52c41a', borderColor: '#52c41a' }}>
+              Confirm &amp; Disburse
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* 15. LOAN TYPE MASTER MODAL (POST / PUT /loan-types) */}
+      <Modal
+        isOpen={loanTypeModalOpen}
+        onClose={() => setLoanTypeModalOpen(false)}
+        title={editingLoanTypeId ? 'Edit Loan Type Policy' : 'Create New Loan / Advance Type'}
+      >
+        <form onSubmit={handleSaveLoanType}>
+          <Input
+            label="Type Name"
+            value={loanTypeForm.name}
+            onChange={(e) => setLoanTypeForm({ ...loanTypeForm, name: e.target.value })}
+            placeholder="e.g. Salary Advance, Emergency Loan, Education Loan"
+            required
+          />
+
+          <div className="grid-2">
+            <Select
+              label="Category"
+              value={loanTypeForm.category}
+              onChange={(e) => setLoanTypeForm({ ...loanTypeForm, category: e.target.value })}
+              options={[
+                { value: 'ADVANCE', label: 'ADVANCE (Short-Term Salary Advance)' },
+                { value: 'LOAN', label: 'LOAN (Long-Term Term Loan)' },
+              ]}
+              required
+            />
+            {companies.length > 0 && (
+              <Select
+                label="Company Allocation"
+                value={loanTypeForm.company}
+                onChange={(e) => setLoanTypeForm({ ...loanTypeForm, company: e.target.value })}
+                options={[
+                  { value: '', label: 'Select Company' },
+                  ...companies.map((c) => ({ value: c._id, label: c.name })),
+                ]}
+                required
+              />
+            )}
+          </div>
+
+          <div className="grid-2">
+            <Input
+              label="Maximum Allowed Amount (₹)"
+              type="number"
+              value={loanTypeForm.maxAmount}
+              onChange={(e) => setLoanTypeForm({ ...loanTypeForm, maxAmount: Number(e.target.value) })}
+              required
+            />
+            <Input
+              label="Maximum Tenure (Months)"
+              type="number"
+              min="1"
+              max="60"
+              value={loanTypeForm.maxTenureMonths}
+              onChange={(e) => setLoanTypeForm({ ...loanTypeForm, maxTenureMonths: Number(e.target.value) })}
+              required
+            />
+          </div>
+
+          <div className="grid-2">
+            <Input
+              label="Interest Rate (% per annum)"
+              type="number"
+              step="0.1"
+              value={loanTypeForm.interestRatePercent}
+              onChange={(e) => setLoanTypeForm({ ...loanTypeForm, interestRatePercent: Number(e.target.value) })}
+              placeholder="0 for interest-free"
+            />
+            <Input
+              label="Min Service Months Required"
+              type="number"
+              min="0"
+              value={loanTypeForm.minimumServiceMonthsRequired}
+              onChange={(e) => setLoanTypeForm({ ...loanTypeForm, minimumServiceMonthsRequired: Number(e.target.value) })}
+              placeholder="0 for immediate eligibility"
+            />
+          </div>
+
+          <div style={{ margin: '14px 0' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={loanTypeForm.isActive}
+                onChange={(e) => setLoanTypeForm({ ...loanTypeForm, isActive: e.target.checked })}
+              />
+              <span><strong>Active Loan Type:</strong> Available for employee application</span>
+            </label>
+          </div>
+
+          <div className="modal-footer" style={{ margin: '20px -20px -20px' }}>
+            <Button variant="secondary" onClick={() => setLoanTypeModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit" loading={submittingLoanType}>
+              {editingLoanTypeId ? 'Update Loan Type' : 'Create Loan Type'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* 16. EMI SCHEDULE MODAL (GET /loans/:id/emi-schedule & PUT mark-paid) */}
       <Modal
         isOpen={scheduleModalOpen}
         onClose={() => setScheduleModalOpen(false)}
-        title={`Loan EMI Schedule - ₹${(activeLoanForSchedule?.amount || 0).toLocaleString()}`}
-        size="md"
+        title={`Loan Repayment Schedule: ₹${(activeLoanForSchedule?.approvedAmount || activeLoanForSchedule?.requestedAmount || activeLoanForSchedule?.amount || 0).toLocaleString()}`}
+        size="lg"
       >
         {loadingSchedule ? (
-          <div style={{ textAlign: 'center', padding: 20 }}>Loading EMI schedule...</div>
+          <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>
+            <RefreshCw className="animate-spin" size={24} style={{ margin: '0 auto 8px' }} />
+            <div>Loading EMI schedule...</div>
+          </div>
         ) : (
           <div>
-            <div style={{ marginBottom: 12, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-              Monthly EMI deductions applied automatically during Payroll Run calculations.
+            {/* Summary Metrics */}
+            {(() => {
+              const totalAmount = Number(activeLoanForSchedule?.approvedAmount || activeLoanForSchedule?.requestedAmount || activeLoanForSchedule?.amount || 0);
+              const totalPaid = emiSchedule.reduce((acc, it) => acc + (it.isPaid || it.status === 'PAID' ? Number(it.amount || it.emiAmount || 0) : 0), 0);
+              const remaining = Math.max(0, totalAmount - totalPaid);
+              return (
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                    gap: 10,
+                    marginBottom: 16,
+                  }}
+                >
+                  <div style={{ padding: 10, borderRadius: 6, background: '#fafafa', border: '1px solid var(--border-color)' }}>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Total Principal</div>
+                    <div style={{ fontWeight: 700, fontSize: '1rem' }}>₹{totalAmount.toLocaleString()}</div>
+                  </div>
+                  <div style={{ padding: 10, borderRadius: 6, background: '#f6ffed', border: '1px solid #b7eb8f' }}>
+                    <div style={{ fontSize: '0.72rem', color: '#389e0d' }}>Total Repaid</div>
+                    <div style={{ fontWeight: 700, fontSize: '1rem', color: '#52c41a' }}>₹{totalPaid.toLocaleString()}</div>
+                  </div>
+                  <div style={{ padding: 10, borderRadius: 6, background: '#fff1f0', border: '1px solid #ffa39e' }}>
+                    <div style={{ fontSize: '0.72rem', color: '#cf1322' }}>Outstanding Balance</div>
+                    <div style={{ fontWeight: 700, fontSize: '1rem', color: '#f5222d' }}>₹{remaining.toLocaleString()}</div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div style={{ marginBottom: 12, fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+              Monthly EMI deductions applied automatically during Payroll Run calculations, or can be marked paid manually below.
             </div>
+
             <table className="table" style={{ width: '100%', fontSize: '0.85rem' }}>
               <thead>
                 <tr>
@@ -1915,30 +4882,83 @@ export const AssetsClaimsLoans = () => {
                   <th>Period</th>
                   <th>EMI Amount</th>
                   <th>Status</th>
+                  <th>Payment Details</th>
+                  {canManage && <th>Action</th>}
                 </tr>
               </thead>
               <tbody>
                 {emiSchedule.length === 0 ? (
-                  Array.from({ length: activeLoanForSchedule?.tenureMonths || 6 }).map((_, idx) => (
-                    <tr key={idx}>
-                      <td>Installment {idx + 1}</td>
-                      <td>Month {idx + 1}</td>
-                      <td>₹{Math.round((activeLoanForSchedule?.amount || 50000) / (activeLoanForSchedule?.tenureMonths || 6)).toLocaleString()}</td>
-                      <td><Badge variant="secondary">SCHEDULED</Badge></td>
-                    </tr>
-                  ))
+                  Array.from({ length: activeLoanForSchedule?.approvedTenureMonths || activeLoanForSchedule?.requestedTenureMonths || activeLoanForSchedule?.tenureMonths || 6 }).map((_, idx) => {
+                    const totalAmt = activeLoanForSchedule?.approvedAmount || activeLoanForSchedule?.requestedAmount || activeLoanForSchedule?.amount || 30000;
+                    const tenure = activeLoanForSchedule?.approvedTenureMonths || activeLoanForSchedule?.requestedTenureMonths || activeLoanForSchedule?.tenureMonths || 6;
+                    const emiAmt = Math.round(totalAmt / (tenure || 1));
+                    return (
+                      <tr key={idx}>
+                        <td>Installment #{idx + 1}</td>
+                        <td>Month {idx + 1}</td>
+                        <td>₹{emiAmt.toLocaleString()}</td>
+                        <td><Badge variant="secondary">SCHEDULED</Badge></td>
+                        <td style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>Pending disbursement</td>
+                        {canManage && <td>-</td>}
+                      </tr>
+                    );
+                  })
                 ) : (
-                  emiSchedule.map((item, idx) => (
-                    <tr key={idx}>
-                      <td>#{item.installmentNo || idx + 1}</td>
-                      <td>{item.periodKey || `Month ${idx + 1}`}</td>
-                      <td>₹{(item.amount || 0).toLocaleString()}</td>
-                      <td><Badge variant={item.isPaid ? 'success' : 'secondary'}>{item.isPaid ? 'PAID' : 'DUE'}</Badge></td>
-                    </tr>
-                  ))
+                  emiSchedule.map((item, idx) => {
+                    const isPaid = item.isPaid || item.status === 'PAID';
+                    const periodKey = item.periodKey || `Installment-${idx + 1}`;
+                    const isProcessing = submittingMarkPaid[periodKey] || submittingMarkPaid[item.installmentNo || idx + 1];
+
+                    return (
+                      <tr key={idx}>
+                        <td style={{ fontWeight: 600 }}>#{item.installmentNo || idx + 1}</td>
+                        <td>{periodKey}</td>
+                        <td style={{ fontWeight: 600 }}>₹{(item.amount || item.emiAmount || 0).toLocaleString()}</td>
+                        <td>
+                          <Badge variant={isPaid ? 'success' : 'warning'}>
+                            {isPaid ? 'PAID' : 'DUE'}
+                          </Badge>
+                        </td>
+                        <td style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                          {isPaid ? (
+                            <div>
+                              <div>Paid: {item.paidAt ? new Date(item.paidAt).toLocaleDateString() : 'Confirmed'}</div>
+                              {item.paidInPayrollRun && <div>Run: {item.paidInPayrollRun}</div>}
+                            </div>
+                          ) : (
+                            <span>Due for recovery</span>
+                          )}
+                        </td>
+                        {canManage && (
+                          <td>
+                            {!isPaid ? (
+                              <Button
+                                size="sm"
+                                variant="primary"
+                                loading={isProcessing}
+                                onClick={() => handleMarkEmiPaid(item.periodKey, item.installmentNo || idx + 1)}
+                              >
+                                Mark Paid
+                              </Button>
+                            ) : (
+                              <span style={{ color: '#52c41a', fontWeight: 600, fontSize: '0.8rem' }}>
+                                Settled
+                              </span>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
+
+            <div className="modal-footer" style={{ margin: '20px -20px -20px' }}>
+              <Button variant="secondary" onClick={() => setScheduleModalOpen(false)}>
+                Close
+              </Button>
+            </div>
           </div>
         )}
       </Modal>

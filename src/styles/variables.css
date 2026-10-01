@@ -1,29 +1,54 @@
 :root {
-
-  --primary: #2e7b85;
-  --primary-hover: #256770;
-  --primary-active: #1c525a;
-  --primary-light: #f0f7f8;
-  --primary-subtle: #e2f0f2;
-  --primary-border: #bce1e6;
-  --primary-ring: rgba(46, 123, 133, 0.2);
+  /* ==========================================================================
+     Official Brand Colors (Derived from TIE Corporation Logo)
+     - Logo Teal (Primary Identity): #3f929a
+     - Logo Orange (Top Accent):     #f5a532
+     - Logo Green (Bottom Accent):   #8bc54a
+     ========================================================================== */
+  --primary: #3f929a;
+  --primary-hover: #337a82;
+  --primary-active: #276269;
+  --primary-light: #edf7f8;
+  --primary-subtle: #dcf0f2;
+  --primary-border: #b1dce1;
+  --primary-ring: rgba(63, 146, 154, 0.25);
 
   --logo-teal: #3f929a;
+  --logo-teal-hover: #337a82;
+  --logo-teal-active: #276269;
+  --logo-teal-light: #edf7f8;
+  --logo-teal-subtle: #dcf0f2;
+  --logo-teal-border: #b1dce1;
+  --logo-teal-ring: rgba(63, 146, 154, 0.25);
+
   --logo-orange: #f5a532;
+  --logo-orange-hover: #df9023;
+  --logo-orange-active: #c77e1b;
+  --logo-orange-light: #fef8ee;
+  --logo-orange-subtle: #fdf0dc;
+  --logo-orange-border: #fbd69f;
+  --logo-orange-ring: rgba(245, 165, 50, 0.25);
+
   --logo-green: #8bc54a;
+  --logo-green-hover: #77ae3c;
+  --logo-green-active: #669731;
+  --logo-green-light: #f4f9ed;
+  --logo-green-subtle: #e7f4d8;
+  --logo-green-border: #c8e6a0;
+  --logo-green-ring: rgba(139, 197, 74, 0.25);
 
   --success: #16a34a;
   --success-light: #f0fdf4;
   --success-border: #bbf7d0;
-  --warning: #d97706;
-  --warning-light: #fffbeb;
-  --warning-border: #fde68a;
+  --warning: #f5a532;
+  --warning-light: #fef8ee;
+  --warning-border: #fbd69f;
   --danger: #dc2626;
   --danger-light: #fef2f2;
   --danger-border: #fecaca;
-  --info: #2563eb;
-  --info-light: #eff6ff;
-  --info-border: #bfdbfe;
+  --info: #3f929a;
+  --info-light: #edf7f8;
+  --info-border: #b1dce1;
 
 
   --bg-app: #f8fafc;

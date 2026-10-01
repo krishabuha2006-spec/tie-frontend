@@ -38,15 +38,60 @@ export const projectTaskApi = {
     return res.data;
   },
 
-  // Site Tasks (Module 9 & 11 - GET & POST /tasks)
+  // Site Tasks (Module 9 & 11 - GET & POST /projects/tasks and /tasks)
   getSiteTasks: async (params) => {
-    const res = await apiClient.get('/tasks', { params });
-    return res.data;
+    try {
+      const res = await apiClient.get('/tasks', { params });
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 404) {
+        const fallback = await apiClient.get('/projects/tasks', { params });
+        return fallback.data;
+      }
+      throw err;
+    }
   },
 
   createSiteTask: async (data) => {
-    const res = await apiClient.post('/tasks', data);
-    return res.data;
+    let siteRef = data.site || data.siteId;
+    let projRef = data.project || data.projectId;
+
+    // If site is missing, attempt to fetch first site of project
+    if (!siteRef && projRef) {
+      try {
+        const sRes = await apiClient.get(`/projects/${projRef}/sites`);
+        const sites = Array.isArray(sRes.data) ? sRes.data : (sRes.data?.data || sRes.data?.sites || []);
+        if (sites.length > 0) {
+          siteRef = sites[0]._id || sites[0].id;
+        }
+      } catch {}
+    }
+
+    const payload = {
+      taskName: data.taskName || data.title,
+      title: data.title || data.taskName,
+      project: projRef,
+      projectId: projRef,
+      site: siteRef,
+      siteId: siteRef,
+      assignedTo: data.assignedTo || data.employeeId,
+      employeeId: data.employeeId || data.assignedTo,
+      dueDate: data.dueDate || data.deadline,
+      deadline: data.deadline || data.dueDate,
+      priority: data.priority || 'MEDIUM',
+      description: data.description || '',
+    };
+
+    try {
+      const res = await apiClient.post('/projects/tasks', payload);
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 404 || err.response?.status === 400) {
+        const fallback = await apiClient.post('/tasks', payload);
+        return fallback.data;
+      }
+      throw err;
+    }
   },
 
   // Site Activity Logs (Module 10)

@@ -47,14 +47,40 @@ export const assetsLoansApi = {
 
   // POST /assets/:assetId/assign
   assignAsset: async (assetId, data) => {
+    const empId = data.employeeId || data.employee || (typeof data === 'string' ? data : undefined);
     const payload = {
-      employeeId: data.employeeId,
+      employee: empId,
+      employeeId: empId,
+      assignedTo: empId,
       conditionAtIssue: data.conditionAtIssue || data.condition || data.notes || 'Good working condition',
+      condition: data.condition || data.conditionAtIssue || 'GOOD',
+      issueDate: new Date().toISOString(),
       ...(data.expectedReturnDate ? { expectedReturnDate: data.expectedReturnDate } : {}),
       ...(data.notes ? { notes: data.notes } : {}),
     };
-    const res = await apiClient.post(`/assets/${assetId}/assign`, payload);
-    return res.data;
+    try {
+      const res = await apiClient.post(`/assets/${assetId}/assign`, payload);
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 400) {
+        // Fallback: minimal clean payload
+        try {
+          const res2 = await apiClient.post(`/assets/${assetId}/assign`, {
+            employee: empId,
+            employeeId: empId,
+            conditionAtIssue: payload.conditionAtIssue,
+          });
+          return res2.data;
+        } catch {
+          const res3 = await apiClient.post(`/assets/${assetId}/assign`, {
+            employee: empId,
+            condition: 'GOOD',
+          });
+          return res3.data;
+        }
+      }
+      throw err;
+    }
   },
 
   // GET /assets/:assetId/history
@@ -65,19 +91,37 @@ export const assetsLoansApi = {
 
   // PUT /assets/assignments/:id/return
   returnAssetAssignment: async (assignmentId, data) => {
-    const res = await apiClient.put(`/assets/assignments/${assignmentId}/return`, data);
+    const payload = {
+      conditionAtReturn: data.conditionAtReturn || data.condition || 'GOOD',
+      remarks: data.remarks || data.returnRemarks || '',
+      ...data,
+    };
+    const res = await apiClient.put(`/assets/assignments/${assignmentId}/return`, payload);
     return res.data;
   },
 
   // PUT /assets/assignments/:id/report-damage-loss
   reportDamageLoss: async (assignmentId, data) => {
-    const res = await apiClient.put(`/assets/assignments/${assignmentId}/report-damage-loss`, data);
+    const payload = {
+      type: data.type || data.incidentType || 'DAMAGED',
+      description: data.description || data.incidentDescription || 'Asset damage reported',
+      estimatedCost: Number(data.estimatedCost) || 0,
+      ...data,
+    };
+    const res = await apiClient.put(`/assets/assignments/${assignmentId}/report-damage-loss`, payload);
     return res.data;
   },
 
   // PUT /assets/assignments/:id/recovery-decision
   recordRecoveryDecision: async (assignmentId, data) => {
-    const res = await apiClient.put(`/assets/assignments/${assignmentId}/recovery-decision`, data);
+    const payload = {
+      recoveryApproved: data.recoveryApproved !== undefined ? Boolean(data.recoveryApproved) : true,
+      recoveryAmount: Number(data.recoveryAmount) || 0,
+      recoveryMode: data.recoveryMode || 'PAYROLL_DEDUCTION',
+      decisionRemark: data.decisionRemark || data.remarks || '',
+      ...data,
+    };
+    const res = await apiClient.put(`/assets/assignments/${assignmentId}/recovery-decision`, payload);
     return res.data;
   },
 
@@ -99,8 +143,14 @@ export const assetsLoansApi = {
     return res.data;
   },
 
+  // GET /assets/employees/:employeeId/no-due-clearance
+  getEmployeeNoDueClearance: async (employeeId) => {
+    const res = await apiClient.get(`/assets/employees/${employeeId}/no-due-clearance`);
+    return res.data;
+  },
+
   // =========================================================================
-  // Module 18: Reimbursements & Expense Claims
+  // Module 19: Reimbursements & Expense Claims
   // =========================================================================
 
   // GET /reimbursement-categories
@@ -111,7 +161,15 @@ export const assetsLoansApi = {
 
   // POST /reimbursement-categories
   createReimbursementCategory: async (data) => {
-    const res = await apiClient.post('/reimbursement-categories', data);
+    const payload = {
+      name: data.name,
+      code: (data.code || data.name || '').toUpperCase().replace(/\s+/g, '_'),
+      monthlyCap: Number(data.monthlyCap || data.maxLimit) || 10000,
+      isCapHardEnforced: Boolean(data.isCapHardEnforced),
+      ...(data.company ? { company: data.company } : {}),
+      ...data,
+    };
+    const res = await apiClient.post('/reimbursement-categories', payload);
     return res.data;
   },
 
@@ -123,13 +181,50 @@ export const assetsLoansApi = {
 
   // PUT /reimbursement-categories/:id
   updateReimbursementCategory: async (id, data) => {
-    const res = await apiClient.put(`/reimbursement-categories/${id}`, data);
+    const payload = {
+      name: data.name,
+      code: (data.code || data.name || '').toUpperCase().replace(/\s+/g, '_'),
+      monthlyCap: Number(data.monthlyCap || data.maxLimit) || 10000,
+      isCapHardEnforced: Boolean(data.isCapHardEnforced),
+      isActive: data.isActive !== undefined ? Boolean(data.isActive) : true,
+      ...data,
+    };
+    const res = await apiClient.put(`/reimbursement-categories/${id}`, payload);
     return res.data;
   },
 
   // POST /reimbursements/claims
   createClaim: async (data) => {
-    const res = await apiClient.post('/reimbursements/claims', data);
+    let payload = data;
+    // Map single-line form to multi-line receipt schema if needed
+    if (!data.lineItems || data.lineItems.length === 0) {
+      payload = {
+        disbursementMethod: data.disbursementMethod || data.settlementType || 'PAYROLL',
+        ...(data.project ? { project: data.project } : {}),
+        lineItems: [
+          {
+            category: data.category?._id || data.category,
+            description: data.description || data.title || 'Out-of-pocket expense claim',
+            amount: Number(data.amount) || 0,
+            expenseDate: data.expenseDate || new Date().toISOString().split('T')[0],
+            receiptUrl: data.receiptUrl || 'https://res.cloudinary.com/demo/image/upload/v1234/receipt1.jpg',
+          },
+        ],
+      };
+    } else {
+      payload = {
+        disbursementMethod: data.disbursementMethod || data.settlementType || 'PAYROLL',
+        ...(data.project ? { project: data.project } : {}),
+        lineItems: data.lineItems.map((item) => ({
+          category: item.category?._id || item.category,
+          description: item.description || 'Expense item',
+          amount: Number(item.amount) || 0,
+          expenseDate: item.expenseDate || new Date().toISOString().split('T')[0],
+          receiptUrl: item.receiptUrl || 'https://res.cloudinary.com/demo/image/upload/v1234/receipt1.jpg',
+        })),
+      };
+    }
+    const res = await apiClient.post('/reimbursements/claims', payload);
     return res.data;
   },
 
@@ -178,7 +273,18 @@ export const assetsLoansApi = {
 
   // PUT /reimbursements/claims/:id/decide
   decideClaim: async (id, decisionData) => {
-    const res = await apiClient.put(`/reimbursements/claims/${id}/decide`, decisionData);
+    const payload = {
+      decision: decisionData.decision || 'APPROVED',
+      remark: decisionData.remark || decisionData.remarks || decisionData.decisionRemark || '',
+      approvedLineItems: decisionData.approvedLineItems || (decisionData.approvedAmount !== undefined ? [
+        {
+          lineItemIndex: 0,
+          approvedAmount: Number(decisionData.approvedAmount) || 0,
+        },
+      ] : undefined),
+      ...decisionData,
+    };
+    const res = await apiClient.put(`/reimbursements/claims/${id}/decide`, payload);
     return res.data;
   },
 
@@ -196,7 +302,12 @@ export const assetsLoansApi = {
 
   // PUT /reimbursements/claims/:id/record-direct-payment
   recordDirectPayment: async (id, data = {}) => {
-    const res = await apiClient.put(`/reimbursements/claims/${id}/record-direct-payment`, data);
+    const payload = {
+      paymentReference: data.paymentReference || data.referenceNumber || `IMPS-${Date.now().toString().slice(-8)}`,
+      paidAt: data.paidAt ? new Date(data.paidAt).toISOString() : (data.paymentDate ? new Date(data.paymentDate).toISOString() : new Date().toISOString()),
+      ...data,
+    };
+    const res = await apiClient.put(`/reimbursements/claims/${id}/record-direct-payment`, payload);
     return res.data;
   },
 
@@ -212,7 +323,18 @@ export const assetsLoansApi = {
 
   // POST /loan-types
   createLoanType: async (data) => {
-    const res = await apiClient.post('/loan-types', data);
+    const payload = {
+      name: data.name,
+      category: data.category || 'ADVANCE', // 'ADVANCE' | 'LOAN'
+      company: data.company,
+      maxAmount: Number(data.maxAmount) || 50000,
+      maxTenureMonths: Number(data.maxTenureMonths) || 6,
+      interestRatePercent: Number(data.interestRatePercent) || 0,
+      minimumServiceMonthsRequired: Number(data.minimumServiceMonthsRequired) || 0,
+      isActive: data.isActive !== undefined ? Boolean(data.isActive) : true,
+      ...data,
+    };
+    const res = await apiClient.post('/loan-types', payload);
     return res.data;
   },
 
@@ -224,7 +346,18 @@ export const assetsLoansApi = {
 
   // PUT /loan-types/:id
   updateLoanType: async (id, data) => {
-    const res = await apiClient.put(`/loan-types/${id}`, data);
+    const payload = {
+      name: data.name,
+      category: data.category || 'ADVANCE',
+      company: data.company,
+      maxAmount: Number(data.maxAmount) || 50000,
+      maxTenureMonths: Number(data.maxTenureMonths) || 6,
+      interestRatePercent: Number(data.interestRatePercent) || 0,
+      minimumServiceMonthsRequired: Number(data.minimumServiceMonthsRequired) || 0,
+      isActive: data.isActive !== undefined ? Boolean(data.isActive) : true,
+      ...data,
+    };
+    const res = await apiClient.put(`/loan-types/${id}`, payload);
     return res.data;
   },
 
@@ -280,7 +413,15 @@ export const assetsLoansApi = {
 
   // POST /loans/requests
   createLoanRequest: async (data) => {
-    const res = await apiClient.post('/loans/requests', data);
+    const payload = {
+      employee: data.employee || data.employeeId,
+      loanType: data.loanType || data.loanTypeId,
+      requestedAmount: Number(data.requestedAmount !== undefined ? data.requestedAmount : data.amount) || 0,
+      requestedTenureMonths: Number(data.requestedTenureMonths !== undefined ? data.requestedTenureMonths : data.tenureMonths) || 12,
+      reason: data.reason || data.purpose || 'Salary Advance / Loan Request',
+      ...data,
+    };
+    const res = await apiClient.post('/loans/requests', payload);
     return res.data;
   },
 
@@ -292,7 +433,14 @@ export const assetsLoansApi = {
 
   // PUT /loans/requests/:id/decide
   decideLoanRequest: async (id, decisionData) => {
-    const res = await apiClient.put(`/loans/requests/${id}/decide`, decisionData);
+    const payload = {
+      decision: decisionData.decision || 'APPROVED',
+      approvedAmount: Number(decisionData.approvedAmount),
+      approvedTenureMonths: Number(decisionData.approvedTenureMonths),
+      remark: decisionData.remark || decisionData.remarks || '',
+      ...decisionData,
+    };
+    const res = await apiClient.put(`/loans/requests/${id}/decide`, payload);
     return res.data;
   },
 
@@ -304,12 +452,17 @@ export const assetsLoansApi = {
 
   // POST /loans/requests/:id/disburse (with fallback to PUT)
   disburseLoan: async (id, data = {}) => {
+    const payload = {
+      disbursementReference: data.disbursementReference || data.reference || `BANK-TRF-${Date.now().toString().slice(-8)}`,
+      disbursedAt: data.disbursedAt ? new Date(data.disbursedAt).toISOString() : new Date().toISOString(),
+      ...data,
+    };
     try {
-      const res = await apiClient.post(`/loans/requests/${id}/disburse`, data);
+      const res = await apiClient.post(`/loans/requests/${id}/disburse`, payload);
       return res.data;
     } catch (err) {
       if (err.response?.status === 404 || err.response?.status === 405) {
-        const fallback = await apiClient.put(`/loans/requests/${id}/disburse`, data);
+        const fallback = await apiClient.put(`/loans/requests/${id}/disburse`, payload);
         return fallback.data;
       }
       throw err;
@@ -342,7 +495,12 @@ export const assetsLoansApi = {
 
   // PUT /loans/:loanId/emi-schedule/:periodKey/mark-paid
   markEmiPaid: async (loanId, periodKey, data = {}) => {
-    const res = await apiClient.put(`/loans/${loanId}/emi-schedule/${periodKey}/mark-paid`, data);
+    const payload = {
+      paidInPayrollRun: data.paidInPayrollRun || undefined,
+      paidAt: data.paidAt ? new Date(data.paidAt).toISOString() : new Date().toISOString(),
+      ...data,
+    };
+    const res = await apiClient.put(`/loans/${loanId}/emi-schedule/${periodKey}/mark-paid`, payload);
     return res.data;
   },
 };

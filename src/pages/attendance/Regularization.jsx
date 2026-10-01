@@ -24,6 +24,7 @@ import Table from '../../components/common/Table';
 import Modal from '../../components/common/Modal';
 import Button from '../../components/common/Button';
 import Input from '../../components/common/Input';
+import TimePicker12 from '../../components/common/TimePicker12';
 import Badge from '../../components/common/Badge';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { attendanceNav } from '../../routes/moduleNavConfig';
@@ -75,27 +76,61 @@ export const Regularization = () => {
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancellingRequest, setCancellingRequest] = useState(false);
 
-  const getEmpName = (emp) =>
-    emp?.basicInfo?.fullName ||
-    emp?.fullName ||
-    (emp?.firstName ? `${emp.firstName} ${emp.lastName || ''}`.trim() : '') ||
-    emp?.name ||
-    'Employee';
+  // Safe list extractor for backend responses
+  const extractList = (res) => {
+    if (!res) return [];
+    if (Array.isArray(res)) return res;
+    if (Array.isArray(res.data)) return res.data;
+    if (Array.isArray(res.regularizations)) return res.regularizations;
+    if (Array.isArray(res.pendingRequests)) return res.pendingRequests;
+    if (Array.isArray(res.requests)) return res.requests;
+    return [];
+  };
 
-  const getEmpCode = (emp) =>
-    emp?.basicInfo?.employeeCode || emp?.employeeCode || '-';
+  const getEmpName = (emp, reqItem) => {
+    if (typeof emp === 'object' && emp !== null) {
+      return (
+        emp?.basicInfo?.fullName ||
+        emp?.fullName ||
+        (emp?.firstName ? `${emp.firstName} ${emp.lastName || ''}`.trim() : '') ||
+        emp?.name ||
+        'Employee'
+      );
+    }
+    const empId = typeof emp === 'string' ? emp : (reqItem?.employee || reqItem?.employeeId);
+    if (empId) {
+      const found = employees.find((e) => (e._id || e.id) === empId);
+      if (found) {
+        return found?.basicInfo?.fullName || found?.fullName || found?.name || 'Employee';
+      }
+      if (user?.employee?._id === empId || user?.employee === empId || user?._id === empId) {
+        return user?.name || user?.basicInfo?.fullName || 'Employee';
+      }
+    }
+    return reqItem?.requestedBy?.name || user?.name || 'Employee';
+  };
+
+  const getEmpCode = (emp, reqItem) => {
+    if (typeof emp === 'object' && emp !== null) {
+      return emp?.basicInfo?.employeeCode || emp?.employeeCode || '-';
+    }
+    const empId = typeof emp === 'string' ? emp : (reqItem?.employee || reqItem?.employeeId);
+    if (empId) {
+      const found = employees.find((e) => (e._id || e.id) === empId);
+      if (found) {
+        return found?.basicInfo?.employeeCode || found?.employeeCode || '-';
+      }
+    }
+    return '-';
+  };
 
   // Load Masters
   const loadMasters = async () => {
     try {
       const res = await employeeApi.getEmployees({ limit: 100 });
-      const list = Array.isArray(res)
-        ? res
-        : Array.isArray(res?.data)
-        ? res.data
-        : res?.employees || [];
+      const list = extractList(res);
       setEmployees(list);
-      if (list.length > 0) setSelectedEmpId(list[0]._id);
+      if (list.length > 0) setSelectedEmpId(list[0]._id || list[0].id);
     } catch (err) {
       console.error(err);
     }
@@ -106,12 +141,7 @@ export const Regularization = () => {
     setLoadingPending(true);
     try {
       const res = await regularizationApi.getPendingApprovals();
-      const list = Array.isArray(res)
-        ? res
-        : Array.isArray(res?.data)
-        ? res.data
-        : res?.requests || res?.pendingRequests || [];
-      setPendingRequests(list);
+      setPendingRequests(extractList(res));
     } catch (err) {
       console.error(err);
       setPendingRequests([]);
@@ -125,12 +155,7 @@ export const Regularization = () => {
     setLoadingMyRequests(true);
     try {
       const res = await regularizationApi.getMyRegularizations();
-      const list = Array.isArray(res)
-        ? res
-        : Array.isArray(res?.data)
-        ? res.data
-        : res?.requests || [];
-      setMyRequests(list);
+      setMyRequests(extractList(res));
     } catch (err) {
       console.error(err);
       setMyRequests([]);
@@ -145,12 +170,7 @@ export const Regularization = () => {
     setLoadingEmpRequests(true);
     try {
       const res = await regularizationApi.getEmployeeRegularizations(empId);
-      const list = Array.isArray(res)
-        ? res
-        : Array.isArray(res?.data)
-        ? res.data
-        : res?.requests || [];
-      setEmployeeRequests(list);
+      setEmployeeRequests(extractList(res));
     } catch (err) {
       console.error(err);
       setEmployeeRequests([]);
@@ -161,7 +181,11 @@ export const Regularization = () => {
 
   useEffect(() => {
     loadMasters();
-  }, []);
+    loadMyRequests();
+    if (canReview) {
+      loadPending();
+    }
+  }, [canReview]);
 
   useEffect(() => {
     if (activeTab === 'pending') loadPending();
@@ -179,15 +203,19 @@ export const Regularization = () => {
 
     setSubmittingApply(true);
     try {
-      const inISO = new Date(`${formData.attendanceDate}T${formData.proposedCheckInTime}:00`).toISOString();
-      const outISO = new Date(`${formData.attendanceDate}T${formData.proposedCheckOutTime}:00`).toISOString();
+      const dateStr = formData.attendanceDate;
+      const formatIso = (hhmm) => {
+        if (!hhmm) return `${dateStr}T09:00:00.000Z`;
+        if (hhmm.includes('T')) return hhmm;
+        return `${dateStr}T${hhmm}:00.000Z`;
+      };
 
       const payload = {
-        attendanceType: formData.attendanceType,
-        attendanceDate: formData.attendanceDate,
-        requestType: formData.requestType,
-        proposedCheckInTime: inISO,
-        proposedCheckOutTime: outISO,
+        attendanceType: formData.attendanceType || 'OFFICE',
+        attendanceDate: dateStr,
+        requestType: formData.requestType || 'WRONG_TIME_RECORDED',
+        proposedCheckInTime: formatIso(formData.proposedCheckInTime),
+        proposedCheckOutTime: formatIso(formData.proposedCheckOutTime),
         reason: formData.reason.trim(),
       };
 
@@ -202,8 +230,9 @@ export const Regularization = () => {
         proposedCheckOutTime: '18:00',
         reason: '',
       });
-      loadMyRequests();
-      if (canReview) loadPending();
+      await loadMyRequests();
+      if (canReview) await loadPending();
+      if (selectedEmpId) await loadEmployeeRequests(selectedEmpId);
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to submit regularization', 'error');
     } finally {
@@ -240,6 +269,8 @@ export const Regularization = () => {
       }
       setReviewModalOpen(false);
       loadPending();
+      loadMyRequests();
+      if (selectedEmpId) loadEmployeeRequests(selectedEmpId);
     } catch (err) {
       showToast(err.response?.data?.message || `Failed to ${reviewAction} request`, 'error');
     } finally {
@@ -263,6 +294,8 @@ export const Regularization = () => {
       showToast('Regularization request cancelled', 'info');
       setCancelModalOpen(false);
       loadMyRequests();
+      if (canReview) loadPending();
+      if (selectedEmpId) loadEmployeeRequests(selectedEmpId);
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to cancel request', 'error');
     } finally {
@@ -310,12 +343,31 @@ export const Regularization = () => {
       header: 'Proposed Timings',
       key: 'proposedTimings',
       render: (r) => {
-        const inTime = r.proposedCheckInTime || r.requestedCheckInTime;
-        const outTime = r.proposedCheckOutTime || r.requestedCheckOutTime;
+        const format12 = (val) => {
+          if (!val) return '—';
+          if (typeof val === 'string' && /^\d{1,2}:\d{2}/.test(val) && !val.includes('T')) {
+            const [hStr, mStr] = val.split(':');
+            let h = parseInt(hStr, 10);
+            const m = mStr.slice(0, 2);
+            const period = h >= 12 ? 'PM' : 'AM';
+            h = h % 12;
+            if (h === 0) h = 12;
+            return `${h}:${m} ${period}`;
+          }
+          try {
+            const d = new Date(val);
+            if (!isNaN(d.getTime())) {
+              return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+            }
+          } catch {}
+          return String(val);
+        };
+        const inTime = format12(r.proposedCheckInTime || r.requestedCheckInTime);
+        const outTime = format12(r.proposedCheckOutTime || r.requestedCheckOutTime);
         return (
           <div style={{ fontSize: '0.82rem' }}>
-            <div>In: <strong>{inTime ? new Date(inTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</strong></div>
-            <div>Out: <strong>{outTime ? new Date(outTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}</strong></div>
+            <div>In: <strong style={{ color: '#16a34a' }}>{inTime}</strong></div>
+            <div>Out: <strong style={{ color: 'var(--primary)' }}>{outTime}</strong></div>
           </div>
         );
       },
@@ -356,7 +408,7 @@ export const Regularization = () => {
       key: 'actions',
       render: (r) => (
         <div style={{ display: 'flex', gap: 6 }}>
-          {activeTab === 'pending' && canReview && r.status === 'PENDING' && (
+          {(activeTab === 'pending' || activeTab === 'employee_history') && canReview && r.status === 'PENDING' && (
             <>
               <Button
                 size="sm"
@@ -407,17 +459,6 @@ export const Regularization = () => {
         <div style={{ display: 'flex', gap: 10 }}>
           <Button variant="primary" icon={Plus} onClick={() => setApplyModalOpen(true)}>
             Apply Regularization
-          </Button>
-          <Button
-            variant="light"
-            icon={RotateCcw}
-            onClick={() => {
-              if (activeTab === 'pending') loadPending();
-              else if (activeTab === 'my_requests') loadMyRequests();
-              else loadEmployeeRequests(selectedEmpId);
-            }}
-          >
-            Refresh
           </Button>
         </div>
       </div>
@@ -610,19 +651,17 @@ export const Regularization = () => {
             </select>
           </div>
 
-          <div className="grid-2" style={{ marginTop: 12 }}>
-            <Input
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
+            <TimePicker12
               label="Proposed Check-In Time"
-              type="time"
               value={formData.proposedCheckInTime}
-              onChange={(e) => setFormData({ ...formData, proposedCheckInTime: e.target.value })}
+              onChange={(val) => setFormData({ ...formData, proposedCheckInTime: val })}
               required
             />
-            <Input
+            <TimePicker12
               label="Proposed Check-Out Time"
-              type="time"
               value={formData.proposedCheckOutTime}
-              onChange={(e) => setFormData({ ...formData, proposedCheckOutTime: e.target.value })}
+              onChange={(val) => setFormData({ ...formData, proposedCheckOutTime: val })}
               required
             />
           </div>

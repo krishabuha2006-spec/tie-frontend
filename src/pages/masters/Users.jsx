@@ -400,7 +400,7 @@ export const Users = () => {
               </span>
               <span style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text-main)' }}>{empName}</span>
             </div>
-            <div style={{ fontSize: '0.75rem', color: '#16a34a', marginTop: 2 }}>✓ Unified Employee Profile</div>
+            <div style={{ fontSize: '0.75rem', color: '#16a34a', marginTop: 2 }}>Unified Employee Profile</div>
           </div>
         );
       },

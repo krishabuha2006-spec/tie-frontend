@@ -7,7 +7,10 @@ export const Modal = ({
   title,
   children,
   footer,
-  size = 'md', // sm | md | lg | xl
+  size = 'md', // sm | md | lg | xl | 2xl | full
+  maxWidth,
+  width,
+  style,
 }) => {
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -31,10 +34,17 @@ export const Modal = ({
 
   const sizeClass = size !== 'md' ? `modal-${size}` : '';
 
+  const dialogStyle = {
+    ...(maxWidth ? { maxWidth } : {}),
+    ...(width ? { width } : {}),
+    ...style,
+  };
+
   return (
     <div className="modal-backdrop" onClick={onClose} role="dialog" aria-modal="true">
       <div
         className={`modal-dialog ${sizeClass}`.trim()}
+        style={dialogStyle}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">

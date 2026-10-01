@@ -9,6 +9,8 @@ import {
   Briefcase,
   FolderKanban,
   CalendarOff,
+  Calendar,
+  CalendarDays,
   Banknote,
   Laptop,
   ShieldCheck,
@@ -21,6 +23,10 @@ import {
   X,
   GitFork,
   BarChart3,
+  Boxes,
+  Wrench,
+  FileCheck,
+  Target,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -31,7 +37,7 @@ export const Sidebar = ({ isMobileOpen, onCloseMobile }) => {
   // Track expanded state of dropdown menus (HRM open by default)
   const [openMenus, setOpenMenus] = useState({
     hrm: true,
-    operations: false,
+    projects: false,
     masters: false,
   });
 
@@ -52,11 +58,13 @@ export const Sidebar = ({ isMobileOpen, onCloseMobile }) => {
     const path = location.pathname;
     if (
       path.includes('/hrm') ||
+      path.includes('/recruitment') ||
       path.includes('/employees') ||
       path.includes('/attendance') ||
+      path.includes('/calendar') ||
       path.includes('/leaves') ||
+      path.includes('/holidays') ||
       path.includes('/payroll') ||
-      path.includes('/recruitment') ||
       path.includes('/assets-claims') ||
       path.includes('/performance') ||
       path.includes('/lifecycle') ||
@@ -64,8 +72,8 @@ export const Sidebar = ({ isMobileOpen, onCloseMobile }) => {
     ) {
       setOpenMenus((prev) => ({ ...prev, hrm: true }));
     }
-    if (path.includes('/operations')) {
-      setOpenMenus((prev) => ({ ...prev, operations: true }));
+    if (path.includes('/operations') || path.includes('/project')) {
+      setOpenMenus((prev) => ({ ...prev, projects: true }));
     }
     if (path.includes('/masters')) {
       setOpenMenus((prev) => ({ ...prev, masters: true }));
@@ -79,7 +87,7 @@ export const Sidebar = ({ isMobileOpen, onCloseMobile }) => {
     }));
   };
 
-  // Modern, simplified Navigation Structure with strict module permission bindings
+  // Modern navigation structure: Dashboard | HRM (all HRMS modules) | Project Management (3 options) | Masters (common)
   const navStructure = [
     {
       type: 'single',
@@ -98,7 +106,9 @@ export const Sidebar = ({ isMobileOpen, onCloseMobile }) => {
         { path: '/recruitment/jobs', label: 'Recruitment', icon: Briefcase, module: 'recruitment' },
         { path: '/employees', label: 'Employees', icon: Users, module: 'employees' },
         { path: '/attendance', label: 'Attendance', icon: CalendarCheck, module: 'attendance' },
+        { path: '/calendar', label: 'Calendar', icon: CalendarDays, module: 'calendar' },
         { path: '/leaves', label: 'Leaves', icon: CalendarOff, module: 'leaves' },
+        { path: '/holidays', label: 'Holidays', icon: Calendar, module: 'holidays' },
         { path: '/payroll', label: 'Payroll', icon: Banknote, module: 'payroll' },
         { path: '/assets-claims', label: 'Assets & Claims', icon: Laptop, module: 'assets-claims' },
         { path: '/performance', label: 'Performance', icon: Award, module: 'performance' },
@@ -107,10 +117,10 @@ export const Sidebar = ({ isMobileOpen, onCloseMobile }) => {
     },
     {
       type: 'dropdown',
-      key: 'operations',
-      label: 'Operations',
+      key: 'projects',
+      label: 'Project Management',
       icon: FolderKanban,
-      module: 'operations',
+      module: 'projectManagement',
       items: [
         { path: '/operations/projects', label: 'Projects', icon: FolderKanban, module: 'projects' },
         { path: '/operations/site-logs', label: 'Site Logs', icon: FileSpreadsheet, module: 'site-logs' },
@@ -128,7 +138,7 @@ export const Sidebar = ({ isMobileOpen, onCloseMobile }) => {
         { path: '/masters/branches', label: 'Branches', icon: Building2, module: 'branches' },
         { path: '/masters/departments', label: 'Departments', icon: Building2, module: 'departments' },
         { path: '/masters/designations', label: 'Designations', icon: Award, module: 'designations' },
-        { path: '/masters/roles', label: 'Roles', icon: ShieldCheck, module: 'roles' },
+        { path: '/masters/roles', label: 'Roles & RBAC', icon: ShieldCheck, module: 'roles' },
       ],
     },
   ];

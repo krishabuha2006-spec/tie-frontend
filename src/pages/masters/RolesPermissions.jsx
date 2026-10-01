@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import apiClient from '../../api/client';
 import masterApi from '../../api/masterApi';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
@@ -18,6 +19,9 @@ import {
   CheckSquare,
   Square,
   Sparkles,
+  Users,
+  FolderKanban,
+  Building2,
 } from 'lucide-react';
 import Modal from '../../components/common/Modal';
 import Button from '../../components/common/Button';
@@ -28,7 +32,7 @@ import ConfirmDialog from '../../components/common/ConfirmDialog';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { mastersNav } from '../../routes/moduleNavConfig';
 
-// Standard 12 granular actions conforming to Backend PermissionActionsSchema
+// All 12 actions — matches backend PermissionActions schema exactly
 export const ALL_ACTIONS = [
   'view',
   'create',
@@ -44,6 +48,9 @@ export const ALL_ACTIONS = [
   'viewReports',
 ];
 
+// Actions displayed in the matrix UI (the 6 most common)
+export const MATRIX_UI_ACTIONS = ['view', 'create', 'edit', 'delete', 'approve', 'export'];
+
 export const createActionsObject = (granted = true) => {
   const actions = {};
   ALL_ACTIONS.forEach((act) => {
@@ -52,180 +59,92 @@ export const createActionsObject = (granted = true) => {
   return actions;
 };
 
-// Canonical 10 Enterprise Modules & 56 Sub-modules from Backend Permission Catalog
+// ─── The 3 Sidebar Modules: HRM, Project Management, and Masters ──────────────
 export const DEFAULT_PERMISSION_CATALOG = {
-  totalModules: 10,
-  totalSubModules: 56,
+  totalModules: 3,
   availableActions: ALL_ACTIONS,
   modules: [
     {
-      moduleKey: 'crm',
-      displayName: 'CRM (Customer Relationship Management)',
-      shortLabel: 'CRM',
-      description: 'Lead tracking, follow-ups, quotation workflow, and AMC proposals.',
+      moduleKey: 'hrm',
+      displayName: 'HRM',
+      shortLabel: 'HRM',
+      icon: Users,
+      description: 'Human Resource Management (all HRMS options)',
       subModules: [
-        { subModuleKey: 'leadManagement', displayName: 'Lead Management', description: 'Lead info, follow-up scheduling, timeline, activity logs, duplicate prevention' },
-        { subModuleKey: 'quotationManagement', displayName: 'Quotation Management', description: 'Quotation workflow, templates, revisions, pricing negotiation & discounts' },
-        { subModuleKey: 'addonQuotation', displayName: 'Add-on Quotation / AMC Quotation', description: 'Supplementary quotes, AMC contract proposals, and value-added services' },
-      ],
-    },
-    {
-      moduleKey: 'erpInventory',
-      displayName: 'ERP & Inventory Management',
-      shortLabel: 'ERP & Inv',
-      description: 'Product master, stock movements, vendor management, POs, and reorder alerts.',
-      subModules: [
-        { subModuleKey: 'productMaster', displayName: 'Product Structure & Master', description: 'Categories, variants, SKUs, specifications, units of measurement (UOM)' },
-        { subModuleKey: 'vendorManagement', displayName: 'Vendor Management', description: 'Vendor onboarding, performance evaluation, rate contracts, and contact repository' },
-        { subModuleKey: 'warehouseStock', displayName: 'Warehouse & Stock Management', description: 'Multi-warehouse stock levels, bin locations, and live inventory tracking' },
-        { subModuleKey: 'inventoryApproval', displayName: 'Inventory Approval Workflow', description: 'Requisition approvals, stock transfer approvals, and threshold authorizations' },
-        { subModuleKey: 'purchaseOrderGen', displayName: 'Purchase Order Generation', description: 'Automated and manual PO generation, vendor terms, and order dispatch' },
-        { subModuleKey: 'materialReceiptIssue', displayName: 'Material Receipt / Issue / Return', description: 'Goods receipt notes (GRN), site material issue slips, and surplus returns' },
-        { subModuleKey: 'reorderForecast', displayName: 'Reorder Rules & Inventory Forecasting', description: 'Minimum stock thresholds, automated reorder triggers, and consumption forecasting' },
-        { subModuleKey: 'stockAdjustments', displayName: 'Stock Adjustments', description: 'Physical audit reconciliations, damage write-offs, and stock correction logs' },
+        { subModuleKey: 'recruitment', displayName: 'Recruitment & Jobs', description: 'Job openings, candidates, interviews & offers' },
+        { subModuleKey: 'employees', displayName: 'Employees Directory', description: 'Employee master profiles, contact, lifecycle & documents' },
+        { subModuleKey: 'attendance', displayName: 'Daily Attendance', description: 'Biometric punches, shift logs & geofence timesheets' },
+        { subModuleKey: 'calendar', displayName: 'Work Calendar', description: 'Company schedule, shift plans & working calendar' },
+        { subModuleKey: 'leaves', displayName: 'Leaves & Holidays', description: 'Leave requests, quota balances & approvals' },
+        { subModuleKey: 'holidays', displayName: 'Holiday Calendar', description: 'Branch & corporate holiday schedule' },
+        { subModuleKey: 'payroll', displayName: 'Payroll & Salaries', description: 'Monthly payroll calculations, salary sheets & payslips' },
+        { subModuleKey: 'assets-claims', displayName: 'Assets & Claims', description: 'Hardware assets custody & expense reimbursements' },
+        { subModuleKey: 'performance', displayName: 'Performance Reviews', description: 'KRA appraisals, quarter evaluations & scorecards' },
+        { subModuleKey: 'reports', displayName: 'HR Reports & Analytics', description: 'Workforce analytics, attendance & statutory payroll export' },
       ],
     },
     {
       moduleKey: 'projectManagement',
-      displayName: 'Project Management System',
-      shortLabel: 'Projects',
-      description: 'Project lifecycles, milestone tracking, drawings, TMS, and project accounting.',
+      displayName: 'Project Management',
+      shortLabel: 'Project Management',
+      icon: FolderKanban,
+      description: 'Project delivery, client sites, supervisor logs & task boards',
       subModules: [
-        { subModuleKey: 'projectCreation', displayName: 'Project Creation & Team Assignment', description: 'New project setup, scope definition, budget allocation, and team staffing' },
-        { subModuleKey: 'stakeholderManagement', displayName: 'Stakeholder Management', description: 'Client contacts, consultants, site engineers, and third-party contractors' },
-        { subModuleKey: 'drawingManagement', displayName: 'Drawing Management', description: 'Architectural drawings, CAD revisions, version control, and markup notes' },
-        { subModuleKey: 'designApproval', displayName: 'Design Approval Workflow', description: 'Internal design review, consultant sign-offs, and client design approvals' },
-        { subModuleKey: 'taskManagement', displayName: 'Task Management System (TMS)', description: 'Site tasks, milestone checklists, deadlines, dependencies, and daily progress' },
-        { subModuleKey: 'issueManagement', displayName: 'Issue Management', description: 'Site impediments, snag lists, escalation matrices, and resolution tracking' },
-        { subModuleKey: 'paymentPhaseExpenses', displayName: 'Payment Phase & Project Expenses', description: 'Milestone billing stages, site imprest cash, and direct project expenditures' },
+        { subModuleKey: 'projects', displayName: 'Projects', description: 'Project delivery, milestones, phases & sites' },
+        { subModuleKey: 'site-logs', displayName: 'Site Logs', description: 'Daily site supervisor logs, material usage & issue reports' },
+        { subModuleKey: 'tasks', displayName: 'Tasks', description: 'Action items, team assignments & deadlines' },
       ],
     },
     {
-      moduleKey: 'installationQC',
-      displayName: 'Installation & Quality Control',
-      shortLabel: 'Install & QC',
-      description: 'Site execution standards, QC inspections, commissioning, and test approvals.',
+      moduleKey: 'masters',
+      displayName: 'Masters',
+      shortLabel: 'Masters',
+      icon: Building2,
+      description: 'Organization master configurations and system access (Common)',
       subModules: [
-        { subModuleKey: 'installationWorkflow', displayName: 'Installation Workflow', description: 'Hydrant, Sprinkler, Fire Alarm, Pump House, and Ventilation execution workflows' },
-        { subModuleKey: 'qcChecklist', displayName: 'Quality Control (QC) Checklist', description: 'Pressure testing, weld inspections, equipment alignment, and safety audits' },
-        { subModuleKey: 'qcApproval', displayName: 'QC Approval Workflow', description: 'Multi-stage QC clearance, non-conformance reports (NCR), and handover sign-off' },
-      ],
-    },
-    {
-      moduleKey: 'nocProcessing',
-      displayName: 'NOC Processing',
-      shortLabel: 'NOC',
-      description: 'Fire authority approvals, compliance checklists, document dossiers, and renewals.',
-      subModules: [
-        { subModuleKey: 'preNocChecklist', displayName: 'Pre-NOC Checklist', description: 'Statutory compliance verification, architectural clearance, and site readiness' },
-        { subModuleKey: 'nocApplication', displayName: 'NOC Application', description: 'Basic project details, fire authority jurisdiction, and statutory document uploads' },
-        { subModuleKey: 'nocApproval', displayName: 'NOC Approval Workflow', description: 'Fire officer site inspection tracking, query replies, and provisional/final certificate issues' },
-        { subModuleKey: 'nocRenewalReminder', displayName: 'NOC Renewal Reminder', description: 'Automated expiry alerts, renewal filing timelines, and compliance tracking' },
-      ],
-    },
-    {
-      moduleKey: 'amcManagement',
-      displayName: 'AMC (Annual Maintenance Contract)',
-      shortLabel: 'AMC',
-      description: 'Contract lifecycles, routine service schedules, preventive visits, and renewals.',
-      subModules: [
-        { subModuleKey: 'amcContracts', displayName: 'AMC Types & Contract Details', description: 'Comprehensive/Non-comprehensive terms, asset scopes, pricing, and SLAs' },
-        { subModuleKey: 'amcVisitManagement', displayName: 'AMC Visit Management', description: 'Quarterly/Monthly visit scheduling, engineer dispatch, and site service logs' },
-        { subModuleKey: 'amcInspectionChecklist', displayName: 'AMC Inspection Checklist', description: 'Pump testing, alarm simulation, extinguisher recharge checks, and client signatures' },
-        { subModuleKey: 'amcRenewalWorkflow', displayName: 'Renewal Workflow', description: 'Contract expiration forecasts, renewal quotation generation, and re-signing' },
-      ],
-    },
-    {
-      moduleKey: 'accountingFinance',
-      displayName: 'Accounting & Financial Management',
-      shortLabel: 'Accounts',
-      description: 'Project-level costing, Pakka (GST) / Kachha accounting, ledgers, and P&L.',
-      subModules: [
-        { subModuleKey: 'projectAccounting', displayName: 'Project-wise Accounting', description: 'Project revenue, budget vs actual variance, work-in-progress (WIP), and profit margins' },
-        { subModuleKey: 'pakkaAccounting', displayName: 'Pakka Accounting (GST)', description: 'Tax invoices, GST input/output calculation, GSTR reporting, and official audits' },
-        { subModuleKey: 'kachhaAccounting', displayName: 'Kachha Accounting (HUF / Labour)', description: 'Daily wage payouts, contractor cash books, site vouchers, and HUF ledgers' },
-        { subModuleKey: 'ledgerManagement', displayName: 'Ledger Management', description: 'General ledger, debtor/creditor accounts, bank reconciliation, and journal entries' },
-        { subModuleKey: 'purchaseAccounting', displayName: 'Purchase Accounting', description: 'Vendor bill booking, payment processing, debit/credit notes, and TDS deductions' },
-        { subModuleKey: 'expenseManagement', displayName: 'Expense Management', description: 'Employee travel claims, branch operational overheads, and petty cash logs' },
-        { subModuleKey: 'outstandingManagement', displayName: 'Outstanding Management', description: 'Accounts receivable aging, payment follow-up alerts, and debtor statements' },
-        { subModuleKey: 'profitLossAssets', displayName: 'Profit & Loss / Asset Management', description: 'Fixed asset registers, depreciation schedules, trial balance, and P&L statements' },
-        { subModuleKey: 'multiBranchAccounting', displayName: 'Multi-Branch / Multi-Company Accounting', description: 'Inter-branch transfers, consolidated balance sheets, and company-level accounting' },
-      ],
-    },
-    {
-      moduleKey: 'hrms',
-      displayName: 'Human Resource Management System (HRMS)',
-      shortLabel: 'HRMS',
-      description: 'Employee profiles, biometric & geofenced attendance, leaves, payroll, and KRAs.',
-      subModules: [
-        { subModuleKey: 'employeeMaster', displayName: 'Employee Master', description: 'Centralized employee repository, personal/employment info, and document custody' },
-        { subModuleKey: 'attendance', displayName: 'Attendance Management', description: 'Face recognition, 500m geofencing, site attendance logs, and regularizations' },
-        { subModuleKey: 'leaveManagement', displayName: 'Leave Management', description: 'Leave applications, approvals, leave balances, policy rules, and holiday calendars' },
-        { subModuleKey: 'payrollManagement', displayName: 'Payroll Management', description: 'Salary structures, PF/ESIC deductions, monthly payslip generation, and disbursements' },
-        { subModuleKey: 'kraManagement', displayName: 'KRA & Appraisal Management', description: 'Key Result Areas (KRAs), quarterly KPI reviews, ratings, and promotions' },
-        { subModuleKey: 'assetCustody', displayName: 'Employee Custody & Asset Management', description: 'Company laptops, tools, safety gear, ID cards, and handover/return tracking' },
-        { subModuleKey: 'hrmsReports', displayName: 'HRMS Reports', description: 'Attrition rates, attendance summaries, statutory compliance reports, and headcount' },
-      ],
-    },
-    {
-      moduleKey: 'procurement',
-      displayName: 'Sales, Purchase & Procurement Management',
-      shortLabel: 'Procurement',
-      description: 'Sales order processing, purchase requisitions, supplier tracking, and GRN.',
-      subModules: [
-        { subModuleKey: 'salesOrderManagement', displayName: 'Sales Order Management', description: 'Customer SO registration, billing schedule, and delivery milestones' },
-        { subModuleKey: 'purchaseRequisitionPO', displayName: 'Purchase Requisition & Purchase Order', description: 'Site indent requisitions, comparative quotes, and PO issuance' },
-        { subModuleKey: 'vendorProcurement', displayName: 'Vendor Procurement Management', description: 'Vendor ratings, delivery SLA monitoring, and payment terms negotiation' },
-        { subModuleKey: 'materialReceiptGRN', displayName: 'Material Receipt (GRN)', description: 'Site delivery inspections, quantity/quality verification, and GRN clearance' },
-        { subModuleKey: 'procurementTracking', displayName: 'Procurement Tracking', description: 'Real-time transit tracking, vendor dispatch status, and lead-time analytics' },
-      ],
-    },
-    {
-      moduleKey: 'administration',
-      displayName: 'Administration & Settings',
-      shortLabel: 'Admin',
-      description: 'Executive dashboards, role-based security, audit trails, and multi-tenant setup.',
-      subModules: [
-        { subModuleKey: 'dashboardOverview', displayName: 'Dashboard Overview', description: 'Executive KPI cards, real-time alerts, project health, and financial snapshots' },
-        { subModuleKey: 'systemSettings', displayName: 'System & Business Settings', description: 'Email server configs, SMS gateways, currency formats, and global business rules' },
-        { subModuleKey: 'rolePermissionManagement', displayName: 'Role & Permission Management', description: 'Role creation, 12-action sub-module matrix configuration, and user assignment' },
-        { subModuleKey: 'notificationCenter', displayName: 'Notification Center', description: 'In-app notifications, email broadcast templates, and escalation triggers' },
-        { subModuleKey: 'reportCenter', displayName: 'Report Center', description: 'Custom report builder, automated scheduled exports, and analytics dashboards' },
-        { subModuleKey: 'multiBranchCompany', displayName: 'Multi-Branch & Multi-Company Management', description: 'Company tenants, branch geofencing parameters, and corporate hierarchy' },
+        { subModuleKey: 'companies', displayName: 'Companies', description: 'Corporate entity setup, registration & business info' },
+        { subModuleKey: 'branches', displayName: 'Branches', description: 'Regional branch offices, geofences & locations' },
+        { subModuleKey: 'departments', displayName: 'Departments', description: 'Functional organizational departments' },
+        { subModuleKey: 'designations', displayName: 'Designations', description: 'Job designations & title hierarchy' },
+        { subModuleKey: 'roles', displayName: 'Roles & RBAC', description: 'Role profiles & granular permission matrices' },
       ],
     },
   ],
 };
 
-// Clean, short & simple module names
-export const getModuleShortName = (mod) => {
-  if (!mod) return '';
-  const key = mod.moduleKey || mod.key || '';
-  const map = {
-    crm: 'CRM',
-    erpInventory: 'ERP & Inventory',
-    projectManagement: 'Project Management',
-    installationQC: 'Installation & QC',
-    nocProcessing: 'NOC Processing',
-    amcManagement: 'AMC',
-    accountingFinance: 'Accounts & Finance',
-    hrms: 'HRMS',
-    procurement: 'Procurement',
-    administration: 'Administration',
-  };
-  if (map[key]) return map[key];
-  if (mod.shortLabel) return mod.shortLabel;
-  if (typeof mod.displayName === 'string') {
-    const stripped = mod.displayName.replace(/\s*\([^)]*\)/g, '').trim();
-    return stripped || mod.displayName;
-  }
-  return key;
+// READ-ONLY aliases: used only when READING permissions back from backend
+// (backend may have stored them under old keys from previous sessions)
+const LEGACY_ALIASES = {
+  recruitment: ['hrm.recruitment', 'crm.leadManagement', 'hrms.recruitment', 'recruitment'],
+  employees: ['hrm.employees', 'hrms.employeeMaster', 'hrms.employees', 'employees'],
+  attendance: ['hrm.attendance', 'hrms.attendance', 'attendance'],
+  calendar: ['hrm.calendar', 'hrms.calendar', 'calendar'],
+  leaves: ['hrm.leaves', 'hrms.leaveManagement', 'hrms.leaves', 'leaves'],
+  holidays: ['hrm.holidays', 'hrms.holidays', 'holidays'],
+  payroll: ['hrm.payroll', 'hrms.payrollManagement', 'hrms.payroll', 'payroll'],
+  'assets-claims': ['hrm.assets-claims', 'hrms.assetCustody', 'hrms.assets', 'assets-claims', 'assets'],
+  performance: ['hrm.performance', 'hrms.kraManagement', 'hrms.kra', 'performance'],
+  reports: ['hrm.reports', 'hrms.hrmsReports', 'reports'],
+  projects: ['projectManagement.projects', 'operations.projects', 'projects'],
+  'site-logs': ['projectManagement.site-logs', 'operations.site-logs', 'site-logs'],
+  tasks: ['projectManagement.tasks', 'operations.tasks', 'tasks'],
+  companies: ['masters.companies', 'administration.multiBranchCompany', 'companies'],
+  branches: ['masters.branches', 'administration.multiBranchCompany', 'branches'],
+  departments: ['masters.departments', 'administration.systemSettings', 'departments'],
+  designations: ['masters.designations', 'administration.systemSettings', 'designations'],
+  roles: ['masters.roles', 'administration.rolePermissionManagement', 'roles'],
+  users: ['masters.users', 'administration.rolePermissionManagement', 'users'],
 };
 
-// Check if role has access to a module or any of its sub-modules
+export const getModuleShortName = (mod) => {
+  if (!mod) return '';
+  return mod.shortLabel || mod.displayName;
+};
+
+// Check if role has access to a module or any of its submodules
 export function checkModuleAccess(role, permissionsMap, modKey, subModules = []) {
   if (!role) return false;
-  if (role.isSuperAdmin || role.name === 'super_admin') return true;
+  if (role.isSuperAdmin || role.name === 'super_admin' || String(role.name || '').toLowerCase() === 'super admin') return true;
 
   const perms = permissionsMap || role.permissions;
   if (!perms || typeof perms !== 'object') return false;
@@ -233,15 +152,23 @@ export function checkModuleAccess(role, permissionsMap, modKey, subModules = [])
   // 1. Direct check on moduleKey
   const modVal = perms[modKey];
   if (modVal === true) return true;
-  if (modVal && typeof modVal === 'object' && Object.values(modVal).some(Boolean)) return true;
+  if (modVal && typeof modVal === 'object' && (modVal.view || Object.values(modVal).some(Boolean))) return true;
 
-  // 2. Check any submodule: modKey.subModuleKey
-  if (Array.isArray(subModules)) {
+  // 2. Check any submodule
+  if (Array.isArray(subModules) && subModules.length > 0) {
     for (const sub of subModules) {
-      const subKey = typeof sub === 'string' ? sub : `${modKey}.${sub.subModuleKey || sub.key}`;
-      const subVal = perms[subKey];
+      const sk = typeof sub === 'string' ? sub : sub.subModuleKey || sub.key;
+      const dotKey = `${modKey}.${sk}`;
+      const subVal = perms[dotKey] ?? perms[sk];
       if (subVal === true) return true;
-      if (subVal && typeof subVal === 'object' && Object.values(subVal).some(Boolean)) return true;
+      if (subVal && typeof subVal === 'object' && (subVal.view || Object.values(subVal).some(Boolean))) return true;
+
+      // Check legacy aliases
+      const aliases = LEGACY_ALIASES[sk] || [];
+      for (const al of aliases) {
+        const alVal = perms[al];
+        if (alVal === true || (alVal && typeof alVal === 'object' && (alVal.view || Object.values(alVal).some(Boolean)))) return true;
+      }
     }
   }
 
@@ -250,25 +177,63 @@ export function checkModuleAccess(role, permissionsMap, modKey, subModules = [])
   for (const [k, val] of Object.entries(perms)) {
     if (k.startsWith(prefix) || k.toLowerCase().startsWith(modKey.toLowerCase())) {
       if (val === true) return true;
-      if (typeof val === 'object' && val !== null && Object.values(val).some(Boolean)) return true;
+      if (typeof val === 'object' && val !== null && (val.view || Object.values(val).some(Boolean))) return true;
     }
   }
 
   return false;
 }
 
-// Check sub-module action status
+// Count active submodules for a module
+export function countActiveSubModules(role, permissionsMap, modKey, subModules = []) {
+  if (!role) return 0;
+  if (role.isSuperAdmin || role.name === 'super_admin' || String(role.name || '').toLowerCase() === 'super admin') {
+    return subModules.length;
+  }
+  const perms = permissionsMap || role.permissions || {};
+  let count = 0;
+  for (const sub of subModules) {
+    const sk = sub.subModuleKey;
+    const dotKey = `${modKey}.${sk}`;
+    const val = perms[dotKey] ?? perms[sk];
+    if (val === true || (val && typeof val === 'object' && (val.view || Object.values(val).some(Boolean)))) {
+      count++;
+    } else {
+      const aliases = LEGACY_ALIASES[sk] || [];
+      for (const al of aliases) {
+        const alVal = perms[al];
+        if (alVal === true || (alVal && typeof alVal === 'object' && (alVal.view || Object.values(alVal).some(Boolean)))) {
+          count++;
+          break;
+        }
+      }
+    }
+  }
+  return count;
+}
+
+// Get action status for a submodule
 export function getSubModuleActions(perms, modKey, subModuleKey) {
   if (!perms || typeof perms !== 'object') return createActionsObject(false);
   const dotKey = `${modKey}.${subModuleKey}`;
   const val = perms[dotKey] ?? perms[subModuleKey] ?? perms[modKey];
 
   if (val === true) return createActionsObject(true);
-  if (!val || val === false) return createActionsObject(false);
+  if (!val || val === false) {
+    const aliases = LEGACY_ALIASES[subModuleKey] || [];
+    for (const al of aliases) {
+      if (perms[al]) return getSubModuleActions({ [dotKey]: perms[al] }, modKey, subModuleKey);
+    }
+    return createActionsObject(false);
+  }
   if (typeof val === 'object') {
     const act = {};
     ALL_ACTIONS.forEach((a) => {
-      act[a] = Boolean(val[a]);
+      if (a === 'edit' && val.edit === undefined && val.update !== undefined) {
+        act.edit = Boolean(val.update);
+      } else {
+        act[a] = Boolean(val[a]);
+      }
     });
     return act;
   }
@@ -277,25 +242,25 @@ export function getSubModuleActions(perms, modKey, subModuleKey) {
 
 export const RolesPermissions = () => {
   const [roles, setRoles] = useState([]);
-  const [catalog, setCatalog] = useState(DEFAULT_PERMISSION_CATALOG);
+  const [catalog] = useState(DEFAULT_PERMISSION_CATALOG);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
-  // Pending changes map: roleId -> permissions object
+  // Pending changes: roleId -> permissions object
   const [pendingChanges, setPendingChanges] = useState({});
   const [savingRoleId, setSavingRoleId] = useState(null);
   const [savingAll, setSavingAll] = useState(false);
 
-  // Create / Edit Role Metadata Modal
+  // Role Metadata Modal (Create / Edit)
   const [roleModalOpen, setRoleModalOpen] = useState(false);
   const [editingRole, setEditingRole] = useState(null);
   const [roleForm, setRoleForm] = useState({ name: '', displayName: '', description: '' });
   const [submittingRole, setSubmittingRole] = useState(false);
 
-  // Granular Permissions Matrix Modal (Sub-modules & 12 Actions)
+  // Granular Matrix Modal
   const [matrixModalOpen, setMatrixModalOpen] = useState(false);
   const [matrixRole, setMatrixRole] = useState(null);
-  const [matrixActiveMod, setMatrixActiveMod] = useState('crm');
+  const [matrixActiveMod, setMatrixActiveMod] = useState('hrm');
   const [matrixSearch, setMatrixSearch] = useState('');
 
   // Delete Confirm Dialog
@@ -306,57 +271,38 @@ export const RolesPermissions = () => {
   const { showToast } = useToast();
   const { fetchUserProfile, refreshRoles } = useAuth();
 
-  // Load roles & permission catalog dynamically from backend API
-  const loadRolesAndCatalog = useCallback(async () => {
+  const loadRoles = useCallback(async () => {
     setLoading(true);
     try {
-      const [rolesRes, catalogRes] = await Promise.allSettled([
-        masterApi.getRoles(),
-        masterApi.getPermissionCatalog(),
-      ]);
-
-      if (rolesRes.status === 'fulfilled') {
-        const list = extractApiData(rolesRes.value, 'roles', 'data');
+      // Always load fresh from backend on this admin page
+      try { sessionStorage.removeItem('tie_skip_roles_api'); } catch {}
+      const res = await masterApi.getRoles();
+      const list = extractApiData(res, 'roles', 'data');
+      if (Array.isArray(list) && list.length > 0) {
         setRoles(list);
-        setPendingChanges({});
+        try { localStorage.setItem('tie_roles', JSON.stringify(list)); } catch {}
       } else {
-        console.error('Failed to load roles:', rolesRes.reason);
-        showToast('Failed to load roles from server', 'error');
+        // Fall back to cache only when backend returns nothing
+        const cached = localStorage.getItem('tie_roles');
+        if (cached) setRoles(JSON.parse(cached));
       }
-
-      if (catalogRes.status === 'fulfilled' && catalogRes.value) {
-        const catPayload = catalogRes.value?.data || catalogRes.value;
-        if (catPayload && Array.isArray(catPayload.modules) && catPayload.modules.length > 0) {
-          // Merge with shortLabel enhancements
-          const enrichedModules = catPayload.modules.map((m) => {
-            const defMatch = DEFAULT_PERMISSION_CATALOG.modules.find((dm) => dm.moduleKey === m.moduleKey);
-            return {
-              ...m,
-              shortLabel: defMatch?.shortLabel || m.displayName.split(' ')[0],
-            };
-          });
-
-          setCatalog({
-            totalModules: catPayload.totalModules || enrichedModules.length,
-            totalSubModules: catPayload.totalSubModules || 56,
-            availableActions: catPayload.availableActions || ALL_ACTIONS,
-            modules: enrichedModules,
-            permissionKeys: catPayload.permissionKeys || [],
-          });
-        }
-      }
+      setPendingChanges({});
     } catch (err) {
-      console.error('Error in loadRolesAndCatalog:', err);
+      console.error('Failed to load roles:', err);
+      try {
+        const cached = localStorage.getItem('tie_roles');
+        if (cached) setRoles(JSON.parse(cached));
+      } catch {}
+      showToast('Failed to load roles from backend API', 'error');
     } finally {
       setLoading(false);
     }
   }, [showToast]);
 
   useEffect(() => {
-    loadRolesAndCatalog();
-  }, [loadRolesAndCatalog]);
+    loadRoles();
+  }, [loadRoles]);
 
-  // Get effective permissions for a role
   const getRolePerms = useCallback(
     (role) => {
       if (!role) return {};
@@ -368,7 +314,7 @@ export const RolesPermissions = () => {
     [pendingChanges]
   );
 
-  // Quick toggle whole module (sets moduleKey & all subModules)
+  // Toggle whole module from the quick-toggle pill on the card (HRM, Project Management, Masters)
   const handleToggleModule = (role, mod) => {
     if (role.isSuperAdmin || role.name === 'super_admin') return;
 
@@ -378,51 +324,31 @@ export const RolesPermissions = () => {
     const hasAccess = checkModuleAccess(role, currentPerms, modKey, subModules);
 
     const updatedPerms = { ...currentPerms };
-    const allActions = createActionsObject(true);
-    const zeroActions = createActionsObject(false);
+    const targetActions = hasAccess ? createActionsObject(false) : createActionsObject(true);
 
-    if (hasAccess) {
-      // Revoke module and all submodules
-      updatedPerms[modKey] = zeroActions;
-      subModules.forEach((sub) => {
-        const subKey = `${modKey}.${sub.subModuleKey || sub.key}`;
-        updatedPerms[subKey] = zeroActions;
-      });
-    } else {
-      // Grant module and all submodules with full 12 actions
-      updatedPerms[modKey] = allActions;
-      subModules.forEach((sub) => {
-        const subKey = `${modKey}.${sub.subModuleKey || sub.key}`;
-        updatedPerms[subKey] = allActions;
-      });
-    }
+    // Write only canonical dotKeys
+    subModules.forEach((sub) => {
+      updatedPerms[`${modKey}.${sub.subModuleKey || sub.key}`] = targetActions;
+    });
 
-    setPendingChanges((prev) => ({
-      ...prev,
-      [role._id]: updatedPerms,
-    }));
+    setPendingChanges((prev) => ({ ...prev, [role._id]: updatedPerms }));
   };
 
   // Select all modules for a role
   const handleSelectAll = (role) => {
     if (role.isSuperAdmin || role.name === 'super_admin') return;
-    const updatedPerms = { ...getRolePerms(role) };
+    const updatedPerms = {};
     const allActions = createActionsObject(true);
 
     catalog.modules.forEach((mod) => {
-      updatedPerms[mod.moduleKey] = allActions;
       if (mod.subModules) {
         mod.subModules.forEach((sub) => {
-          const subKey = `${mod.moduleKey}.${sub.subModuleKey || sub.key}`;
-          updatedPerms[subKey] = allActions;
+          updatedPerms[`${mod.moduleKey}.${sub.subModuleKey || sub.key}`] = allActions;
         });
       }
     });
 
-    setPendingChanges((prev) => ({
-      ...prev,
-      [role._id]: updatedPerms,
-    }));
+    setPendingChanges((prev) => ({ ...prev, [role._id]: updatedPerms }));
   };
 
   // Clear all modules for a role
@@ -432,19 +358,14 @@ export const RolesPermissions = () => {
     const zeroActions = createActionsObject(false);
 
     catalog.modules.forEach((mod) => {
-      updatedPerms[mod.moduleKey] = zeroActions;
       if (mod.subModules) {
         mod.subModules.forEach((sub) => {
-          const subKey = `${mod.moduleKey}.${sub.subModuleKey || sub.key}`;
-          updatedPerms[subKey] = zeroActions;
+          updatedPerms[`${mod.moduleKey}.${sub.subModuleKey || sub.key}`] = zeroActions;
         });
       }
     });
 
-    setPendingChanges((prev) => ({
-      ...prev,
-      [role._id]: updatedPerms,
-    }));
+    setPendingChanges((prev) => ({ ...prev, [role._id]: updatedPerms }));
   };
 
   // Toggle a specific action in the Granular Matrix Modal
@@ -456,34 +377,21 @@ export const RolesPermissions = () => {
     const dotKey = `${modKey}.${subModuleKey}`;
     const currentActions = getSubModuleActions(currentPerms, modKey, subModuleKey);
 
-    const updatedActions = {
-      ...currentActions,
-      [actionName]: !currentActions[actionName],
-    };
+    const nextVal = !currentActions[actionName];
+    const updatedActions = { ...currentActions, [actionName]: nextVal };
 
-    const updatedPerms = {
-      ...currentPerms,
-      [dotKey]: updatedActions,
-    };
+    // If enabling any action other than view -> auto-enable view
+    if (nextVal && actionName !== 'view') updatedActions.view = true;
+    // If disabling view -> disable all
+    if (actionName === 'view' && !nextVal) ALL_ACTIONS.forEach((a) => { updatedActions[a] = false; });
 
-    // Update parent module access state
-    const parentModule = catalog.modules.find((m) => m.moduleKey === modKey);
-    const subModules = parentModule?.subModules || [];
-    const anySubHasAccess = subModules.some((sub) => {
-      const sKey = `${modKey}.${sub.subModuleKey || sub.key}`;
-      const acts = sKey === dotKey ? updatedActions : getSubModuleActions(updatedPerms, modKey, sub.subModuleKey);
-      return Object.values(acts).some(Boolean);
-    });
+    // Write only the canonical dotKey — backend is source of truth
+    const updatedPerms = { ...currentPerms, [dotKey]: updatedActions };
 
-    updatedPerms[modKey] = createActionsObject(anySubHasAccess);
-
-    setPendingChanges((prev) => ({
-      ...prev,
-      [roleId]: updatedPerms,
-    }));
+    setPendingChanges((prev) => ({ ...prev, [roleId]: updatedPerms }));
   };
 
-  // Grant or clear all actions for a specific sub-module
+  // Grant or clear all actions for a specific submodule
   const handleToggleAllActionsForSubModule = (roleId, modKey, subModuleKey, grantAll = true) => {
     const role = roles.find((r) => r._id === roleId);
     if (!role || role.isSuperAdmin || role.name === 'super_admin') return;
@@ -492,31 +400,35 @@ export const RolesPermissions = () => {
     const dotKey = `${modKey}.${subModuleKey}`;
     const newActions = createActionsObject(grantAll);
 
-    const updatedPerms = {
-      ...currentPerms,
-      [dotKey]: newActions,
-    };
+    // Write only the canonical dotKey
+    const updatedPerms = { ...currentPerms, [dotKey]: newActions };
 
-    // Update parent module
-    const parentModule = catalog.modules.find((m) => m.moduleKey === modKey);
-    const subModules = parentModule?.subModules || [];
-    const anySubHasAccess = subModules.some((sub) => {
-      const sKey = `${modKey}.${sub.subModuleKey || sub.key}`;
-      const acts = sKey === dotKey ? newActions : getSubModuleActions(updatedPerms, modKey, sub.subModuleKey);
-      return Object.values(acts).some(Boolean);
+    setPendingChanges((prev) => ({ ...prev, [roleId]: updatedPerms }));
+  };
+
+  // Grant or clear all actions for an entire module inside the Matrix
+  const handleToggleAllForModule = (roleId, modKey, grantAll = true) => {
+    const role = roles.find((r) => r._id === roleId);
+    if (!role || role.isSuperAdmin || role.name === 'super_admin') return;
+
+    const currentPerms = { ...getRolePerms(role) };
+    const mod = catalog.modules.find((m) => m.moduleKey === modKey);
+    if (!mod) return;
+
+    const newActions = createActionsObject(grantAll);
+    const updatedPerms = { ...currentPerms };
+
+    // Write only canonical dotKeys per submodule
+    mod.subModules.forEach((sub) => {
+      updatedPerms[`${modKey}.${sub.subModuleKey}`] = newActions;
     });
 
-    updatedPerms[modKey] = createActionsObject(anySubHasAccess);
-
-    setPendingChanges((prev) => ({
-      ...prev,
-      [roleId]: updatedPerms,
-    }));
+    setPendingChanges((prev) => ({ ...prev, [roleId]: updatedPerms }));
   };
 
   // Save changes for one role
   const handleSaveRole = async (roleId) => {
-    const role = roles.find((r) => r._id === roleId);
+    const role = roles.find((r) => r._id === roleId || r.id === roleId || String(r._id) === String(roleId));
     if (!role) return;
 
     if (role.isSuperAdmin || role.name === 'super_admin') {
@@ -528,10 +440,21 @@ export const RolesPermissions = () => {
     setSavingRoleId(roleId);
 
     try {
+      // Send to backend first — backend is source of truth
       await masterApi.updateRolePermissions(roleId, permsToSave);
 
-      setRoles((prev) =>
-        prev.map((r) => (r._id === roleId ? { ...r, permissions: permsToSave } : r))
+      // Update React state and localStorage cache to match what was just saved
+      const updatedRoles = roles.map((r) =>
+        r._id === roleId || r.id === roleId ? { ...r, permissions: permsToSave } : r
+      );
+      setRoles(updatedRoles);
+      try { localStorage.setItem('tie_roles', JSON.stringify(updatedRoles)); } catch {}
+
+      // Keep matrixRole in sync if modal is open
+      setMatrixRole((prev) =>
+        prev && (prev._id === roleId || prev.id === roleId)
+          ? { ...prev, permissions: permsToSave }
+          : prev
       );
 
       setPendingChanges((prev) => {
@@ -544,6 +467,7 @@ export const RolesPermissions = () => {
 
       if (refreshRoles) await refreshRoles();
       if (fetchUserProfile) await fetchUserProfile();
+      window.dispatchEvent(new CustomEvent('tie:permissions-updated', { detail: { roleId } }));
     } catch (err) {
       console.error(err);
       showToast(err?.response?.data?.message || err?.message || 'Failed to save permissions', 'error');
@@ -552,37 +476,40 @@ export const RolesPermissions = () => {
     }
   };
 
-  // Save all roles with pending changes
+  // Save all pending roles
   const handleSaveAll = async () => {
-    const roleIdsWithChanges = Object.keys(pendingChanges);
-    if (roleIdsWithChanges.length === 0) {
-      showToast('No changes to save', 'info');
-      return;
-    }
+    const ids = Object.keys(pendingChanges);
+    if (ids.length === 0) return;
 
     setSavingAll(true);
     try {
-      for (const rId of roleIdsWithChanges) {
-        const role = roles.find((r) => r._id === rId);
-        if (role) {
-          const perms = pendingChanges[rId];
-          await masterApi.updateRolePermissions(rId, perms);
-        }
+      // Send each to backend
+      for (const roleId of ids) {
+        await masterApi.updateRolePermissions(roleId, pendingChanges[roleId] || {});
       }
 
-      showToast('All role permissions updated successfully!', 'success');
-      await loadRolesAndCatalog();
+      // Update React state to reflect what was saved
+      const updatedRoles = roles.map((r) =>
+        pendingChanges[r._id] ? { ...r, permissions: pendingChanges[r._id] } : r
+      );
+      setRoles(updatedRoles);
+      try { localStorage.setItem('tie_roles', JSON.stringify(updatedRoles)); } catch {}
+      setPendingChanges({});
+
+      showToast(`Successfully saved permissions for all ${ids.length} modified roles!`, 'success');
+
       if (refreshRoles) await refreshRoles();
       if (fetchUserProfile) await fetchUserProfile();
+      window.dispatchEvent(new CustomEvent('tie:permissions-updated', { detail: {} }));
     } catch (err) {
       console.error(err);
-      showToast(err?.response?.data?.message || err?.message || 'Failed to save some permissions', 'error');
+      showToast('Error saving all permissions', 'error');
     } finally {
       setSavingAll(false);
     }
   };
 
-  // Save new or edited role metadata
+  // Save Role Metadata (Create / Edit)
   const handleSaveRoleMetadata = async (e) => {
     e.preventDefault();
     if (!roleForm.name.trim()) {
@@ -591,54 +518,62 @@ export const RolesPermissions = () => {
     }
 
     setSubmittingRole(true);
-    const slug = roleForm.name.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
-    const payload = {
-      name: slug,
-      displayName: roleForm.displayName.trim() || roleForm.name.trim(),
-      description: roleForm.description.trim(),
-    };
-
     try {
       if (editingRole) {
-        await masterApi.updateRole(editingRole._id, payload);
+        const res = await masterApi.updateRole(editingRole._id, {
+          displayName: roleForm.displayName || roleForm.name,
+          description: roleForm.description,
+        });
+        const updated = extractApiData(res, 'role', 'data') || res.data || res;
+        setRoles((prev) => prev.map((r) => (r._id === editingRole._id ? { ...r, ...updated } : r)));
         showToast('Role updated successfully', 'success');
       } else {
-        await masterApi.createRole({ ...payload, permissions: {} });
-        showToast('New role created! Tick checkboxes to grant permissions.', 'success');
+        const res = await masterApi.createRole({
+          name: roleForm.name.toLowerCase().replace(/\s+/g, '_').trim(),
+          displayName: roleForm.displayName || roleForm.name,
+          description: roleForm.description,
+          permissions: {},
+        });
+        const created = extractApiData(res, 'role', 'data') || res.data || res;
+        setRoles((prev) => [...prev, created]);
+        showToast('Role created successfully', 'success');
       }
       setRoleModalOpen(false);
-      await loadRolesAndCatalog();
+      setEditingRole(null);
+      if (refreshRoles) await refreshRoles();
     } catch (err) {
+      console.error(err);
       showToast(err?.response?.data?.message || err?.message || 'Failed to save role', 'error');
     } finally {
       setSubmittingRole(false);
     }
   };
 
-  // Delete custom role
+  // Delete Role
   const handleDeleteRole = async () => {
     if (!roleToDelete) return;
     setDeletingRole(true);
     try {
       await masterApi.deleteRole(roleToDelete._id);
-      showToast(`Role "${roleToDelete.displayName || roleToDelete.name}" deleted`, 'success');
+      setRoles((prev) => prev.filter((r) => r._id !== roleToDelete._id));
+      showToast('Role deleted successfully', 'success');
       setDeleteModalOpen(false);
       setRoleToDelete(null);
-      await loadRolesAndCatalog();
+      if (refreshRoles) await refreshRoles();
     } catch (err) {
+      console.error(err);
       showToast(err?.response?.data?.message || err?.message || 'Failed to delete role', 'error');
     } finally {
       setDeletingRole(false);
     }
   };
 
-  // Filtered roles based on search
   const filteredRoles = useMemo(() => {
     if (!search.trim()) return roles;
     const s = search.toLowerCase();
     return roles.filter(
       (r) =>
-        r.name?.toLowerCase().includes(s) ||
+        r.name.toLowerCase().includes(s) ||
         r.displayName?.toLowerCase().includes(s) ||
         r.description?.toLowerCase().includes(s)
     );
@@ -646,12 +581,10 @@ export const RolesPermissions = () => {
 
   const pendingCount = Object.keys(pendingChanges).length;
 
-  // Active module in matrix modal
   const selectedMatrixModule = useMemo(() => {
     return catalog.modules.find((m) => m.moduleKey === matrixActiveMod) || catalog.modules[0];
   }, [catalog.modules, matrixActiveMod]);
 
-  // Filtered sub-modules inside matrix modal
   const filteredSubModules = useMemo(() => {
     if (!selectedMatrixModule?.subModules) return [];
     if (!matrixSearch.trim()) return selectedMatrixModule.subModules;
@@ -688,8 +621,7 @@ export const RolesPermissions = () => {
             <Badge variant="primary">Access Control</Badge>
           </div>
           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>
-            Connected to Live Backend Permission Catalog: <strong>{catalog.totalModules} Enterprise Modules</strong> &amp;{' '}
-            <strong>{catalog.totalSubModules} Sub-modules</strong> with 12 Granular Actions.
+            Manage access for <strong>HRM</strong>, <strong>Project Management</strong>, and <strong>Masters</strong>, then configure granular permissions in Matrix.
           </div>
         </div>
 
@@ -697,9 +629,9 @@ export const RolesPermissions = () => {
           <Button
             variant="secondary"
             icon={RefreshCw}
-            onClick={loadRolesAndCatalog}
+            onClick={loadRoles}
             loading={loading}
-            title="Reload roles and permission catalog from backend"
+            title="Reload roles from backend"
           >
             Refresh
           </Button>
@@ -767,7 +699,7 @@ export const RolesPermissions = () => {
               color: 'var(--primary)',
             }}
           >
-            ✓ Allowed
+            Allowed
           </span>
           <span
             style={{
@@ -785,20 +717,22 @@ export const RolesPermissions = () => {
         </div>
       </div>
 
-      {/* ROLES LIST: ROLE INFO ON LEFT, 10 BACKEND MODULES (5x2 GRID) IN CENTER, ACTIONS ON RIGHT */}
+      {/* ═══════════════════════════════════════════════════════════════════
+          ROLES LIST: ROLE INFO ON LEFT, 3 MODULES IN CENTER, SAVE ON RIGHT
+         ═══════════════════════════════════════════════════════════════════ */}
       {loading ? (
         <div className="card" style={{ padding: '36px 20px', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, color: 'var(--text-muted)' }}>
             <span className="spinner-ring" />
             <span style={{ fontSize: '0.88rem', color: 'var(--text-main)', fontWeight: 500 }}>
-              Loading roles and permission catalog from backend...
+              Loading roles from backend...
             </span>
           </div>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {filteredRoles.map((role) => {
-            const isSuper = role.isSuperAdmin || role.name === 'super_admin';
+            const isSuper = role.isSuperAdmin || role.name === 'super_admin' || String(role.name || '').toLowerCase() === 'super admin';
             const perms = getRolePerms(role);
             const isPending = !!pendingChanges[role._id];
             const isSavingThis = savingRoleId === role._id;
@@ -813,7 +747,7 @@ export const RolesPermissions = () => {
                 key={role._id}
                 className="card"
                 style={{
-                  padding: '10px 14px',
+                  padding: '12px 16px',
                   border: isPending
                     ? '1.5px solid #f59e0b'
                     : isSuper
@@ -956,7 +890,7 @@ export const RolesPermissions = () => {
                         type="button"
                         onClick={() => {
                           setMatrixRole(role);
-                          setMatrixActiveMod(catalog.modules[0]?.moduleKey || 'crm');
+                          setMatrixActiveMod('hrm');
                           setMatrixSearch('');
                           setMatrixModalOpen(true);
                         }}
@@ -972,7 +906,7 @@ export const RolesPermissions = () => {
                           alignItems: 'center',
                           gap: 3,
                         }}
-                        title="Configure granular 12 actions across 56 submodules"
+                        title="Configure granular permissions across submodules"
                       >
                         <Sliders size={11} />
                         Matrix
@@ -981,10 +915,20 @@ export const RolesPermissions = () => {
                   )}
                 </div>
 
-                {/* CENTER: Exact 10 Backend Modules (Balanced 5 columns x 2 rows) */}
-                <div className="roles-checkbox-grid">
+                {/* CENTER: Exact 3 Outside Options (HRM, Project Management, Masters) */}
+                <div
+                  style={{
+                    flex: 1,
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                    gap: 10,
+                    minWidth: 0,
+                  }}
+                >
                   {catalog.modules.map((mod) => {
                     const hasAccess = checkModuleAccess(role, perms, mod.moduleKey, mod.subModules);
+                    const activeSubs = countActiveSubModules(role, perms, mod.moduleKey, mod.subModules);
+                    const ModIcon = mod.icon;
 
                     return (
                       <label
@@ -992,11 +936,12 @@ export const RolesPermissions = () => {
                         style={{
                           display: 'flex',
                           alignItems: 'center',
-                          gap: 6,
-                          padding: '4px 7px',
-                          borderRadius: 5,
+                          justifyContent: 'space-between',
+                          gap: 10,
+                          padding: '8px 12px',
+                          borderRadius: 7,
                           border: hasAccess
-                            ? '1px solid var(--primary)'
+                            ? '1.5px solid var(--primary)'
                             : '1px solid var(--border-color)',
                           backgroundColor: hasAccess
                             ? 'rgba(42, 171, 160, 0.08)'
@@ -1005,36 +950,53 @@ export const RolesPermissions = () => {
                           userSelect: 'none',
                           transition: 'all 0.12s ease',
                           margin: 0,
-                          height: 26,
                           boxSizing: 'border-box',
                         }}
                         title={`${mod.displayName}: ${mod.description || ''}`}
                       >
-                        <input
-                          type="checkbox"
-                          checked={hasAccess}
-                          disabled={isSuper}
-                          onChange={() => handleToggleModule(role, mod)}
-                          style={{
-                            width: 13,
-                            height: 13,
-                            accentColor: 'var(--primary)',
-                            cursor: isSuper ? 'default' : 'pointer',
-                            margin: 0,
-                            flexShrink: 0,
-                          }}
-                        />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                          <input
+                            type="checkbox"
+                            checked={hasAccess}
+                            disabled={isSuper}
+                            onChange={() => handleToggleModule(role, mod)}
+                            style={{
+                              width: 15,
+                              height: 15,
+                              accentColor: 'var(--primary)',
+                              cursor: isSuper ? 'default' : 'pointer',
+                              margin: 0,
+                              flexShrink: 0,
+                            }}
+                          />
+                          <ModIcon size={16} color={hasAccess ? 'var(--primary)' : 'var(--text-muted)'} style={{ flexShrink: 0 }} />
+                          <span
+                            style={{
+                              fontSize: '0.84rem',
+                              fontWeight: hasAccess ? 700 : 500,
+                              color: hasAccess ? 'var(--text-main)' : 'var(--text-muted)',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}
+                          >
+                            {getModuleShortName(mod)}
+                          </span>
+                        </div>
+
                         <span
                           style={{
-                            fontSize: '0.76rem',
-                            fontWeight: hasAccess ? 600 : 400,
-                            color: hasAccess ? 'var(--text-main)' : 'var(--text-muted)',
+                            fontSize: '0.68rem',
+                            fontWeight: 600,
+                            padding: '1px 6px',
+                            borderRadius: 10,
+                            backgroundColor: hasAccess ? 'var(--primary)' : 'var(--bg-subtle, #e2e8f0)',
+                            color: hasAccess ? '#ffffff' : 'var(--text-muted)',
                             whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
+                            flexShrink: 0,
                           }}
                         >
-                          {getModuleShortName(mod)}
+                          {isSuper ? 'All' : `${activeSubs}/${mod.subModules.length}`}
                         </span>
                       </label>
                     );
@@ -1060,10 +1022,10 @@ export const RolesPermissions = () => {
                       loading={isSavingThis}
                       onClick={() => handleSaveRole(role._id)}
                       style={{
-                        padding: '3px 8px',
-                        fontSize: '0.74rem',
-                        height: 26,
-                        minWidth: 58,
+                        padding: '4px 10px',
+                        fontSize: '0.76rem',
+                        height: 28,
+                        minWidth: 62,
                       }}
                     >
                       {isPending ? 'Save' : 'Saved'}
@@ -1101,14 +1063,13 @@ export const RolesPermissions = () => {
                           background: 'none',
                           border: 'none',
                           color: 'var(--text-muted)',
+                          padding: '3px 4px',
                           cursor: 'pointer',
-                          padding: 2,
                         }}
                         title="Edit Role Name"
                       >
                         <Edit2 size={12} />
                       </button>
-
                       <button
                         type="button"
                         onClick={() => {
@@ -1118,9 +1079,9 @@ export const RolesPermissions = () => {
                         style={{
                           background: 'none',
                           border: 'none',
-                          color: 'var(--danger)',
+                          color: '#ef4444',
+                          padding: '3px 4px',
                           cursor: 'pointer',
-                          padding: 2,
                         }}
                         title="Delete Role"
                       >
@@ -1132,260 +1093,472 @@ export const RolesPermissions = () => {
               </div>
             );
           })}
-
-          {filteredRoles.length === 0 && (
-            <div className="card" style={{ textAlign: 'center', padding: 28, color: 'var(--text-muted)', fontSize: '0.84rem' }}>
-              No roles match your search "{search}".
-            </div>
-          )}
         </div>
       )}
 
-      {/* GRANULAR PERMISSION MATRIX MODAL (12 ACTIONS PER SUB-MODULE) */}
+      {/* ═══════════════════════════════════════════════════════════════════
+          GRANULAR PERMISSIONS MATRIX MODAL (Proper options inside)
+         ═══════════════════════════════════════════════════════════════════ */}
       <Modal
         isOpen={matrixModalOpen}
         onClose={() => setMatrixModalOpen(false)}
-        title={`Permission Matrix: ${matrixRole?.displayName || matrixRole?.name}`}
-        size="lg"
+        title={
+          matrixRole
+            ? `Permission Matrix: ${matrixRole.displayName || matrixRole.name}`
+            : 'Permission Matrix'
+        }
+        size="2xl"
+        maxWidth="1220px"
+        width="95vw"
+        style={{ maxHeight: '92vh' }}
       >
-        {matrixRole && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {/* Header info */}
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: 8,
-                padding: '10px 14px',
-                backgroundColor: 'var(--bg-app, #f8fafc)',
-                borderRadius: 'var(--radius-md, 8px)',
-                border: '1px solid var(--border-color)',
-              }}
-            >
-              <div>
-                <span style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-main)' }}>
-                  Configuring 12 granular actions for {matrixRole.displayName || matrixRole.name}
-                </span>
-                <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
-                  Select a module on the left to configure its sub-modules. Click checkboxes or action shortcuts.
-                </div>
-              </div>
+        {(() => {
+          const currentRole = matrixRole
+            ? roles.find(
+                (r) =>
+                  r._id === matrixRole._id ||
+                  r.id === matrixRole._id ||
+                  r.name === matrixRole.name
+              ) || matrixRole
+            : null;
 
-              <div style={{ position: 'relative', width: 220 }}>
-                <Input
-                  placeholder="Filter sub-modules..."
-                  value={matrixSearch}
-                  onChange={(e) => setMatrixSearch(e.target.value)}
-                  style={{ fontSize: '0.78rem', height: 30, paddingLeft: 28, marginBottom: 0 }}
-                />
-                <Search size={12} color="var(--text-muted)" style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)' }} />
-              </div>
-            </div>
+          if (!currentRole) return null;
 
-            {/* Two-Column Layout: Modules on Left (tabs), Sub-modules & 12 Actions on Right */}
-            <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 16, minHeight: 380 }}>
-              {/* Left Column: 10 Module Selector */}
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {/* Modal Subheader with Role Info & Quick Actions */}
               <div
                 style={{
                   display: 'flex',
-                  flexDirection: 'column',
-                  gap: 3,
-                  borderRight: '1px solid var(--border-color)',
-                  paddingRight: 10,
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: 10,
+                  padding: '10px 16px',
+                  backgroundColor: 'var(--bg-subtle, #f8fafc)',
+                  borderRadius: 8,
+                  border: '1px solid var(--border-color)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-main)' }}>
+                    Configuring Role:
+                  </span>
+                  <span
+                    style={{
+                      fontSize: '0.88rem',
+                      color: 'var(--primary)',
+                      fontWeight: 700,
+                      backgroundColor: 'rgba(42, 171, 160, 0.1)',
+                      padding: '2px 10px',
+                      borderRadius: 6,
+                    }}
+                  >
+                    {currentRole.displayName || currentRole.name}
+                  </span>
+                  <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                    ({currentRole.isSystem ? 'System Role' : 'Custom Role'})
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    type="button"
+                    onClick={() => handleSelectAll(currentRole)}
+                    style={{ fontSize: '0.76rem', padding: '4px 10px' }}
+                  >
+                    Grant All Modules
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    type="button"
+                    onClick={() => handleClearAll(currentRole)}
+                    style={{ fontSize: '0.76rem', padding: '4px 10px', color: '#ef4444' }}
+                  >
+                    Clear All
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    type="button"
+                    icon={Save}
+                    loading={savingRoleId === currentRole._id}
+                    onClick={async () => {
+                      await handleSaveRole(currentRole._id);
+                      setMatrixModalOpen(false);
+                    }}
+                    style={{ fontSize: '0.76rem', padding: '4px 14px' }}
+                  >
+                    Save &amp; Close
+                  </Button>
+                </div>
+              </div>
+
+              {/* The 3 Main Tabs: HRM (10), Project Management (3), Masters (5) */}
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 6,
+                  borderBottom: '2px solid var(--border-color)',
+                  paddingBottom: 0,
                 }}
               >
                 {catalog.modules.map((m) => {
-                  const isSelected = m.moduleKey === selectedMatrixModule?.moduleKey;
-                  const perms = getRolePerms(matrixRole);
-                  const hasAccess = checkModuleAccess(matrixRole, perms, m.moduleKey, m.subModules);
+                  const isSel = m.moduleKey === matrixActiveMod;
+                  const perms = getRolePerms(currentRole);
+                  const activeSubs = countActiveSubModules(currentRole, perms, m.moduleKey, m.subModules);
+                  const MIcon = m.icon;
 
                   return (
                     <button
                       key={m.moduleKey}
                       type="button"
-                      onClick={() => setMatrixActiveMod(m.moduleKey)}
-                      title={m.displayName}
+                      onClick={() => {
+                        setMatrixActiveMod(m.moduleKey);
+                        setMatrixSearch('');
+                      }}
                       style={{
-                        textAlign: 'left',
-                        padding: '8px 10px',
-                        borderRadius: 6,
-                        border: isSelected ? '1px solid var(--primary)' : '1px solid transparent',
-                        backgroundColor: isSelected ? 'rgba(42, 171, 160, 0.1)' : 'transparent',
-                        color: isSelected ? 'var(--primary)' : 'var(--text-main)',
-                        fontWeight: isSelected ? 700 : 500,
-                        fontSize: '0.82rem',
+                        padding: '10px 18px',
+                        fontSize: '0.86rem',
+                        fontWeight: isSel ? 700 : 500,
+                        color: isSel ? 'var(--primary)' : 'var(--text-main)',
+                        border: 'none',
+                        borderBottom: isSel ? '3px solid var(--primary)' : '3px solid transparent',
+                        background: isSel ? 'rgba(42, 171, 160, 0.08)' : 'transparent',
+                        borderRadius: '6px 6px 0 0',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'space-between',
-                        transition: 'all 0.12s ease',
+                        gap: 8,
+                        marginBottom: -2,
+                        transition: 'all 0.15s ease',
                       }}
                     >
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {getModuleShortName(m)}
-                      </span>
+                      <MIcon size={17} />
+                      <span>{m.displayName}</span>
                       <span
                         style={{
-                          width: 8,
-                          height: 8,
-                          borderRadius: '50%',
-                          backgroundColor: hasAccess ? 'var(--primary, #2e7b85)' : 'var(--border-dark, #cbd5e1)',
-                          flexShrink: 0,
-                          marginLeft: 6,
+                          fontSize: '0.72rem',
+                          padding: '1px 7px',
+                          borderRadius: 10,
+                          backgroundColor: isSel ? 'var(--primary)' : 'var(--bg-subtle, #e2e8f0)',
+                          color: isSel ? '#ffffff' : 'var(--text-muted)',
+                          fontWeight: 700,
                         }}
-                      />
+                      >
+                        {activeSubs}/{m.subModules.length}
+                      </span>
                     </button>
                   );
                 })}
               </div>
 
-              {/* Right Column: Sub-Modules and 12 Granular Actions */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 440, overflowY: 'auto', paddingRight: 4 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                    <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--text-main)' }}>
-                      {getModuleShortName(selectedMatrixModule)}
-                    </h4>
-                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                      ({selectedMatrixModule?.displayName})
-                    </span>
-                  </div>
-                  <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
-                    {filteredSubModules.length} Sub-modules
-                  </span>
+              {/* Matrix Search & Module Quick Toggles */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: 10,
+                  padding: '2px 0',
+                }}
+              >
+                <div style={{ position: 'relative', width: 280 }}>
+                  <Input
+                    placeholder={`Search ${selectedMatrixModule?.displayName} options...`}
+                    value={matrixSearch}
+                    onChange={(e) => setMatrixSearch(e.target.value)}
+                    style={{ paddingLeft: 30, fontSize: '0.8rem', height: 32, marginBottom: 0 }}
+                  />
+                  <Search
+                    size={14}
+                    color="var(--text-muted)"
+                    style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)' }}
+                  />
                 </div>
 
-                {filteredSubModules.map((sub) => {
-                  const perms = getRolePerms(matrixRole);
-                  const actions = getSubModuleActions(perms, selectedMatrixModule.moduleKey, sub.subModuleKey);
-                  const activeActionCount = Object.values(actions).filter(Boolean).length;
-                  const allActive = activeActionCount === ALL_ACTIONS.length;
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    Showing {filteredSubModules.length} options
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleAllForModule(currentRole._id, selectedMatrixModule.moduleKey, true)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--primary)',
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                    }}
+                  >
+                    Grant All {selectedMatrixModule?.displayName}
+                  </button>
+                  <span style={{ color: 'var(--border-color)' }}>|</span>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleAllForModule(currentRole._id, selectedMatrixModule.moduleKey, false)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--text-muted)',
+                      fontSize: '0.78rem',
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                    }}
+                  >
+                    Clear {selectedMatrixModule?.displayName}
+                  </button>
+                </div>
+              </div>
 
-                  return (
-                    <div
-                      key={sub.subModuleKey}
+              {/* Granular Sub-modules Table with Sticky Header & NO Horizontal Scroll */}
+              <div
+                style={{
+                  maxHeight: 'min(60vh, 460px)',
+                  overflowY: 'auto',
+                  overflowX: 'hidden',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 8,
+                  backgroundColor: 'var(--bg-surface, #ffffff)',
+                }}
+              >
+                <table
+                  style={{
+                    width: '100%',
+                    borderCollapse: 'collapse',
+                    fontSize: '0.84rem',
+                    tableLayout: 'fixed',
+                  }}
+                >
+                  <thead>
+                    <tr
                       style={{
-                        border: activeActionCount > 0 ? '1px solid var(--primary-border, #bce1e6)' : '1px solid var(--border-color)',
-                        borderRadius: 6,
-                        padding: '10px 12px',
-                        backgroundColor: activeActionCount > 0 ? 'rgba(42, 171, 160, 0.03)' : '#ffffff',
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 2,
+                        background: 'var(--bg-subtle, #f8fafc)',
+                        borderBottom: '2px solid var(--border-color)',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
                       }}
                     >
-                      {/* Sub-module title & bulk triggers */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8, gap: 8 }}>
-                        <div>
-                          <div style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-main)' }}>
-                            {sub.displayName}
-                          </div>
-                          {sub.description && (
-                            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 2 }}>
-                              {sub.description}
-                            </div>
-                          )}
-                        </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                          <button
-                            type="button"
-                            onClick={() => handleToggleAllActionsForSubModule(matrixRole._id, selectedMatrixModule.moduleKey, sub.subModuleKey, !allActive)}
-                            style={{
-                              padding: '2px 7px',
-                              fontSize: '0.72rem',
-                              fontWeight: 600,
-                              borderRadius: 4,
-                              border: '1px solid var(--border-color)',
-                              backgroundColor: allActive ? 'var(--primary)' : 'var(--bg-subtle)',
-                              color: allActive ? '#ffffff' : 'var(--text-main)',
-                              cursor: 'pointer',
-                            }}
-                          >
-                            {allActive ? 'Clear All' : 'Grant All (12)'}
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* 12 Action Checkboxes */}
-                      <div
+                      <th
                         style={{
-                          display: 'grid',
-                          gridTemplateColumns: 'repeat(4, 1fr)',
-                          gap: 6,
-                          paddingTop: 6,
-                          borderTop: '1px solid var(--border-color)',
+                          padding: '11px 16px',
+                          textAlign: 'left',
+                          fontWeight: 700,
+                          width: '36%',
+                          color: 'var(--text-main)',
                         }}
                       >
-                        {ALL_ACTIONS.map((action) => {
-                          const isChecked = Boolean(actions[action]);
-                          return (
-                            <label
+                        {selectedMatrixModule?.displayName} Sub-Module / Feature
+                      </th>
+                      {MATRIX_UI_ACTIONS.map((action) => (
+                        <th
+                          key={action}
+                          style={{
+                            padding: '11px 4px',
+                            textAlign: 'center',
+                            fontWeight: 700,
+                            textTransform: 'capitalize',
+                            width: '8%',
+                            color: 'var(--text-main)',
+                            fontSize: '0.8rem',
+                          }}
+                        >
+                          {action === 'edit' ? 'Edit' : action}
+                        </th>
+                      ))}
+                      <th
+                        style={{
+                          padding: '11px 14px',
+                          textAlign: 'center',
+                          fontWeight: 700,
+                          width: '16%',
+                          color: 'var(--text-main)',
+                        }}
+                      >
+                        Quick Action
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {filteredSubModules.map((sub, idx) => {
+                      const perms = getRolePerms(currentRole);
+                      const actions = getSubModuleActions(perms, selectedMatrixModule.moduleKey, sub.subModuleKey);
+                      const allGranted = MATRIX_UI_ACTIONS.every((a) => actions[a]);
+                      const anyGranted = Object.values(actions).some(Boolean);
+
+                      return (
+                        <tr
+                          key={sub.subModuleKey}
+                          style={{
+                            borderBottom: '1px solid var(--border-color)',
+                            backgroundColor: anyGranted ? 'rgba(42, 171, 160, 0.03)' : 'transparent',
+                            transition: 'background-color 0.15s ease',
+                          }}
+                        >
+                          <td style={{ padding: '10px 16px', overflow: 'hidden' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <span
+                                style={{
+                                  width: 22,
+                                  height: 22,
+                                  borderRadius: 5,
+                                  backgroundColor: anyGranted ? 'var(--primary)' : 'var(--bg-subtle, #e2e8f0)',
+                                  color: anyGranted ? '#fff' : 'var(--text-muted)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 700,
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {idx + 1}
+                              </span>
+                              <div style={{ minWidth: 0, flex: 1 }}>
+                                <div
+                                  style={{
+                                    fontWeight: 600,
+                                    color: 'var(--text-main)',
+                                    fontSize: '0.85rem',
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                  }}
+                                  title={sub.displayName}
+                                >
+                                  {sub.displayName}
+                                </div>
+                                {sub.description && (
+                                  <div
+                                    style={{
+                                      fontSize: '0.72rem',
+                                      color: 'var(--text-muted)',
+                                      marginTop: 1,
+                                      whiteSpace: 'nowrap',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                    }}
+                                    title={sub.description}
+                                  >
+                                    {sub.description}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+
+                          {MATRIX_UI_ACTIONS.map((action) => (
+                            <td
                               key={action}
                               style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 5,
-                                fontSize: '0.74rem',
-                                color: isChecked ? 'var(--text-main)' : 'var(--text-muted)',
-                                fontWeight: isChecked ? 600 : 400,
-                                cursor: 'pointer',
-                                margin: 0,
-                                userSelect: 'none',
+                                padding: '8px 4px',
+                                textAlign: 'center',
+                                verticalAlign: 'middle',
                               }}
                             >
                               <input
                                 type="checkbox"
-                                checked={isChecked}
-                                onChange={() => handleToggleSubModuleAction(matrixRole._id, selectedMatrixModule.moduleKey, sub.subModuleKey, action)}
+                                id={`chk_${currentRole._id}_${selectedMatrixModule.moduleKey}_${sub.subModuleKey}_${action}`}
+                                checked={Boolean(actions[action])}
+                                onChange={() =>
+                                  handleToggleSubModuleAction(
+                                    currentRole._id,
+                                    selectedMatrixModule.moduleKey,
+                                    sub.subModuleKey,
+                                    action
+                                  )
+                                }
                                 style={{
-                                  width: 12,
-                                  height: 12,
+                                  width: 17,
+                                  height: 17,
                                   accentColor: 'var(--primary)',
-                                  margin: 0,
+                                  cursor: 'pointer',
                                 }}
                               />
-                              <span style={{ textTransform: 'capitalize' }}>
-                                {action.replace(/([A-Z])/g, ' $1')}
-                              </span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
+                            </td>
+                          ))}
+
+                          <td style={{ padding: '8px 14px', textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleToggleAllActionsForSubModule(
+                                  currentRole._id,
+                                  selectedMatrixModule.moduleKey,
+                                  sub.subModuleKey,
+                                  !allGranted
+                                )
+                              }
+                              style={{
+                                padding: '4px 12px',
+                                fontSize: '0.74rem',
+                                fontWeight: 600,
+                                borderRadius: 5,
+                                border: '1px solid var(--border-color)',
+                                background: allGranted ? 'var(--primary)' : 'var(--bg-subtle, #f1f5f9)',
+                                color: allGranted ? '#fff' : 'var(--text-main)',
+                                cursor: 'pointer',
+                                whiteSpace: 'nowrap',
+                                transition: 'all 0.15s ease',
+                              }}
+                            >
+                              {allGranted ? 'Revoke All' : 'Grant All'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Modal Footer with Status & Save */}
+              <div
+                className="modal-footer"
+                style={{
+                  margin: '6px -20px -20px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '12px 20px',
+                  borderTop: '1px solid var(--border-color)',
+                }}
+              >
+                <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                  Changes will be permanently applied to{' '}
+                  <strong>{currentRole.displayName || currentRole.name}</strong>.
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <Button variant="secondary" type="button" onClick={() => setMatrixModalOpen(false)}>
+                    Close
+                  </Button>
+                  <Button
+                    variant="primary"
+                    type="button"
+                    icon={Save}
+                    loading={savingRoleId === currentRole._id}
+                    onClick={async () => {
+                      await handleSaveRole(currentRole._id);
+                      setMatrixModalOpen(false);
+                    }}
+                  >
+                    Save Permissions
+                  </Button>
+                </div>
               </div>
             </div>
-
-            <div className="modal-footer" style={{ margin: '14px -20px -20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                {pendingChanges[matrixRole._id] ? (
-                  <span style={{ color: '#b45309', fontWeight: 600 }}>Unsaved permissions changes detected</span>
-                ) : (
-                  <span>All matrix permissions aligned with backend</span>
-                )}
-              </div>
-
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Button variant="secondary" type="button" onClick={() => setMatrixModalOpen(false)}>
-                  Close
-                </Button>
-                <Button
-                  variant="primary"
-                  type="button"
-                  icon={Save}
-                  loading={savingRoleId === matrixRole._id}
-                  onClick={async () => {
-                    await handleSaveRole(matrixRole._id);
-                    setMatrixModalOpen(false);
-                  }}
-                >
-                  Save Permissions
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </Modal>
 
       {/* CREATE / EDIT ROLE MODAL */}

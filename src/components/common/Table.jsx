@@ -6,10 +6,12 @@ export const Table = ({
   loading = false,
   emptyMessage = 'No records found.',
   className = '',
+  style = {},
+  tableStyle = {},
 }) => {
   return (
-    <div className={`table-responsive ${className}`}>
-      <table className="table">
+    <div className={`table-responsive ${className}`} style={style}>
+      <table className="table" style={tableStyle}>
         <thead>
           <tr>
             {columns.map((col, idx) => (

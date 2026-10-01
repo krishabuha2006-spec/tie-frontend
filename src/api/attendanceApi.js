@@ -1,4 +1,5 @@
 import apiClient from './client';
+import regularizationApi from './regularizationApi';
 
 export const attendanceApi = {
   // Office Attendance
@@ -329,79 +330,40 @@ export const attendanceApi = {
     return res.data;
   },
 
-  // Regularization (Module 12: POST, GET, PUT /regularization/requests with legacy fallbacks)
-  applyRegularization: async (data) => {
-    try {
-      const res = await apiClient.post('/regularization/requests', data);
-      return res.data;
-    } catch (err) {
-      if (err.response?.status === 404) {
-        const fallback = await apiClient.post('/attendance/office/regularize', data);
-        return fallback.data;
-      }
-      throw err;
-    }
-  },
-
-  getMyRegularizations: async (params) => {
-    try {
-      const res = await apiClient.get('/regularization/requests/me', { params });
-      return res.data;
-    } catch (err) {
-      if (err.response?.status === 404) {
-        const fallback = await apiClient.get('/attendance/office/regularizations/me', { params });
-        return fallback.data;
-      }
-      throw err;
-    }
-  },
-
-  getAllRegularizations: async (params) => {
-    try {
-      const res = await apiClient.get('/regularization/requests/pending-approval', { params });
-      return res.data;
-    } catch (err) {
-      if (err.response?.status === 404) {
-        const fallback = await apiClient.get('/attendance/office/regularizations', { params });
-        return fallback.data;
-      }
-      throw err;
-    }
-  },
-
-  approveRegularization: async (id, data = {}) => {
-    const text = typeof data === 'string' ? data : (data?.remark || data?.reviewRemarks || 'Approved by manager');
-    const payload = { remark: text, reviewRemarks: text };
-    try {
-      const res = await apiClient.put(`/regularization/requests/${id}/approve`, payload);
-      return res.data;
-    } catch (err) {
-      if (err.response?.status === 404) {
-        const fallback = await apiClient.put(`/attendance/office/regularizations/${id}/approve`, payload);
-        return fallback.data;
-      }
-      throw err;
-    }
-  },
-
-  rejectRegularization: async (id, data = {}) => {
-    const text = typeof data === 'string' ? data : (data?.remark || data?.reviewRemarks || data?.reason || 'Rejected by manager');
-    const payload = { remark: text, reviewRemarks: text };
-    try {
-      const res = await apiClient.put(`/regularization/requests/${id}/reject`, payload);
-      return res.data;
-    } catch (err) {
-      if (err.response?.status === 404) {
-        const fallback = await apiClient.put(`/attendance/office/regularizations/${id}/reject`, payload);
-        return fallback.data;
-      }
-      throw err;
-    }
-  },
+  // Regularization (Module 12: delegated to regularizationApi)
+  applyRegularization: (data) => regularizationApi.applyRegularization(data),
+  getMyRegularizations: (params) => regularizationApi.getMyRegularizations(params),
+  getAllRegularizations: (params) => regularizationApi.getPendingApprovals(params),
+  getPendingApprovals: (params) => regularizationApi.getPendingApprovals(params),
+  getEmployeeRegularizations: (empId, params) => regularizationApi.getEmployeeRegularizations(empId, params),
+  approveRegularization: (id, data) => regularizationApi.approveRegularization(id, data),
+  rejectRegularization: (id, data) => regularizationApi.rejectRegularization(id, data),
+  cancelRegularization: (id, reason) => regularizationApi.cancelRegularization(id, reason),
 
   // Timing Config & Late Occurrences (Module 7)
   createTimingConfig: async (data) => {
-    const res = await apiClient.post('/timing/configs', data);
+    let companyRef = data.reference;
+    let scope = data.scope || 'COMPANY';
+    let referenceModel = data.referenceModel || 'Company';
+
+    if (!companyRef) {
+      try {
+        const rawUser = localStorage.getItem('tie_user');
+        if (rawUser) {
+          const u = JSON.parse(rawUser);
+          companyRef = u.company?._id || u.company?.id || (typeof u.company === 'string' ? u.company : undefined);
+        }
+      } catch {}
+    }
+
+    const payload = {
+      ...data,
+      scope,
+      referenceModel,
+      ...(companyRef ? { reference: companyRef } : {}),
+    };
+
+    const res = await apiClient.post('/timing/configs', payload);
     return res.data;
   },
 

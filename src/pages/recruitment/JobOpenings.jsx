@@ -4,7 +4,8 @@ import recruitmentApi from '../../api/recruitmentApi';
 import masterApi from '../../api/masterApi';
 import { useToast } from '../../context/ToastContext';
 import { useConfirm } from '../../context/ConfirmContext';
-import { Plus, Briefcase, RefreshCw, XCircle, Search, Users } from 'lucide-react';
+import { extractApiData } from '../../utils/apiUtils';
+import { Plus, Briefcase, XCircle, Search, Users, Edit2 } from 'lucide-react';
 import Table from '../../components/common/Table';
 import Modal from '../../components/common/Modal';
 import Button from '../../components/common/Button';
@@ -24,6 +25,7 @@ export const JobOpenings = () => {
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingJob, setEditingJob] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [search, setSearch] = useState('');
 
@@ -35,6 +37,7 @@ export const JobOpenings = () => {
     numberOfOpenings: 1,
     employmentType: 'FULL_TIME',
     workType: 'OFFICE',
+    status: 'OPEN',
     description: '',
     requirements: '',
   });
@@ -50,11 +53,11 @@ export const JobOpenings = () => {
         recruitmentApi.getCandidates().catch(() => ({ data: [] })),
       ]);
 
-      const jobsList = jRes?.data || jRes?.jobs || jRes?.jobOpenings || (Array.isArray(jRes) ? jRes : []);
-      const deptList = dRes?.data || dRes?.departments || (Array.isArray(dRes) ? dRes : []);
-      const branchList = bRes?.data || bRes?.branches || (Array.isArray(bRes) ? bRes : []);
-      const compList = cRes?.data || cRes?.companies || (Array.isArray(cRes) ? cRes : []);
-      const candList = candRes?.data || candRes?.candidates || (Array.isArray(candRes) ? candRes : []);
+      const jobsList = extractApiData(jRes, 'jobs', 'jobOpenings', 'data');
+      const deptList = extractApiData(dRes, 'departments', 'data');
+      const branchList = extractApiData(bRes, 'branches', 'data');
+      const compList = extractApiData(cRes, 'companies', 'data');
+      const candList = extractApiData(candRes, 'candidates', 'data');
 
       setJobs(jobsList);
       setDepartments(deptList);
@@ -82,6 +85,7 @@ export const JobOpenings = () => {
   };
 
   const openAddModal = () => {
+    setEditingJob(null);
     setFormData({
       title: '',
       department: departments[0]?._id || '',
@@ -90,15 +94,62 @@ export const JobOpenings = () => {
       numberOfOpenings: 1,
       employmentType: 'FULL_TIME',
       workType: 'OFFICE',
+      status: 'OPEN',
       description: '',
       requirements: '',
     });
     setModalOpen(true);
   };
 
+  const openEditModal = async (job) => {
+    setEditingJob(job);
+    setFormData({
+      title: job.title || '',
+      department: job.department?._id || job.department || departments[0]?._id || '',
+      branch: job.branch?._id || job.branch || '',
+      company: job.company?._id || job.company || '',
+      numberOfOpenings: job.numberOfOpenings || job.numberOfPositions || 1,
+      employmentType: job.employmentType || job.jobType || 'FULL_TIME',
+      workType: job.workType || 'OFFICE',
+      status: job.status || 'OPEN',
+      description: job.description || '',
+      requirements: Array.isArray(job.requirements)
+        ? job.requirements.join('\n')
+        : (job.requirements || ''),
+    });
+    setModalOpen(true);
+
+    // Call GET /job-openings/{id} for freshest details from server
+    if (job?._id) {
+      try {
+        const freshRes = await recruitmentApi.getJobOpeningById(job._id);
+        const freshJob = freshRes?.data || freshRes?.jobOpening || freshRes;
+        if (freshJob && freshJob._id) {
+          setEditingJob(freshJob);
+          setFormData({
+            title: freshJob.title || '',
+            department: freshJob.department?._id || freshJob.department || departments[0]?._id || '',
+            branch: freshJob.branch?._id || freshJob.branch || '',
+            company: freshJob.company?._id || freshJob.company || '',
+            numberOfOpenings: freshJob.numberOfOpenings || freshJob.numberOfPositions || 1,
+            employmentType: freshJob.employmentType || freshJob.jobType || 'FULL_TIME',
+            workType: freshJob.workType || 'OFFICE',
+            status: freshJob.status || 'OPEN',
+            description: freshJob.description || '',
+            requirements: Array.isArray(freshJob.requirements)
+              ? freshJob.requirements.join('\n')
+              : (freshJob.requirements || ''),
+          });
+        }
+      } catch (err) {
+        console.warn('Fresh job fetch note:', err?.message);
+      }
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.title.trim()) {
+    if (!formData.title?.trim()) {
       showToast('Job title is required', 'error');
       return;
     }
@@ -109,8 +160,13 @@ export const JobOpenings = () => {
 
     setSubmitting(true);
     try {
-      await recruitmentApi.createJobOpening(formData);
-      showToast('Job opening created successfully!', 'success');
+      if (editingJob?._id) {
+        await recruitmentApi.updateJobOpening(editingJob._id, formData);
+        showToast('Job opening updated successfully!', 'success');
+      } else {
+        await recruitmentApi.createJobOpening(formData);
+        showToast('Job opening created successfully!', 'success');
+      }
       setModalOpen(false);
       await loadData();
     } catch (err) {
@@ -118,7 +174,7 @@ export const JobOpenings = () => {
       if (status === 409) {
         showToast(err.response?.data?.message || 'A job opening with the same title already exists in this department. Please use a different title or update the existing one.', 'error');
       } else {
-        showToast(err.response?.data?.message || 'Failed to create job opening', 'error');
+        showToast(err.response?.data?.message || (editingJob ? 'Failed to update job opening' : 'Failed to create job opening'), 'error');
       }
     } finally {
       setSubmitting(false);
@@ -281,6 +337,15 @@ export const JobOpenings = () => {
       key: 'actions',
       render: (r) => (
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => openEditModal(r)}
+            title="Edit Job Opening"
+            style={{ color: 'var(--primary)' }}
+          >
+            <Edit2 size={15} />
+          </Button>
           {r.status === 'OPEN' && (
             <Button variant="secondary" size="sm" onClick={() => handleCloseJob(r)}>
               Close
@@ -317,9 +382,6 @@ export const JobOpenings = () => {
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <Button variant="secondary" icon={RefreshCw} onClick={loadData} loading={loading}>
-            Refresh
-          </Button>
           <Button variant="primary" icon={Plus} onClick={openAddModal}>
             Create Job Opening
           </Button>
@@ -351,18 +413,18 @@ export const JobOpenings = () => {
         emptyMessage="No job openings found. Click 'Create Job Opening' to post a vacancy."
       />
 
-      {/* Create Modal */}
+      {/* Create / Edit Modal */}
       <Modal
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
-        title="Post New Job Vacancy"
+        title={editingJob ? 'Edit Job Opening' : 'Post New Job Vacancy'}
       >
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <Input
             label="Job Title"
             value={formData.title}
             onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-            placeholder="e.g. Senior Project Engineer"
+            placeholder="Enter job title"
             required
           />
 
@@ -383,13 +445,14 @@ export const JobOpenings = () => {
             />
           </div>
 
-          <div className="grid-3">
+          <div className={editingJob ? "grid-4" : "grid-3"}>
             <Input
               label="Openings"
               type="number"
               min="1"
               value={formData.numberOfOpenings}
               onChange={(e) => setFormData({ ...formData, numberOfOpenings: e.target.value })}
+              placeholder="Enter number of openings"
               required
             />
 
@@ -418,6 +481,19 @@ export const JobOpenings = () => {
               ]}
               required
             />
+
+            {editingJob && (
+              <Select
+                label="Status"
+                value={formData.status || 'OPEN'}
+                onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                options={[
+                  { value: 'OPEN', label: 'Open' },
+                  { value: 'CLOSED', label: 'Closed' },
+                ]}
+                required
+              />
+            )}
           </div>
 
           <div>
@@ -428,7 +504,7 @@ export const JobOpenings = () => {
               className="form-control"
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              placeholder="Responsibilities, role overview, and expectations..."
+              placeholder="Enter job description"
               rows={3}
               style={{ width: '100%', fontSize: '0.84rem' }}
             />
@@ -442,7 +518,7 @@ export const JobOpenings = () => {
               className="form-control"
               value={formData.requirements}
               onChange={(e) => setFormData({ ...formData, requirements: e.target.value })}
-              placeholder="e.g. B.E. Mechanical Engineering&#10;3+ years experience in MEP project execution"
+              placeholder="Enter requirements (one per line)"
               rows={2}
               style={{ width: '100%', fontSize: '0.84rem' }}
             />
@@ -453,7 +529,7 @@ export const JobOpenings = () => {
               Cancel
             </Button>
             <Button variant="primary" type="submit" loading={submitting}>
-              Post Job Opening
+              {editingJob ? 'Save Changes' : 'Post Job Opening'}
             </Button>
           </div>
         </form>

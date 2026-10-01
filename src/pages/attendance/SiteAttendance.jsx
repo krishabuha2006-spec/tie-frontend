@@ -497,7 +497,7 @@ export const SiteAttendance = () => {
             {r.project?.name || 'Project'}
           </div>
           <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-            Site: <strong style={{ color: '#0284c7' }}>{r.site?.name || r.site?.code || 'Site Yard'}</strong>
+            Site: <strong style={{ color: 'var(--primary)' }}>{r.site?.name || r.site?.code || 'Site Yard'}</strong>
           </div>
         </div>
       ),
@@ -647,16 +647,6 @@ export const SiteAttendance = () => {
           >
             Site Punch Terminal
           </Button>
-          <Button
-            variant="light"
-            icon={RotateCcw}
-            onClick={() => {
-              loadRecords();
-              if (selectedEmpId) loadEmployeeHistory(selectedEmpId);
-            }}
-          >
-            Refresh
-          </Button>
         </div>
       </div>
 
@@ -701,9 +691,9 @@ export const SiteAttendance = () => {
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
             <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#64748b' }}>BIOMETRIC FACE GATE</span>
-            <Camera size={18} color="#0284c7" />
+            <Camera size={18} color="var(--primary)" />
           </div>
-          <div style={{ fontSize: '1.35rem', fontWeight: 700, color: '#0284c7' }}>
+          <div style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--primary)' }}>
             Face Gate (Site-In)
           </div>
           <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: 4 }}>
@@ -1063,7 +1053,7 @@ export const SiteAttendance = () => {
                     </select>
                   ) : (
                     <div style={{ padding: 10, background: '#fee2e2', borderRadius: 8, color: '#b91c1c', fontSize: '0.82rem' }}>
-                      ⚠ No tasks currently assigned to you for this site. A task must be assigned before Site-In.
+                      No tasks currently assigned to you for this site. A task must be assigned before Site-In.
                     </div>
                   )}
                 </div>
@@ -1072,7 +1062,7 @@ export const SiteAttendance = () => {
                 <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 14, background: '#fafafa' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.84rem', fontWeight: 600, color: '#334155' }}>
-                      <Camera size={16} color="#0284c7" />
+                      <Camera size={16} color="var(--primary)" />
                       Biometric Face Gate (Site-In):
                     </div>
                     {!cameraActive && !capturedFaceImage && (
@@ -1301,15 +1291,6 @@ export const SiteAttendance = () => {
                 Your personal site visits, check-in face verification, task linking, checkout photos, and duty hours.
               </p>
             </div>
-            <Button
-              variant="light"
-              size="sm"
-              icon={RotateCcw}
-              onClick={loadMyHistory}
-              loading={loadingMyHistory}
-            >
-              Refresh
-            </Button>
           </div>
 
           <Table
