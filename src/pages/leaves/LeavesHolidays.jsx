@@ -83,7 +83,7 @@ export const LeavesHolidays = () => {
   const [submittingCancel, setSubmittingCancel] = useState(false);
 
   // 4. Balances & Accrual State
-  const myEmpId = user?.employee?._id || user?.employee || user?._id;
+  const myEmpId = user?.employee?._id || (typeof user?.employee === 'string' && /^[0-9a-fA-F]{24}$/.test(user.employee) ? user.employee : null);
   const [selectedBalanceEmpId, setSelectedBalanceEmpId] = useState(myEmpId || '');
   const [employeeBalances, setEmployeeBalances] = useState([]);
   const [myBalances, setMyBalances] = useState([]);
@@ -169,6 +169,10 @@ export const LeavesHolidays = () => {
 
   // 1. Load My Leaves (GET /leave/requests/me)
   const loadMyLeaves = useCallback(async () => {
+    if (!myEmpId) {
+      setMyRequests([]);
+      return;
+    }
     setLoadingMyRequests(true);
     try {
       const res = await leaveHolidayApi.getMyLeaveRequests({ year: selectedYear });
@@ -179,11 +183,14 @@ export const LeavesHolidays = () => {
     } finally {
       setLoadingMyRequests(false);
     }
-  }, [selectedYear]);
+  }, [myEmpId, selectedYear]);
 
   // 2. Load My Own Balance (GET /leave/employees/:myEmpId/balance)
   const loadMyBalance = useCallback(async () => {
-    if (!myEmpId) return;
+    if (!myEmpId) {
+      setMyBalances([]);
+      return;
+    }
     setLoadingMyBalance(true);
     try {
       const res = await leaveHolidayApi.getEmployeeLeaveBalance(myEmpId, { year: selectedYear });

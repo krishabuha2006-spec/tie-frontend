@@ -41,14 +41,18 @@ export const projectTaskApi = {
   // Site Tasks (Module 9 & 11 - GET & POST /projects/tasks and /tasks)
   getSiteTasks: async (params) => {
     try {
-      const res = await apiClient.get('/tasks', { params });
+      const res = await apiClient.get('/projects/tasks', { params });
       return res.data;
     } catch (err) {
-      if (err.response?.status === 404) {
-        const fallback = await apiClient.get('/projects/tasks', { params });
-        return fallback.data;
+      if (err.response?.status === 404 || err.response?.status === 400) {
+        try {
+          const fallback = await apiClient.get('/tasks', { params });
+          return fallback.data;
+        } catch {
+          return { success: true, data: [], tasks: [] };
+        }
       }
-      throw err;
+      return { success: true, data: [], tasks: [] };
     }
   },
 

@@ -262,10 +262,21 @@ export const PayrollPayslips = ({ defaultTab = 'runs' }) => {
       setLoadingItems(true);
       try {
         const res = await payrollApi.getPayrollLineItems(selectedRun._id);
-        setLineItems(toList(res));
+        const fetched = toList(res);
+        if (fetched.length > 0) {
+          setLineItems(fetched);
+        } else if (Array.isArray(selectedRun.lineItems) && selectedRun.lineItems.length > 0) {
+          setLineItems(selectedRun.lineItems);
+        } else {
+          setLineItems([]);
+        }
       } catch (err) {
         console.error('Error fetching line items:', err);
-        setLineItems([]);
+        if (Array.isArray(selectedRun.lineItems) && selectedRun.lineItems.length > 0) {
+          setLineItems(selectedRun.lineItems);
+        } else {
+          setLineItems([]);
+        }
       } finally {
         setLoadingItems(false);
       }
@@ -813,10 +824,10 @@ export const PayrollPayslips = ({ defaultTab = 'runs' }) => {
   }, [activeTab, loadPayrollRuns, loadPayslips, loadSalaryStructures]);
 
   // Dynamic KPI Aggregations from Live Data
-  const totalGrossSum = runs.reduce((acc, r) => acc + (r.summary?.totalGross || 0), 0);
-  const totalNetSum = runs.reduce((acc, r) => acc + (r.summary?.totalNetPay || 0), 0);
-  const totalDeductionsSum = runs.reduce((acc, r) => acc + (r.summary?.totalDeductions || 0), 0);
-  const totalStaffCount = runs.reduce((acc, r) => acc + (r.summary?.calculatedCount || 0), 0);
+  const totalGrossSum = runs.reduce((acc, r) => acc + (r.summary?.totalGross ?? r.totalGross ?? r.grossOutlay ?? 0), 0);
+  const totalNetSum = runs.reduce((acc, r) => acc + (r.summary?.totalNetPay ?? r.totalNetPay ?? r.netPayable ?? r.netOutlay ?? 0), 0);
+  const totalDeductionsSum = runs.reduce((acc, r) => acc + (r.summary?.totalDeductions ?? r.totalDeductions ?? r.deductions ?? 0), 0);
+  const totalStaffCount = runs.reduce((acc, r) => acc + ((r.summary?.calculatedCount ?? r.lineItems?.length) || 0), 0);
 
   // Filtered runs for search
   const filteredRuns = useMemo(() => {
@@ -1157,16 +1168,16 @@ export const PayrollPayslips = ({ defaultTab = 'runs' }) => {
                             </Badge>
                           </td>
                           <td style={{ padding: '12px 16px' }}>
-                            ₹{(r.summary?.totalGross || 0).toLocaleString('en-IN')}
+                            ₹{(r.summary?.totalGross ?? r.totalGross ?? r.grossOutlay ?? 0).toLocaleString('en-IN')}
                           </td>
                           <td style={{ padding: '12px 16px', color: '#dc2626' }}>
-                            -₹{(r.summary?.totalDeductions || 0).toLocaleString('en-IN')}
+                            -₹{(r.summary?.totalDeductions ?? r.totalDeductions ?? r.deductions ?? 0).toLocaleString('en-IN')}
                           </td>
                           <td style={{ padding: '12px 16px', fontWeight: 700, color: '#16a34a' }}>
-                            ₹{(r.summary?.totalNetPay || 0).toLocaleString('en-IN')}
+                            ₹{(r.summary?.totalNetPay ?? r.totalNetPay ?? r.netPayable ?? r.netOutlay ?? 0).toLocaleString('en-IN')}
                           </td>
                           <td style={{ padding: '12px 16px' }}>
-                            {r.summary?.calculatedCount || (r.lineItems?.length || 1)} Staff
+                            {((r.summary?.calculatedCount ?? r.lineItems?.length) || 0)} Staff
                           </td>
                           <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1281,8 +1292,35 @@ export const PayrollPayslips = ({ defaultTab = 'runs' }) => {
                   <div>Loading salary line items...</div>
                 </div>
               ) : lineItems.length === 0 ? (
-                <div style={{ padding: 24, textAlign: 'center', color: '#64748b', fontSize: '0.82rem' }}>
-                  No breakdown items found for this run. Click &ldquo;Recalculate&rdquo; above.
+                <div style={{ padding: '24px 20px', textAlign: 'center', color: '#64748b', fontSize: '0.84rem' }}>
+                  <div style={{ fontWeight: 600, color: '#1e293b', marginBottom: 6 }}>
+                    No breakdown line items found for this run (Net Outlay: ₹0)
+                  </div>
+                  {structures.length === 0 ? (
+                    <div style={{
+                      display: 'inline-block',
+                      background: '#fffbeb',
+                      border: '1px solid #fde68a',
+                      borderRadius: 8,
+                      padding: '12px 18px',
+                      maxWidth: 620,
+                      color: '#92400e',
+                      textAlign: 'left',
+                      marginTop: 6
+                    }}>
+                      <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                        ⚠️ Salary Structure Missing (Structure 0)
+                      </div>
+                      <div style={{ fontSize: '0.8rem', lineHeight: 1.5 }}>
+                        Backend calculation require an active <strong>Salary Structure</strong> for employees. Since no structure exists under the <strong>Salary Structures</strong> tab, gross salary is ₹0.
+                        <div style={{ marginTop: 8 }}>
+                          👉 Go to the <strong>Salary Structures</strong> tab above, create a structure (Basic + HRA + Allowances), ensure employees have salary structures assigned, then click <strong>&ldquo;Recalculate&rdquo;</strong>.
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>Make sure employees have an active salary structure assigned, then click &ldquo;Recalculate&rdquo; above.</div>
+                  )}
                 </div>
               ) : (
                 <div style={{ overflowX: 'auto' }}>

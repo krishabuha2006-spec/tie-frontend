@@ -28,9 +28,12 @@ export const leaveHolidayApi = {
   },
 
   // GET /leave/employees/:employeeId/balance
-  getEmployeeLeaveBalance: async (employeeId) => {
+  getEmployeeLeaveBalance: async (employeeId, params = {}) => {
+    if (!employeeId || !/^[0-9a-fA-F]{24}$/.test(String(employeeId))) {
+      return { success: true, data: [], balances: [] };
+    }
     try {
-      const res = await apiClient.get(`/leave/employees/${employeeId}/balance`);
+      const res = await apiClient.get(`/leave/employees/${employeeId}/balance`, { params });
       return res.data;
     } catch (err) {
       if (err.response?.status === 404 || err.response?.status === 400) {

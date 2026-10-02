@@ -217,8 +217,8 @@ export const Dashboard = () => {
             : Promise.resolve({ data: [] }),
           canAccessModule('attendance')
             ? isOrgAdmin
-              ? attendanceApi.getAllOfficeAttendance({ date: todayStr }).catch(() => attendanceApi.getMyOfficeAttendance({ date: todayStr }).catch(() => []))
-              : attendanceApi.getMyOfficeAttendance({ date: todayStr }).catch(() => [])
+              ? attendanceApi.getAllOfficeAttendance({ date: todayStr }).catch(() => [])
+              : (user?.employee ? attendanceApi.getMyOfficeAttendance({ date: todayStr }).catch(() => []) : Promise.resolve([]))
             : Promise.resolve([]),
           canAccessModule('leaves')
             ? (isSuperAdmin || isDirector || isHrAdmin)
@@ -251,14 +251,14 @@ export const Dashboard = () => {
         }
 
         // Load logged in employee's today attendance & face registration status
-        const myEmpId = user?.employee?._id || (typeof user?.employee === 'string' ? user.employee : null) || user?._id;
-        if (myEmpId) {
+        const actualEmpId = user?.employee?._id || (typeof user?.employee === 'string' && /^[0-9a-fA-F]{24}$/.test(user.employee) ? user.employee : null);
+        if (actualEmpId) {
           try {
             let myAtt = null;
             if (isFieldStaffUser) {
               myAtt = await attendanceApi.getMyFieldAttendance({ date: todayStr }).catch(() => null);
               if (!myAtt || (Array.isArray(myAtt) && myAtt.length === 0)) {
-                myAtt = await attendanceApi.getEmployeeFieldAttendance(myEmpId, { date: todayStr }).catch(() => null);
+                myAtt = await attendanceApi.getEmployeeFieldAttendance(actualEmpId, { date: todayStr }).catch(() => null);
               }
             } else {
               myAtt = await attendanceApi.getMyOfficeAttendance({ date: todayStr }).catch(() => null);
@@ -272,7 +272,7 @@ export const Dashboard = () => {
 
             let cachedToday = null;
             try {
-              const raw = localStorage.getItem(`tie_today_att_${myEmpId}_${todayStr}`);
+              const raw = localStorage.getItem(`tie_today_att_${actualEmpId}_${todayStr}`);
               if (raw) cachedToday = JSON.parse(raw);
             } catch {}
 
@@ -280,15 +280,18 @@ export const Dashboard = () => {
           } catch {}
 
           try {
-            const st = await faceApi.getFaceStatus(myEmpId);
+            const st = await faceApi.getFaceStatus(actualEmpId);
             const sData = st?.data || st;
             const isEnr = sData?.isRegistered === true || sData?.status === 'REGISTERED' || sData?.status === 'ENROLLED' || sData?.isEnrolled === true;
-            const hasLocalSelfie = !!localStorage.getItem(`tie_reg_selfie_${myEmpId}`) || !!localStorage.getItem(`tie_face_enrolled_${myEmpId}`);
+            const hasLocalSelfie = !!localStorage.getItem(`tie_reg_selfie_${actualEmpId}`) || !!localStorage.getItem(`tie_face_enrolled_${actualEmpId}`);
             setMyFaceStatus({ isEnrolled: isEnr || hasLocalSelfie, details: sData });
           } catch {
-            const hasLocalSelfie = !!localStorage.getItem(`tie_reg_selfie_${myEmpId}`) || !!localStorage.getItem(`tie_face_enrolled_${myEmpId}`);
+            const hasLocalSelfie = !!localStorage.getItem(`tie_reg_selfie_${actualEmpId}`) || !!localStorage.getItem(`tie_face_enrolled_${actualEmpId}`);
             setMyFaceStatus({ isEnrolled: hasLocalSelfie });
           }
+        } else {
+          setMyTodayAttendance(null);
+          setMyFaceStatus({ isEnrolled: false });
         }
 
         // Show UI immediately once core stats are loaded
@@ -405,16 +408,16 @@ export const Dashboard = () => {
         .finally(() => setLoadingBranchLocation(false));
     }
 
-    const myEmpId = user?.employee?._id || (typeof user?.employee === 'string' ? user.employee : null) || user?._id;
-    if (myEmpId) {
+    const actualEmpId = user?.employee?._id || (typeof user?.employee === 'string' && /^[0-9a-fA-F]{24}$/.test(user.employee) ? user.employee : null);
+    if (actualEmpId) {
       try {
-        const st = await faceApi.getFaceStatus(myEmpId);
+        const st = await faceApi.getFaceStatus(actualEmpId);
         const sData = st?.data || st;
         const isEnr = sData?.isRegistered === true || sData?.status === 'REGISTERED' || sData?.status === 'ENROLLED' || sData?.isEnrolled === true;
-        const hasLocalSelfie = !!localStorage.getItem(`tie_reg_selfie_${myEmpId}`) || !!localStorage.getItem(`tie_face_enrolled_${myEmpId}`);
+        const hasLocalSelfie = !!localStorage.getItem(`tie_reg_selfie_${actualEmpId}`) || !!localStorage.getItem(`tie_face_enrolled_${actualEmpId}`);
         setMyFaceStatus({ isEnrolled: isEnr || hasLocalSelfie, details: sData });
       } catch {
-        const hasLocalSelfie = !!localStorage.getItem(`tie_reg_selfie_${myEmpId}`) || !!localStorage.getItem(`tie_face_enrolled_${myEmpId}`);
+        const hasLocalSelfie = !!localStorage.getItem(`tie_reg_selfie_${actualEmpId}`) || !!localStorage.getItem(`tie_face_enrolled_${actualEmpId}`);
         setMyFaceStatus({ isEnrolled: hasLocalSelfie });
       } finally {
         setCheckingFaceStatus(false);
@@ -424,7 +427,7 @@ export const Dashboard = () => {
       try {
         let photo = user?.employee?.basicInfo?.photo || user?.photo || null;
         if (!photo) {
-          const empRes = await employeeApi.getEmployeeById(myEmpId);
+          const empRes = await employeeApi.getEmployeeById(actualEmpId);
           const empData = empRes?.data || empRes?.employee || empRes;
           photo = empData?.basicInfo?.photo || empData?.photo || null;
         }
@@ -434,13 +437,14 @@ export const Dashboard = () => {
       }
     } else {
       setCheckingFaceStatus(false);
+      setMyFaceStatus({ isEnrolled: false });
     }
   };
 
   const handleFaceAttendanceSubmit = async () => {
-    const myEmpId = user?.employee?._id || (typeof user?.employee === 'string' ? user.employee : null) || user?._id;
-    if (!myEmpId) {
-      showToast('Employee profile not linked to user account', 'error');
+    const actualEmpId = user?.employee?._id || (typeof user?.employee === 'string' && /^[0-9a-fA-F]{24}$/.test(user.employee) ? user.employee : null);
+    if (!actualEmpId) {
+      showToast('No employee profile linked to your account. Attendance punch requires an employee profile.', 'warning');
       return;
     }
     if (!capturedPhoto) {

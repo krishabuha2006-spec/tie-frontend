@@ -51,7 +51,7 @@ export const AttendanceCalendar = () => {
   const [currentDate, setCurrentDate] = useState(new Date());
 
   // State: Selected Employee (defaults to logged-in employee)
-  const myEmpId = user?.employee?._id || user?.employee || user?._id;
+  const myEmpId = user?.employee?._id || (typeof user?.employee === 'string' && /^[0-9a-fA-F]{24}$/.test(user.employee) ? user.employee : null);
   const [selectedEmpId, setSelectedEmpId] = useState(myEmpId || '');
   const [employees, setEmployees] = useState([]);
   const [loadingEmployees, setLoadingEmployees] = useState(false);
@@ -156,26 +156,26 @@ export const AttendanceCalendar = () => {
 
       // 2. Attendance History: for selected employee or self
       const empToFetch = selectedEmpId || myEmpId;
-      const isSelf = !selectedEmpId || selectedEmpId === myEmpId;
+      const isSelf = (!selectedEmpId || selectedEmpId === myEmpId) && Boolean(myEmpId);
 
       const officePromise = isSelf
-        ? calendarApi.getMyOfficeAttendance({ from: startStr, to: endStr, limit: 100 })
-        : calendarApi.getEmployeeOfficeAttendance(empToFetch, { from: startStr, to: endStr, limit: 100 });
+        ? calendarApi.getMyOfficeAttendance({ from: startStr, to: endStr, limit: 100 }).catch(() => ({ data: [] }))
+        : (empToFetch ? calendarApi.getEmployeeOfficeAttendance(empToFetch, { from: startStr, to: endStr, limit: 100 }).catch(() => ({ data: [] })) : Promise.resolve({ data: [] }));
 
       const fieldPromise = isSelf
-        ? calendarApi.getMyFieldAttendance({ from: startStr, to: endStr, limit: 100 })
-        : calendarApi.getEmployeeFieldAttendance(empToFetch, { from: startStr, to: endStr, limit: 100 });
+        ? calendarApi.getMyFieldAttendance({ from: startStr, to: endStr, limit: 100 }).catch(() => ({ data: [] }))
+        : (empToFetch ? calendarApi.getEmployeeFieldAttendance(empToFetch, { from: startStr, to: endStr, limit: 100 }).catch(() => ({ data: [] })) : Promise.resolve({ data: [] }));
 
       // 3. Corporate Holidays (GET /holidays)
-      const holidaysPromise = calendarApi.getHolidays({ year, scope: 'COMPANY' });
+      const holidaysPromise = calendarApi.getHolidays({ year, scope: 'COMPANY' }).catch(() => ({ data: [] }));
 
       // 4. Weekly-Off Configs (GET /weekly-off-configs)
-      const weeklyOffPromise = calendarApi.getWeeklyOffConfigs();
+      const weeklyOffPromise = calendarApi.getWeeklyOffConfigs().catch(() => ({ data: [] }));
 
       // 5. Approved Leaves
       const leavesPromise = isSelf
-        ? calendarApi.getMyLeaves({ year })
-        : calendarApi.getEmployeeLeaves(empToFetch, { year });
+        ? calendarApi.getMyLeaves({ year }).catch(() => ({ data: [] }))
+        : (empToFetch ? calendarApi.getEmployeeLeaves(empToFetch, { year }).catch(() => ({ data: [] })) : Promise.resolve({ data: [] }));
 
       const [eventsRes, officeRes, fieldRes, holidayRes, weeklyOffRes, leavesRes] = await Promise.allSettled([
         eventsPromise,

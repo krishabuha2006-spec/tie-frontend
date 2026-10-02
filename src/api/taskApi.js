@@ -20,14 +20,32 @@ export const taskApi = {
 
   // 2. GET /tasks - Get Filtered Task List
   getTasks: async (params = {}) => {
-    const res = await apiClient.get('/tasks', { params });
-    const raw = res.data?.data || res.data?.tasks || (Array.isArray(res.data) ? res.data : []);
-    return {
-      success: res.data?.success ?? true,
-      data: Array.isArray(raw) ? raw : [],
-      count: res.data?.count || (Array.isArray(raw) ? raw.length : 0),
-      total: res.data?.total || (Array.isArray(raw) ? raw.length : 0),
-    };
+    try {
+      const res = await apiClient.get('/tasks', { params });
+      const raw = res.data?.data || res.data?.tasks || (Array.isArray(res.data) ? res.data : []);
+      return {
+        success: res.data?.success ?? true,
+        data: Array.isArray(raw) ? raw : [],
+        count: res.data?.count || (Array.isArray(raw) ? raw.length : 0),
+        total: res.data?.total || (Array.isArray(raw) ? raw.length : 0),
+      };
+    } catch (err) {
+      if (err.response?.status === 400 || err.response?.status === 404) {
+        try {
+          const fallback = await apiClient.get('/projects/tasks', { params });
+          const raw = fallback.data?.data || fallback.data?.tasks || (Array.isArray(fallback.data) ? fallback.data : []);
+          return {
+            success: true,
+            data: Array.isArray(raw) ? raw : [],
+            count: raw.length,
+            total: raw.length,
+          };
+        } catch {
+          return { success: true, data: [], count: 0, total: 0 };
+        }
+      }
+      throw err;
+    }
   },
 
   // 3. GET /tasks/me - Get Logged-in Employee Tasks

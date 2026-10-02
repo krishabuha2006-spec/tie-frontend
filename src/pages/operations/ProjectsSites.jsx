@@ -814,7 +814,7 @@ export const ProjectsSites = () => {
                   }}
                   style={{ fontSize: '0.74rem' }}
                 >
-                  + Add Site
+                  Add Site
                 </Button>
               </div>
 

@@ -184,9 +184,21 @@ export const attendanceApi = {
     }
   },
 
-  getMyOfficeAttendance: async (params) => {
-    const res = await apiClient.get('/attendance/office/me', { params });
-    return res.data;
+  getMyOfficeAttendance: async (params = {}) => {
+    const cleanParams = { ...params };
+    if (cleanParams.date && !cleanParams.from && !cleanParams.to) {
+      cleanParams.from = cleanParams.date;
+      cleanParams.to = cleanParams.date;
+    }
+    try {
+      const res = await apiClient.get('/attendance/office/me', { params: cleanParams });
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 404) {
+        return { success: true, data: [], records: [] };
+      }
+      throw err;
+    }
   },
 
   getAllOfficeAttendance: async (params) => {
