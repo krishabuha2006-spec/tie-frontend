@@ -117,10 +117,25 @@ apiClient.interceptors.request.use(
       }
     }
 
-    // Cache-bust all GET requests with a timestamp so browser/CDN always
-    // returns a fresh 200 OK instead of a stale 304 Not Modified.
+    // Clean up empty, null, or undefined params to prevent backend 400 validation errors
+    if (config.params && typeof config.params === 'object') {
+      const cleaned = {};
+      for (const [key, val] of Object.entries(config.params)) {
+        if (val !== '' && val !== null && val !== undefined) {
+          cleaned[key] = val;
+        }
+      }
+      config.params = cleaned;
+    }
+
+    // Cache-bust GET requests with a timestamp so browser/CDN always
+    // returns a fresh 200 OK instead of a stale 304 Not Modified,
+    // but avoid appending _t to strict routes like /tasks which validate exact query params.
     if (!config.method || config.method.toLowerCase() === 'get') {
-      config.params = { ...config.params, _t: Date.now() };
+      const isStrictRoute = config.url?.includes('/tasks');
+      if (!isStrictRoute) {
+        config.params = { ...config.params, _t: Date.now() };
+      }
     }
 
     const activeCompanyId = localStorage.getItem('tie_active_company_id');
