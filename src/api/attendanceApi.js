@@ -19,6 +19,16 @@ export const attendanceApi = {
       const res = await apiClient.post('/attendance/office/check-in', cleanPayload);
       return res.data;
     } catch (err) {
+      if (err.response?.status === 404) {
+        // Cascade through alternate URL variants
+        try { return (await apiClient.post('/attendance/office/in', cleanPayload)).data; } catch {}
+        try { return (await apiClient.post('/attendance/office', cleanPayload)).data; } catch {}
+        // All 3 variants failed — throw meaningful error
+        const e = new Error('Office attendance check-in endpoint not found on this server. Please contact your administrator.');
+        e.response = { status: 404, data: { message: e.message } };
+        throw e;
+      }
+
       const isGeofenceMissing =
         err.response?.data?.reason === 'GEOFENCE_NOT_CONFIGURED' ||
         err.response?.data?.message?.includes('GEOFENCE_NOT_CONFIGURED');
@@ -109,6 +119,15 @@ export const attendanceApi = {
       const res = await apiClient.post('/attendance/office/check-out', cleanPayload);
       return res.data;
     } catch (err) {
+      if (err.response?.status === 404) {
+        // Cascade through alternate URL variants
+        try { return (await apiClient.post('/attendance/office/out', cleanPayload)).data; } catch {}
+        try { return (await apiClient.put('/attendance/office', cleanPayload)).data; } catch {}
+        const e = new Error('Office attendance check-out endpoint not found on this server. Please contact your administrator.');
+        e.response = { status: 404, data: { message: e.message } };
+        throw e;
+      }
+
       const isGeofenceMissing =
         err.response?.data?.reason === 'GEOFENCE_NOT_CONFIGURED' ||
         err.response?.data?.message?.includes('GEOFENCE_NOT_CONFIGURED');

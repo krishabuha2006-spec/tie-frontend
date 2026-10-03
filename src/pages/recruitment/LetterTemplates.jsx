@@ -149,23 +149,23 @@ export const LetterTemplates = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [tRes, cRes] = await Promise.all([
+      const [tRes, cRes] = await Promise.allSettled([
         recruitmentApi.getLetterTemplates(),
-        masterApi.getCompanies().catch(() => ({ data: [] })),
+        masterApi.getCompanies(),
       ]);
 
-      const tList = extractApiData(tRes, 'templates', 'data');
-      const cList = extractApiData(cRes, 'companies', 'data');
+      const tList = tRes.status === 'fulfilled' ? extractApiData(tRes.value, 'templates', 'data') : [];
+      const cList = cRes.status === 'fulfilled' ? extractApiData(cRes.value, 'companies', 'data') : [];
 
-      setTemplates(tList);
-      setCompanies(cList);
-    } catch (err) {
-      console.error(err);
-      showToast(err.response?.data?.message || 'Failed to load letter templates from server', 'error');
+      setTemplates(Array.isArray(tList) ? tList : []);
+      setCompanies(Array.isArray(cList) ? cList : []);
+    } catch {
+      setTemplates([]);
+      setCompanies([]);
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, []);
 
   useEffect(() => {
     loadData();

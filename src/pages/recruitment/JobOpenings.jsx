@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import recruitmentApi from '../../api/recruitmentApi';
 import masterApi from '../../api/masterApi';
 import { useToast } from '../../context/ToastContext';
 import { useConfirm } from '../../context/ConfirmContext';
+import { useAuth } from '../../context/AuthContext';
 import { extractApiData } from '../../utils/apiUtils';
 import { Plus, Briefcase, XCircle, Search, Users, Edit2 } from 'lucide-react';
 import Table from '../../components/common/Table';
@@ -18,6 +19,11 @@ import { recruitmentNav } from '../../routes/moduleNavConfig';
 export const JobOpenings = () => {
   const confirm = useConfirm();
   const { showToast } = useToast();
+  const { branch: globalBranch } = useAuth();
+
+  const activeBranchId = globalBranch?._id || globalBranch?.id;
+  const isAllBranches = !activeBranchId || activeBranchId === 'ALL';
+
   const [jobs, setJobs] = useState([]);
   const [candidates, setCandidates] = useState([]);
   const [departments, setDepartments] = useState([]);
@@ -45,12 +51,13 @@ export const JobOpenings = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
+      const jobParams = (!isAllBranches && activeBranchId) ? { branch: activeBranchId } : undefined;
       const [jRes, dRes, bRes, cRes, candRes] = await Promise.all([
-        recruitmentApi.getJobOpenings(),
-        masterApi.getDepartments(),
-        masterApi.getBranches(),
-        masterApi.getCompanies(),
-        recruitmentApi.getCandidates().catch(() => ({ data: [] })),
+        recruitmentApi.getJobOpenings(jobParams).catch(() => ({ data: [], jobs: [] })),
+        masterApi.getDepartments().catch(() => ({ data: [], departments: [] })),
+        masterApi.getBranches().catch(() => ({ data: [], branches: [] })),
+        masterApi.getCompanies().catch(() => ({ data: [], companies: [] })),
+        recruitmentApi.getCandidates().catch(() => ({ data: [], candidates: [] })),
       ]);
 
       const jobsList = extractApiData(jRes, 'jobs', 'jobOpenings', 'data');
@@ -65,16 +72,23 @@ export const JobOpenings = () => {
       setCompanies(compList);
       setCandidates(candList);
     } catch (err) {
-      console.error(err);
-      showToast('Failed to load job openings from server', 'error');
+      // Only show toast for unexpected errors, not permission-denied responses
+      const status = err?.response?.status;
+      if (status !== 403 && status !== 401) {
+        console.error(err);
+        showToast('Failed to load job openings from server', 'error');
+      }
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, [showToast, isAllBranches, activeBranchId]);
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+    const handleContextChange = () => loadData();
+    window.addEventListener('tie:context-changed', handleContextChange);
+    return () => window.removeEventListener('tie:context-changed', handleContextChange);
+  }, [loadData, globalBranch]);
 
   const getJobCandidateCount = (jobId) => {
     if (!jobId) return 0;
@@ -86,10 +100,11 @@ export const JobOpenings = () => {
 
   const openAddModal = () => {
     setEditingJob(null);
+    const defaultBranchId = (!isAllBranches && activeBranchId) ? activeBranchId : (branches[0]?._id || '');
     setFormData({
       title: '',
       department: departments[0]?._id || '',
-      branch: branches[0]?._id || '',
+      branch: defaultBranchId,
       company: companies[0]?._id || '',
       numberOfOpenings: 1,
       employmentType: 'FULL_TIME',
@@ -250,16 +265,32 @@ export const JobOpenings = () => {
     }
   };
 
-  const filteredJobs = jobs.filter((j) => {
-    if (!search.trim()) return true;
-    const s = search.toLowerCase();
-    return (
-      j.title?.toLowerCase().includes(s) ||
-      j.department?.name?.toLowerCase().includes(s) ||
-      j.branch?.name?.toLowerCase().includes(s) ||
-      j.workType?.toLowerCase().includes(s)
-    );
-  });
+  const filteredJobs = useMemo(() => {
+    return jobs.filter((j) => {
+      // 1. Header Branch Filter
+      if (!isAllBranches && activeBranchId) {
+        const jBranchId = j.branch?._id || j.branch?.id || (typeof j.branch === 'string' ? j.branch : null);
+        const jBranchName = (j.branch?.name || '').toLowerCase().trim();
+        const activeBranchName = (globalBranch?.name || '').toLowerCase().trim();
+
+        if (jBranchId) {
+          if (String(jBranchId) !== String(activeBranchId)) return false;
+        } else if (jBranchName && activeBranchName) {
+          if (jBranchName !== activeBranchName) return false;
+        }
+      }
+
+      // 2. Search filter
+      if (!search.trim()) return true;
+      const s = search.toLowerCase();
+      return (
+        j.title?.toLowerCase().includes(s) ||
+        j.department?.name?.toLowerCase().includes(s) ||
+        j.branch?.name?.toLowerCase().includes(s) ||
+        j.workType?.toLowerCase().includes(s)
+      );
+    });
+  }, [jobs, search, isAllBranches, activeBranchId, globalBranch]);
 
   const columns = [
     {
@@ -377,7 +408,7 @@ export const JobOpenings = () => {
             <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>
               Job Vacancies
             </h2>
-            <Badge variant="primary">{jobs.length} Total Postings</Badge>
+            <Badge variant="primary">{filteredJobs.length} Total Postings</Badge>
           </div>
         </div>
 

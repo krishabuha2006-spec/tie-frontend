@@ -17,9 +17,10 @@ import Badge from '../../components/common/Badge';
 import CameraCapture from '../../components/common/CameraCapture';
 import TimePicker12 from '../../components/common/TimePicker12';
 import { extractApiData } from '../../utils/apiUtils';
+import { formatDateOnlyIST, formatTimeIST, getErrorMessage } from '../../utils/formatters';
 
 export const DailyAttendance = () => {
-  const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager } = useAuth();
+  const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager, branch: globalBranch } = useAuth();
   const isOrgAdmin = isSuperAdmin || isHrAdmin || isDirector || isBranchManager;
   const { showToast } = useToast();
 
@@ -39,10 +40,8 @@ export const DailyAttendance = () => {
     return 'OFFICE';
   }, [user]);
 
-  const isFieldStaff = userWorkType === 'FIELD';
+  const isFieldStaff = userWorkType === 'FIELD' || userWorkType === 'HYBRID';
   const isHybridStaff = userWorkType === 'HYBRID';
-  const isOfficeAllowed = isOrgAdmin || userWorkType === 'OFFICE' || userWorkType === 'HYBRID';
-  const isFieldAllowed = isOrgAdmin || userWorkType === 'FIELD' || userWorkType === 'HYBRID';
 
   // Tabs
   const [activeTab, setActiveTab] = useState('records');
@@ -52,6 +51,9 @@ export const DailyAttendance = () => {
 
   // View scope: MY vs ALL (for org admins)
   const [viewScope, setViewScope] = useState(isOrgAdmin ? 'ALL' : 'MY');
+
+  const isOfficeAllowed = true; // Both Office staff and Field staff can do office check-in
+  const isFieldAllowed = isFieldStaff || (isOrgAdmin && viewScope === 'ALL');
 
   // Filters
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -175,8 +177,13 @@ export const DailyAttendance = () => {
     if (scope === 'MY') {
       return { from: selectedDate, to: selectedDate, limit: 100 };
     }
-    return { date: selectedDate, limit: 100 };
-  }, [selectedDate]);
+    const params = { date: selectedDate, limit: 100 };
+    const branchId = globalBranch?._id || globalBranch?.id;
+    if (branchId && branchId !== 'ALL') {
+      params.branch = branchId;
+    }
+    return params;
+  }, [selectedDate, globalBranch]);
 
   // ─── 1. Load Attendance Records (+ KPI + Today Status in one pass) ──────
   // Single API call per load — KPI stats and today's record are derived from
@@ -315,6 +322,14 @@ export const DailyAttendance = () => {
     else if (activeTab === 'regularization') loadRegularizations();
     else if (activeTab === 'geofences') loadGeofences();
   }, [activeTab, loadRecords, loadRegularizations, loadGeofences]);
+
+  useEffect(() => {
+    const handleContextChange = () => {
+      loadRecords();
+    };
+    window.addEventListener('tie:context-changed', handleContextChange);
+    return () => window.removeEventListener('tie:context-changed', handleContextChange);
+  }, [loadRecords]);
 
   // ─── Detect nearby sites ──────────────────────────────────────────────────
   const handleDetectNearbySites = useCallback(async () => {
@@ -494,7 +509,7 @@ export const DailyAttendance = () => {
       await Promise.all([loadRecords(), loadKpiData(), loadMyTodayStatus()]);
 
     } catch (err) {
-      const msg = err.response?.data?.message || err.message || 'Attendance punch failed';
+      const msg = getErrorMessage(err, 'Attendance punch failed');
       showToast(msg, 'error');
       setPunchError(msg);
     } finally {
@@ -857,7 +872,7 @@ export const DailyAttendance = () => {
             <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a' }}>
               {hasActiveSession
                 ? `Checked In at ${myTodayRecord?.firstCheckInTime
-                  ? new Date(myTodayRecord.firstCheckInTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+                  ? formatTimeIST(myTodayRecord.firstCheckInTime)
                   : 'Today'} — Session Active`
                 : hasCompletedSession
                   ? `Completed Today — ${myTodayRecord?.totalWorkingHours || 0} hrs worked`
@@ -964,9 +979,11 @@ export const DailyAttendance = () => {
               <button style={S.pill(attendanceType === 'OFFICE')} onClick={() => setAttendanceType('OFFICE')}>
                 Office
               </button>
-              <button style={S.pill(attendanceType === 'FIELD')} onClick={() => setAttendanceType('FIELD')}>
-                Field Staff
-              </button>
+              {isFieldAllowed && (
+                <button style={S.pill(attendanceType === 'FIELD')} onClick={() => setAttendanceType('FIELD')}>
+                  Field Staff
+                </button>
+              )}
             </div>
 
             {/* Scope pills for org admins */}
@@ -1056,17 +1073,11 @@ export const DailyAttendance = () => {
                     const empName = r.employee?.basicInfo?.fullName || r.employee?.name || user?.name || 'Staff Member';
                     const empCode = r.employee?.basicInfo?.employeeCode || r.employee?.employeeCode || 'EMP';
                     const rawIn = r.firstCheckInTime || r.siteInTime;
-                    const inTimeStr = rawIn
-                      ? new Date(rawIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                      : '—';
+                    const inTimeStr = rawIn ? formatTimeIST(rawIn) : '—';
                     const rawOut = r.lastCheckOutTime || r.siteOutTime;
-                    const outTimeStr = rawOut
-                      ? new Date(rawOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                      : r.isOpen ? 'In Progress' : '—';
+                    const outTimeStr = rawOut ? formatTimeIST(rawOut) : (r.isOpen ? 'In Progress' : '—');
                     const rawDate = r.attendanceDate || r.siteInTime || r.createdAt;
-                    const dateStr = rawDate
-                      ? new Date(rawDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-                      : '—';
+                    const dateStr = rawDate ? formatDateOnlyIST(rawDate) : '—';
                     const isLate = r.lateStatus?.isLate;
                     const totalHrs = r.totalWorkingHours ?? r.totalHours ?? r.hours ?? 0;
                     const punchesCount = r.punches?.length || 1;
@@ -1418,7 +1429,7 @@ export const DailyAttendance = () => {
                   Office Location
                 </button>
               )}
-              {(isOrgAdmin || isFieldAllowed) && (
+              {isFieldStaff && (
                 <button
                   type="button"
                   onClick={() => setPunchAttendanceType('FIELD')}
@@ -1674,7 +1685,7 @@ export const DailyAttendance = () => {
             <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
               Recorded punches for{' '}
               {selectedRecordForSessions.attendanceDate
-                ? new Date(selectedRecordForSessions.attendanceDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                ? formatDateOnlyIST(selectedRecordForSessions.attendanceDate)
                 : 'this date'}
             </div>
 
@@ -1682,7 +1693,7 @@ export const DailyAttendance = () => {
               <div style={{ padding: 20, textAlign: 'center', color: '#64748b', fontSize: '0.82rem' }}>
                 Single session —{' '}
                 {selectedRecordForSessions.firstCheckInTime
-                  ? new Date(selectedRecordForSessions.firstCheckInTime).toLocaleTimeString()
+                  ? formatTimeIST(selectedRecordForSessions.firstCheckInTime)
                   : '—'}
               </div>
             ) : (
@@ -1696,8 +1707,8 @@ export const DailyAttendance = () => {
                       </Badge>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: '0.78rem' }}>
-                      <div><strong>In:</strong> {p.checkInTime ? new Date(p.checkInTime).toLocaleTimeString() : '—'}</div>
-                      <div><strong>Out:</strong> {p.checkOutTime ? new Date(p.checkOutTime).toLocaleTimeString() : (p.isOpen ? 'Active' : '—')}</div>
+                      <div><strong>In:</strong> {p.checkInTime ? formatTimeIST(p.checkInTime) : '—'}</div>
+                      <div><strong>Out:</strong> {p.checkOutTime ? formatTimeIST(p.checkOutTime) : (p.isOpen ? 'Active' : '—')}</div>
                     </div>
                     {p.checkInAddress && (
                       <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 4 }}>

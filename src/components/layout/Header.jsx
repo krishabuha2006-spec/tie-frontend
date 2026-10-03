@@ -16,6 +16,8 @@ export const Header = ({ onToggleMobileSidebar, title = 'HRMS Portal' }) => {
     accessibleBranches = [],
     selectCompany,
     selectBranch,
+    isSuperAdmin,
+    isDirector,
   } = useAuth();
 
   const [profileOpen, setProfileOpen] = useState(false);
@@ -84,23 +86,25 @@ export const Header = ({ onToggleMobileSidebar, title = 'HRMS Portal' }) => {
   const currentCompanyId = company?._id || company?.id || (typeof company === 'string' ? company : '');
   const currentBranchId = branch?._id || branch?.id || (typeof branch === 'string' ? branch : '');
 
+  const isAllBranches = !currentBranchId || currentBranchId === 'ALL' || branch?._id === 'ALL';
   const currentCompanyName = company?.name || 'TIE Corporation';
-  const currentBranchDisplayName =
-    branch?.name
-      ? `${branch.name}${branch.city ? ' - ' + branch.city : ''}`
-      : accessibleBranches[0]?.name
-      ? `${accessibleBranches[0].name}${accessibleBranches[0].city ? ' - ' + accessibleBranches[0].city : ''}`
-      : 'Main Branch';
+  const currentBranchDisplayName = isAllBranches
+    ? 'All Branches'
+    : branch?.name
+    ? `${branch.name}${branch.city ? ' - ' + branch.city : ''}`
+    : accessibleBranches[0]?.name
+    ? `${accessibleBranches[0].name}${accessibleBranches[0].city ? ' - ' + accessibleBranches[0].city : ''}`
+    : 'All Branches';
 
-  const hasMultipleCompanies = accessibleCompanies.length > 1;
-  const hasMultipleBranches = accessibleBranches.length > 1;
+  const hasMultipleCompanies = (isSuperAdmin || isDirector) && accessibleCompanies.length > 1;
+  const canSwitchBranch = Boolean(isSuperAdmin || isDirector) && accessibleBranches.length > 0;
+  const hasMultipleBranches = canSwitchBranch;
 
   return (
     <header className="app-header">
       <div className="header-main-bar">
-        {/* Left Section: Mobile Menu + Title */}
+        {/* Left Section: Mobile/Tablet Menu + Title */}
         <div className="header-left-col">
-          {/* Mobile / Tablet Hamburger Toggle */}
           <button
             type="button"
             onClick={onToggleMobileSidebar}
@@ -110,7 +114,6 @@ export const Header = ({ onToggleMobileSidebar, title = 'HRMS Portal' }) => {
           >
             <Menu size={20} />
           </button>
-
           <h1 className="header-brand-title" title={title}>{title}</h1>
         </div>
 
@@ -222,9 +225,25 @@ export const Header = ({ onToggleMobileSidebar, title = 'HRMS Portal' }) => {
                   </div>
 
                   <div className="header-dropdown-list">
+                    {/* All Branches Option: Only for Super Admin / Director */}
+                    {(isSuperAdmin || isDirector) && (
+                      <button
+                        type="button"
+                        className={`header-dropdown-item ${isAllBranches ? 'selected' : ''}`}
+                        onClick={() => handleSelectBranch('ALL')}
+                      >
+                        <div className="header-dropdown-item-left">
+                          <Building2 size={13} style={{ opacity: isAllBranches ? 1 : 0.6 }} />
+                          <span className="header-dropdown-item-text">All Branches</span>
+                          <span className="header-badge-tag" style={{ background: '#f1f5f9', color: '#64748b' }}>All</span>
+                        </div>
+                        {isAllBranches && <Check size={14} />}
+                      </button>
+                    )}
+
                     {accessibleBranches.map((b) => {
                       const bid = b._id || b.id;
-                      const isSelected = String(bid) === String(currentBranchId);
+                      const isSelected = !isAllBranches && String(bid) === String(currentBranchId);
                       return (
                         <button
                           key={bid}

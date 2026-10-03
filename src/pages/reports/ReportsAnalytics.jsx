@@ -43,6 +43,7 @@ import Input from '../../components/common/Input';
 import Select from '../../components/common/Select';
 import Badge from '../../components/common/Badge';
 import { extractApiData } from '../../utils/apiUtils';
+import { formatDateOnlyIST, formatMoneyINR, getErrorMessage } from '../../utils/formatters';
 
 const CATEGORY_CONFIG = {
   ATTENDANCE: { color: '#6366f1', bg: 'rgba(99, 102, 241, 0.1)', icon: Calendar, label: 'Attendance' },
@@ -175,7 +176,7 @@ const DEFAULT_CATALOG = [
 ];
 
 export const ReportsAnalytics = () => {
-  const { isSuperAdmin, isHrAdmin } = useAuth();
+  const { isSuperAdmin, isHrAdmin, branch: globalBranch } = useAuth();
   const canManageCatalog = isSuperAdmin;
   const { showToast } = useToast();
 
@@ -258,7 +259,28 @@ export const ReportsAnalytics = () => {
   useEffect(() => {
     loadMasters();
     loadCatalog();
-  }, []);
+
+    const handleContextChange = () => {
+      loadMasters();
+      loadCatalog();
+    };
+    window.addEventListener('tie:context-changed', handleContextChange);
+    return () => window.removeEventListener('tie:context-changed', handleContextChange);
+  }, [globalBranch]);
+
+  // Synchronize branch filter when global header branch changes
+  useEffect(() => {
+    const bId = globalBranch?._id || globalBranch?.id || 'ALL';
+    const targetBranch = (!bId || bId === 'ALL') ? 'ALL' : String(bId);
+    setFilters((prev) => {
+      if (prev.branch === targetBranch) return prev;
+      const updated = { ...prev, branch: targetBranch };
+      if (selectedReport) {
+        handleSelectReport(selectedReport, updated);
+      }
+      return updated;
+    });
+  }, [globalBranch, selectedReport]);
 
   useEffect(() => {
     if (activeTab === 'export_logs') {

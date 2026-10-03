@@ -52,16 +52,49 @@ export const getEmployeeDesignation = (emp) => {
   );
 };
 
-export const formatEmployeeOption = (emp, includeDept = true) => {
+export const getEmployeeBranch = (emp) => {
+  if (!emp || typeof emp === 'string') return '';
+  return (
+    emp.employmentInfo?.branch?.name ||
+    emp.branch?.name ||
+    (typeof emp.branch === 'string' ? emp.branch : '') ||
+    ''
+  );
+};
+
+export const filterEmployeesByBranch = (employees = [], branchIdOrName = '') => {
+  if (!Array.isArray(employees) || !branchIdOrName || branchIdOrName === 'ALL') {
+    return employees;
+  }
+  const cleanTarget = String(branchIdOrName).trim().toLowerCase();
+  return employees.filter((emp) => {
+    if (!emp) return false;
+    const b = emp.employmentInfo?.branch || emp.branch;
+    const bId = String(b?._id || b?.id || (typeof b === 'string' ? b : '')).trim().toLowerCase();
+    const bName = String(b?.name || (typeof b === 'string' ? b : '')).trim().toLowerCase();
+    return (
+      (bId && bId === cleanTarget) ||
+      (bName && (bName === cleanTarget || cleanTarget.includes(bName) || bName.includes(cleanTarget)))
+    );
+  });
+};
+
+export const formatEmployeeOption = (emp, includeDept = true, includeBranch = false) => {
   if (!emp) return 'Employee';
   const name = getEmployeeName(emp);
   const code = getEmployeeCode(emp);
   const dept = includeDept ? getEmployeeDept(emp) : '';
+  const branch = includeBranch ? getEmployeeBranch(emp) : '';
 
-  if (code && code !== '-') {
-    return dept ? `${name} (${code}) • ${dept}` : `${name} (${code})`;
+  const details = [];
+  if (code && code !== '-') details.push(code);
+  if (dept) details.push(dept);
+  if (branch) details.push(branch);
+
+  if (details.length > 0) {
+    return `${name} (${details.join(' • ')})`;
   }
-  return dept ? `${name} • ${dept}` : name;
+  return name;
 };
 
 export const extractEmployeeList = (res) => {
@@ -72,3 +105,4 @@ export const extractEmployeeList = (res) => {
   if (Array.isArray(res?.data?.employees)) return res.data.employees;
   return [];
 };
+

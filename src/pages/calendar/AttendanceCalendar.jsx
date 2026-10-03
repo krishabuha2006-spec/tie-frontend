@@ -39,7 +39,7 @@ import Button from '../../components/common/Button';
 import Badge from '../../components/common/Badge';
 
 export const AttendanceCalendar = () => {
-  const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager } = useAuth();
+  const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager, branch } = useAuth();
   const canSelectStaff = isSuperAdmin || isHrAdmin || isDirector || isBranchManager;
   const { showToast } = useToast();
   const navigate = useNavigate();
@@ -115,14 +115,15 @@ export const AttendanceCalendar = () => {
     const fetchStaff = async () => {
       setLoadingEmployees(true);
       try {
-        const res = await employeeApi.getEmployees({ limit: 200 });
+        const activeBr = branch?._id && branch._id !== 'ALL' ? branch._id : undefined;
+        const res = await employeeApi.getEmployees({ limit: 200, branch: activeBr });
         const list = Array.isArray(res?.data)
           ? res.data
           : Array.isArray(res?.employees)
-          ? res.employees
-          : Array.isArray(res)
-          ? res
-          : [];
+            ? res.employees
+            : Array.isArray(res)
+              ? res
+              : [];
         setEmployees(list);
       } catch (err) {
         console.error('Error fetching employee list for calendar:', err);
@@ -131,7 +132,7 @@ export const AttendanceCalendar = () => {
       }
     };
     fetchStaff();
-  }, [canSelectStaff]);
+  }, [canSelectStaff, branch?._id]);
 
   // Ensure default selectedEmpId is populated once user is ready
   useEffect(() => {
@@ -1520,22 +1521,22 @@ export const AttendanceCalendar = () => {
                       selectedDayData.status === 'PRESENT'
                         ? '#dcfce7'
                         : selectedDayData.status === 'HOLIDAY'
-                        ? '#f3e8ff'
-                        : selectedDayData.status === 'WEEKLY_OFF'
-                        ? '#e2e8f0'
-                        : selectedDayData.status === 'LEAVE'
-                        ? '#e0f2fe'
-                        : '#fee2e2',
+                          ? '#f3e8ff'
+                          : selectedDayData.status === 'WEEKLY_OFF'
+                            ? '#e2e8f0'
+                            : selectedDayData.status === 'LEAVE'
+                              ? '#e0f2fe'
+                              : '#fee2e2',
                     color:
                       selectedDayData.status === 'PRESENT'
                         ? '#15803d'
                         : selectedDayData.status === 'HOLIDAY'
-                        ? '#7c3aed'
-                        : selectedDayData.status === 'WEEKLY_OFF'
-                        ? '#475569'
-                        : selectedDayData.status === 'LEAVE'
-                        ? '#0369a1'
-                        : '#b91c1c',
+                          ? '#7c3aed'
+                          : selectedDayData.status === 'WEEKLY_OFF'
+                            ? '#475569'
+                            : selectedDayData.status === 'LEAVE'
+                              ? '#0369a1'
+                              : '#b91c1c',
                   }}
                 >
                   {selectedDayData.status}

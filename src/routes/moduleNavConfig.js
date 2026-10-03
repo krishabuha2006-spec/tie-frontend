@@ -57,4 +57,5 @@ export const mastersNav = [
   { label: 'Departments', path: '/masters/departments', icon: Building2, module: 'departments' },
   { label: 'Designations', path: '/masters/designations', icon: Award, module: 'designations' },
   { label: 'Roles & RBAC', path: '/masters/roles', icon: ShieldCheck, module: 'roles' },
+  { label: 'Users & Logins', path: '/masters/users', icon: Users, module: 'users' },
 ];

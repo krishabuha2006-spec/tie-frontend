@@ -7,12 +7,12 @@ import employeeApi from '../../api/employeeApi';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { calculateDistanceMeters, resolveBranchLocation } from '../../utils/geoUtils';
-import { compareFacePhotos, resolveRegisteredSelfie } from '../../utils/faceComparison';
+import { compareFacePhotos, resolveRegisteredSelfie, resolveRegisteredSelfies } from '../../utils/faceComparison';
 import {
   ScanFace, MapPin, CheckCircle2, Clock, UserCheck, UserPlus,
   History, Camera, Database, Search, XCircle, Loader2,
   ShieldCheck, AlertCircle, LogIn, LogOut, Sliders, Users,
-  Check, Sparkles, Filter, ChevronRight
+  Check, Sparkles, Filter, ChevronRight, Trash2, Upload, X, Layers, RefreshCw
 } from 'lucide-react';
 import CameraCapture from '../../components/common/CameraCapture';
 import GeoLocationPicker from '../../components/common/GeoLocationPicker';
@@ -21,6 +21,7 @@ import Badge from '../../components/common/Badge';
 import Table from '../../components/common/Table';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { attendanceNav } from '../../routes/moduleNavConfig';
+import { formatDateOnlyIST, formatTimeIST, getErrorMessage } from '../../utils/formatters';
 
 const LiveClock = () => {
   const [now, setNow] = useState(new Date());
@@ -156,7 +157,7 @@ const EmpPicker = ({ employees, value, onChange, label, getEmpName, getEmpCode, 
 };
 
 export const FacePunch = () => {
-  const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager } = useAuth();
+  const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager, branch: globalBranch } = useAuth();
   const isOrgAdmin = isSuperAdmin || isHrAdmin || isDirector || isBranchManager;
   const [searchParams] = useSearchParams();
 
@@ -170,11 +171,11 @@ export const FacePunch = () => {
   const [employees, setEmployees] = useState([]);
   const [loadingEmps, setLoadingEmps] = useState(false);
 
-  // Enrollment State
+  // Enrollment State (Max 3 Images)
   const [regEmpId, setRegEmpId] = useState('');
   const [regFilter, setRegFilter] = useState('ALL');
   const [regSearch, setRegSearch] = useState('');
-  const [regPhoto, setRegPhoto] = useState(null);
+  const [regPhotos, setRegPhotos] = useState([]); // Up to 3 samples
   const [registering, setRegistering] = useState(false);
   const [regSuccess, setRegSuccess] = useState(null);
 
@@ -194,10 +195,11 @@ export const FacePunch = () => {
   const [verificationLogs, setVerificationLogs] = useState([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [logResultFilter, setLogResultFilter] = useState('ALL');
+  const [logSearchQuery, setLogSearchQuery] = useState('');
 
-  // Threshold Settings State
-  const [systemThreshold, setSystemThreshold] = useState(0.85);
-  const [tempThreshold, setTempThreshold] = useState(0.85);
+  // Threshold Settings State (Default 0.80)
+  const [systemThreshold, setSystemThreshold] = useState(0.80);
+  const [tempThreshold, setTempThreshold] = useState(0.80);
   const [thresholdUpdatedAt, setThresholdUpdatedAt] = useState(null);
   const [loadingThreshold, setLoadingThreshold] = useState(false);
   const [savingThreshold, setSavingThreshold] = useState(false);
@@ -241,7 +243,12 @@ export const FacePunch = () => {
         return;
       }
 
-      const res = await employeeApi.getEmployees({ limit: 200 });
+      const params = { limit: 200 };
+      const branchId = globalBranch?._id || globalBranch?.id;
+      if (branchId && branchId !== 'ALL') {
+        params.branch = branchId;
+      }
+      const res = await employeeApi.getEmployees(params);
       const list = res?.data || [];
       const empIds = list.map((e) => e._id || e.id).filter(Boolean);
       const statusMap = await faceApi.getBulkFaceStatus(empIds);
@@ -308,13 +315,13 @@ export const FacePunch = () => {
     setLoadingThreshold(true);
     try {
       const res = await faceApi.getThresholdSettings();
-      const val = res?.threshold != null ? Number(res.threshold) : 0.85;
+      const val = res?.threshold != null ? Number(res.threshold) : 0.80;
       setSystemThreshold(val);
       setTempThreshold(val);
       setThresholdUpdatedAt(res?.updatedAt ? new Date(res.updatedAt).toLocaleString() : null);
     } catch {
-      setSystemThreshold(0.85);
-      setTempThreshold(0.85);
+      setSystemThreshold(0.80);
+      setTempThreshold(0.80);
     } finally {
       setLoadingThreshold(false);
     }
@@ -347,7 +354,14 @@ export const FacePunch = () => {
     loadLogs();
     if (isOrgAdmin) loadThreshold();
     isMountedRef.current = true;
-  }, [userEmpId, isOrgAdmin]);
+
+    const handleContextChange = () => {
+      loadEmps();
+      loadLogs();
+    };
+    window.addEventListener('tie:context-changed', handleContextChange);
+    return () => window.removeEventListener('tie:context-changed', handleContextChange);
+  }, [userEmpId, isOrgAdmin, globalBranch]);
 
   // Only re-fetch logs when filter changes AFTER initial mount
   useEffect(() => {
@@ -395,6 +409,20 @@ export const FacePunch = () => {
   const storedCount = employees.filter((e) => e.isFaceEnrolled).length;
   const enrolledPct = employees.length > 0 ? Math.round((storedCount / employees.length) * 100) : 0;
 
+  const selectedEmpWorkType = (
+    selectedPunchEmployee?.employmentInfo?.workType ||
+    selectedPunchEmployee?.workType ||
+    user?.workType ||
+    'OFFICE'
+  ).toUpperCase();
+  const isFieldStaff = selectedEmpWorkType.includes('FIELD') || selectedEmpWorkType.includes('SITE') || selectedEmpWorkType.includes('HYBRID');
+
+  useEffect(() => {
+    if (!isFieldStaff && attendanceType !== 'OFFICE') {
+      setAttendanceType('OFFICE');
+    }
+  }, [isFieldStaff, attendanceType]);
+
   const filteredRegEmps = employees.filter((emp) => {
     if (regFilter === 'PENDING' && emp.isFaceEnrolled) return false;
     if (regFilter === 'STORED' && !emp.isFaceEnrolled) return false;
@@ -405,79 +433,92 @@ export const FacePunch = () => {
     return true;
   });
 
+  // ─── Enrollment Handlers (Max 3 Images) ──────────────────────────────────
+  const handleCaptureRegPhoto = (img) => {
+    if (!img) return;
+    setRegSuccess(null);
+    if (regPhotos.length >= 3) {
+      showToast('Maximum 3 sample images already reached. Remove a slot to replace.', 'warning');
+      return;
+    }
+    const nextCount = Math.min(regPhotos.length + 1, 3);
+    setRegPhotos((prev) => [...prev, img].slice(0, 3));
+    showToast(`Sample ${nextCount} of 3 captured!`, 'success');
+  };
+
+  const handleRemoveRegPhoto = (index) => {
+    setRegPhotos((prev) => prev.filter((_, i) => i !== index));
+    setRegSuccess(null);
+  };
+
+  const handleFileUpload = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    const remaining = 3 - regPhotos.length;
+    if (remaining <= 0) {
+      showToast('Maximum 3 sample images already reached', 'warning');
+      return;
+    }
+    const toRead = files.slice(0, remaining);
+    let count = 0;
+    const loaded = [];
+
+    toRead.forEach((f) => {
+      const r = new FileReader();
+      r.onload = (ev) => {
+        if (ev.target?.result) loaded.push(ev.target.result);
+        count++;
+        if (count === toRead.length) {
+          setRegPhotos((prev) => [...prev, ...loaded].slice(0, 3));
+          showToast(`Added ${loaded.length} image(s) from disk.`, 'success');
+        }
+      };
+      r.readAsDataURL(f);
+    });
+    e.target.value = '';
+  };
+
   // Handle Face Enrollment / Self-Enrollment (POST /face/self-enroll, POST /face/employees/:id/enroll, PUT /face/employees/:id/re-enroll)
   const handleRegisterFace = async () => {
     if (!regEmpId) { showToast('Select an employee first', 'warning'); return; }
-    if (!regPhoto) { showToast('Capture a photo first', 'warning'); return; }
+    if (!regPhotos || regPhotos.length === 0) {
+      showToast('Capture at least 1 photo sample (max 3 images)', 'warning');
+      return;
+    }
     setRegistering(true);
     setRegSuccess(null);
     try {
       const isSelf = regEmpId === userEmpId && !isOrgAdmin;
       const empName = getEmpName(selectedRegEmployee);
+      const samplesToSubmit = regPhotos.slice(0, 3);
 
       if (isSelf) {
-        // Self-Enroll Biometric Face Profile (POST /face/self-enroll)
-        await faceApi.selfEnroll([regPhoto], regEmpId || userEmpId);
-        showToast('Your face biometrics have been self-enrolled successfully!', 'success');
+        // Self-Enroll Biometric Face Profile (POST /face/self-enroll, Max 3 Images)
+        await faceApi.selfEnroll(samplesToSubmit, regEmpId || userEmpId);
+        showToast(`Your face biometrics (${samplesToSubmit.length} sample${samplesToSubmit.length > 1 ? 's' : ''}) self-enrolled successfully!`, 'success');
       } else if (selectedRegEmployee?.isFaceEnrolled) {
-        // Re-enroll Face Profile (PUT /face/employees/:id/re-enroll)
+        // Re-enroll Face Profile (PUT /face/employees/:id/re-enroll, Max 3 Images)
         try {
-          await faceApi.reEnrollFace(regEmpId, [regPhoto]);
+          await faceApi.reEnrollFace(regEmpId, samplesToSubmit);
         } catch {
-          await faceApi.enrollFace(regEmpId, [regPhoto]);
+          await faceApi.enrollFace(regEmpId, samplesToSubmit);
         }
-        showToast(`Face biometrics updated for ${empName}!`, 'success');
+        showToast(`Face biometrics re-enrolled for ${empName} (${samplesToSubmit.length} sample${samplesToSubmit.length > 1 ? 's' : ''})!`, 'success');
       } else {
-        // Enroll Face Profile (POST /face/employees/:id/enroll)
-        await faceApi.enrollFace(regEmpId, [regPhoto]);
-        showToast(`Face biometrics registered for ${empName}!`, 'success');
+        // Enroll Face Profile (POST /face/employees/:id/enroll, Max 3 Images)
+        await faceApi.enrollFace(regEmpId, samplesToSubmit);
+        showToast(`Face biometrics enrolled for ${empName} (${samplesToSubmit.length} sample${samplesToSubmit.length > 1 ? 's' : ''})!`, 'success');
       }
 
-      setRegSuccess({ empName, timestamp: new Date().toLocaleTimeString() });
+      setRegSuccess({
+        empName,
+        count: samplesToSubmit.length,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      });
       setEmployees((prev) =>
         prev.map((e) => ((e._id || e.id) === regEmpId ? { ...e, isFaceEnrolled: true, faceRegistrationPending: false } : e))
       );
-      // Automatically refresh employee statuses without any manual refresh button
-      await loadEmps();
-    } catch (err) {
-      showToast(err.response?.data?.message || 'Face registration failed', 'error');
-    } finally {
-      setRegistering(false);
-    }
-  };
-
-  const handleAutoRegister = async (img) => {
-    setRegPhoto(img);
-    setRegSuccess(null);
-    if (!regEmpId) {
-      showToast('Photo captured! Please select an employee to enroll.', 'warning');
-      return;
-    }
-    const empToRegister = employees.find((e) => (e._id || e.id) === regEmpId);
-    const empName = getEmpName(empToRegister);
-    const isSelf = regEmpId === userEmpId && !isOrgAdmin;
-
-    setRegistering(true);
-    try {
-      if (isSelf) {
-        await faceApi.selfEnroll([img], regEmpId || userEmpId);
-        showToast('Your face biometrics have been self-enrolled!', 'success');
-      } else if (empToRegister?.isFaceEnrolled) {
-        try {
-          await faceApi.reEnrollFace(regEmpId, [img]);
-        } catch {
-          await faceApi.enrollFace(regEmpId, [img]);
-        }
-        showToast(`Face captured & updated for ${empName}!`, 'success');
-      } else {
-        await faceApi.enrollFace(regEmpId, [img]);
-        showToast(`Face captured & registered for ${empName}!`, 'success');
-      }
-
-      setRegSuccess({ empName, timestamp: new Date().toLocaleTimeString() });
-      setEmployees((prev) =>
-        prev.map((e) => ((e._id || e.id) === regEmpId ? { ...e, isFaceEnrolled: true, faceRegistrationPending: false } : e))
-      );
+      // Automatically sync employee statuses without manual refresh
       await loadEmps();
     } catch (err) {
       showToast(err.response?.data?.message || 'Face registration failed', 'error');
@@ -513,9 +554,9 @@ export const FacePunch = () => {
     setPunchResult(null);
 
     try {
-      // Step 1: Biometric Verification against Registered Selfie
-      const regPhoto = await resolveRegisteredSelfie(selectedEmpId, empCode, empObj);
-      if (!regPhoto) {
+      // Step 1: Biometric Verification against Registered Selfie(s)
+      const regPhotosList = await resolveRegisteredSelfies(selectedEmpId, empCode, empObj);
+      if (!regPhotosList || regPhotosList.length === 0) {
         const noPhotoErr = 'No registered face template found for this employee. Please enroll face biometrics first.';
         setPunchResult({ success: false, reason: noPhotoErr, empName, empCode });
         showToast(noPhotoErr, 'error');
@@ -523,10 +564,10 @@ export const FacePunch = () => {
         return;
       }
 
-      // Local biometric similarity check using configured threshold
-      const compareResult = await compareFacePhotos(regPhoto, capturedPhoto, systemThreshold || 0.60);
+      // Local biometric similarity check using configured threshold (default 0.80)
+      const compareResult = await compareFacePhotos(regPhotosList, capturedPhoto, systemThreshold || 0.80);
       if (!compareResult.matched) {
-        const mismatchReason = compareResult.reason || `Biometric mismatch (${compareResult.confidencePct}% match). Face does not match registered profile.`;
+        const mismatchReason = compareResult.reason || `Biometric mismatch (${compareResult.confidencePct}% match, required >= ${Math.round((systemThreshold || 0.80) * 100)}%). Face does not match registered profile.`;
         setPunchResult({ success: false, reason: mismatchReason, empName, empCode });
         showToast(mismatchReason, 'error');
         setSubmitting(false);
@@ -547,13 +588,13 @@ export const FacePunch = () => {
       }
 
       const faceLogId = faceRes?.logId || faceRes?.data?.logId;
-      const confidence = faceRes?.confidenceScore ?? faceRes?.data?.confidenceScore ?? 0.95;
+      const confidence = faceRes?.confidenceScore ?? faceRes?.data?.confidenceScore ?? ((compareResult.confidencePct || 95) / 100);
       const matchResult = faceRes?.matchResult || faceRes?.data?.matchResult || 'MATCHED';
       const isFaceMatched = faceRes?.matched !== false &&
         matchResult !== 'NOT_MATCHED' && matchResult !== 'NO_FACE_DETECTED' && matchResult !== 'LOW_CONFIDENCE';
 
       if (!isFaceMatched) {
-        const reason = faceRes?.reason || faceRes?.data?.reason || `Face mismatch (${Math.round(confidence * 100)}% match below threshold). Verification rejected.`;
+        const reason = faceRes?.reason || faceRes?.data?.reason || `Face mismatch (${Math.round(confidence * 100)}% match below threshold ${Math.round((systemThreshold || 0.80) * 100)}%). Verification rejected.`;
         setPunchResult({ success: false, reason, empName, empCode });
         showToast(reason, 'error');
         setSubmitting(false);
@@ -650,14 +691,14 @@ export const FacePunch = () => {
         empCode,
         confidence: Math.round(confidence * 100),
         address: addressStr,
-        time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        date: now.toLocaleDateString(),
+        time: formatTimeIST(now),
+        date: formatDateOnlyIST(now),
       });
 
       // Automatically refresh logs and status without any manual refresh button
       loadLogs();
     } catch (err) {
-      const msg = err.response?.data?.message || 'Attendance punch failed';
+      const msg = getErrorMessage(err, 'Attendance punch failed');
       showToast(msg, 'error');
       setPunchResult({ success: false, reason: msg, empName, empCode });
       loadLogs();
@@ -964,20 +1005,29 @@ export const FacePunch = () => {
 
               {/* Attendance Gate Category */}
               <div>
-                <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 8 }}>
-                  Attendance Category
+                <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>Attendance Category</span>
+                  <span style={{ fontSize: '0.74rem', color: isFieldStaff ? '#0284c7' : '#64748b', fontWeight: 600 }}>
+                    Work Type: {isFieldStaff ? 'Field Staff' : 'Office Staff'}
+                  </span>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
-                  {['OFFICE', 'FIELD', 'SITE'].map((t) => (
+                <div style={{ display: 'grid', gridTemplateColumns: isFieldStaff ? 'repeat(2, 1fr)' : '1fr', gap: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => setAttendanceType('OFFICE')}
+                    style={S.typeBtn(attendanceType === 'OFFICE', typeColors['OFFICE'])}
+                  >
+                    Office Location
+                  </button>
+                  {isFieldStaff && (
                     <button
-                      key={t}
                       type="button"
-                      onClick={() => setAttendanceType(t)}
-                      style={S.typeBtn(attendanceType === t, typeColors[t])}
+                      onClick={() => setAttendanceType('FIELD')}
+                      style={S.typeBtn(attendanceType === 'FIELD', typeColors['FIELD'])}
                     >
-                      {t}
+                      Field / Site Punch
                     </button>
-                  ))}
+                  )}
                 </div>
               </div>
 
@@ -1134,9 +1184,14 @@ export const FacePunch = () => {
               <div style={S.cardIconWrap('var(--primary-light)')}>
                 <Camera size={16} color="var(--primary)" />
               </div>
-              <div>
-                <div style={S.sectionTitle}>Biometric Enrollment Camera</div>
-                <div style={S.sectionSub}>Position employee face squarely in the frame</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                  <div style={S.sectionTitle}>Biometric Enrollment Camera</div>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '2px 8px', borderRadius: 12, background: regPhotos.length === 3 ? '#dcfce7' : 'var(--primary-light)', color: regPhotos.length === 3 ? '#166534' : 'var(--primary)' }}>
+                    {regPhotos.length}/3 Samples Captured
+                  </span>
+                </div>
+                <div style={S.sectionSub}>Capture up to 3 facial angles (Front, Left angle, Right angle)</div>
               </div>
             </div>
 
@@ -1146,17 +1201,123 @@ export const FacePunch = () => {
                 <span style={{ fontSize: '0.88rem' }}>Loading profiles...</span>
               </div>
             ) : (
-              <CameraCapture onCapture={handleAutoRegister} label="Look directly into camera to capture profile" />
+              <CameraCapture
+                onCapture={handleCaptureRegPhoto}
+                label={regPhotos.length < 3 ? `Click to capture sample ${regPhotos.length + 1} of 3` : 'Maximum 3 samples captured'}
+              />
             )}
+
+            {/* 3-Slot Visual Card Gallery */}
+            <div style={{ marginTop: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Layers size={14} color="var(--primary)" />
+                  <span>Enrolled Samples ({regPhotos.length}/3)</span>
+                </div>
+                {regPhotos.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => { setRegPhotos([]); setRegSuccess(null); }}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.74rem', color: '#dc2626', background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                  >
+                    <Trash2 size={12} /> Clear all
+                  </button>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                {[0, 1, 2].map((slotIdx) => {
+                  const photo = regPhotos[slotIdx];
+                  const slotTitles = ['1. Front Face', '2. Angle 1', '3. Angle 2'];
+                  const isRequired = slotIdx === 0;
+
+                  return (
+                    <div
+                      key={slotIdx}
+                      style={{
+                        position: 'relative',
+                        aspectRatio: '1 / 1',
+                        borderRadius: 10,
+                        border: photo ? '2px solid var(--primary)' : '1.5px dashed var(--border-color)',
+                        background: photo ? '#0f172a' : 'var(--bg-subtle)',
+                        overflow: 'hidden',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        transition: 'all 0.18s',
+                      }}
+                    >
+                      {photo ? (
+                        <>
+                          <img
+                            src={photo}
+                            alt={`Sample ${slotIdx + 1}`}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '4px 6px', background: 'rgba(0,0,0,0.7)', color: '#fff', fontSize: '0.68rem', fontWeight: 600, textAlign: 'center', backdropFilter: 'blur(2px)' }}>
+                            {slotTitles[slotIdx]}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveRegPhoto(slotIdx)}
+                            title="Remove sample"
+                            style={{
+                              position: 'absolute',
+                              top: 5,
+                              right: 5,
+                              width: 22,
+                              height: 22,
+                              borderRadius: '50%',
+                              background: 'rgba(220, 38, 38, 0.9)',
+                              border: 'none',
+                              color: '#fff',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                              boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
+                            }}
+                          >
+                            <X size={13} />
+                          </button>
+                        </>
+                      ) : (
+                        <div style={{ textAlign: 'center', padding: 6 }}>
+                          <Camera size={18} color="var(--text-light)" style={{ margin: '0 auto 4px' }} />
+                          <div style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                            {slotTitles[slotIdx]}
+                          </div>
+                          <div style={{ fontSize: '0.64rem', color: isRequired ? '#dc2626' : 'var(--text-light)', marginTop: 2 }}>
+                            {isRequired ? 'Required' : 'Optional'}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Upload from file button */}
+              <div style={{ marginTop: 10 }}>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.76rem', color: 'var(--primary)', cursor: regPhotos.length >= 3 ? 'not-allowed' : 'pointer', fontWeight: 600, padding: '5px 10px', borderRadius: 8, border: '1px solid var(--primary-border)', background: 'var(--primary-light)', opacity: regPhotos.length >= 3 ? 0.5 : 1 }}>
+                  <Upload size={13} />
+                  <span>Upload images from computer</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleFileUpload}
+                    style={{ display: 'none' }}
+                    disabled={regPhotos.length >= 3}
+                  />
+                </label>
+              </div>
+            </div>
 
             {registering && (
               <div style={{ ...S.alertOk, marginTop: 12 }}>
-                <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Generating 128D facial embeddings &amp; registering with backend...
-              </div>
-            )}
-            {regPhoto && !registering && !regSuccess && (
-              <div style={{ ...S.alertOk, marginTop: 12 }}>
-                <CheckCircle2 size={15} /> Facial frame captured. Click Enroll below to finalize.
+                <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Generating 128D facial embeddings &amp; registering samples with backend...
               </div>
             )}
             {regSuccess && (
@@ -1165,7 +1326,7 @@ export const FacePunch = () => {
                   <CheckCircle2 size={17} /> Face Biometrics Successfully Registered!
                 </div>
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                  Profile: {regSuccess.empName} — {regSuccess.timestamp}
+                  Profile: <strong>{regSuccess.empName}</strong> · {regSuccess.count} sample{regSuccess.count > 1 ? 's' : ''} stored · {regSuccess.timestamp}
                 </div>
               </div>
             )}
@@ -1182,7 +1343,9 @@ export const FacePunch = () => {
                   {isOrgAdmin ? 'Employee Biometric Profiles' : 'Self-Enroll Biometric Profile'}
                 </div>
                 <div style={S.sectionSub}>
-                  {isOrgAdmin ? 'Enroll first-time face profile or update existing registration' : 'Register your facial template for attendance gates'}
+                  {selectedRegEmployee?.isFaceEnrolled
+                    ? 'Re-enroll / update facial profile (PUT /face/employees/:id/re-enroll)'
+                    : 'Initial face registration (POST /face/employees/:id/enroll)'}
                 </div>
               </div>
             </div>
@@ -1222,7 +1385,7 @@ export const FacePunch = () => {
                 <EmpPicker
                   employees={filteredRegEmps}
                   value={regEmpId}
-                  onChange={(id) => { setRegEmpId(id); setRegPhoto(null); setRegSuccess(null); }}
+                  onChange={(id) => { setRegEmpId(id); setRegSuccess(null); }}
                   label="Select Employee"
                   getEmpName={getEmpName}
                   getEmpCode={getEmpCode}
@@ -1241,21 +1404,38 @@ export const FacePunch = () => {
                     {getEmpCode(selectedRegEmployee)} · {getEmpDept(selectedRegEmployee)}
                   </div>
                 </div>
-                <Badge variant={selectedRegEmployee.isFaceEnrolled ? 'success' : 'warning'}>
-                  {selectedRegEmployee.isFaceEnrolled ? 'Enrolled' : 'Pending Enrollment'}
-                </Badge>
+                <div style={{ textAlign: 'right' }}>
+                  <Badge variant={selectedRegEmployee.isFaceEnrolled ? 'success' : 'warning'}>
+                    {selectedRegEmployee.isFaceEnrolled ? 'Enrolled' : 'Pending Enrollment'}
+                  </Badge>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                    {selectedRegEmployee.isFaceEnrolled ? 'Active in biometric gate' : 'Requires enrollment'}
+                  </div>
+                </div>
               </div>
             )}
+
+            {/* Mode Explanation Notice */}
+            <div style={{ padding: '10px 14px', borderRadius: 8, background: selectedRegEmployee?.isFaceEnrolled ? '#f0fdf4' : '#fffbeb', border: `1px solid ${selectedRegEmployee?.isFaceEnrolled ? '#bbf7d0' : '#fde68a'}`, marginTop: 14, fontSize: '0.78rem', color: selectedRegEmployee?.isFaceEnrolled ? '#166534' : '#92400e', lineHeight: 1.4 }}>
+              <strong>{selectedRegEmployee?.isFaceEnrolled ? 'Re-enrollment Mode:' : 'Initial Enrollment:'}</strong>{' '}
+              {selectedRegEmployee?.isFaceEnrolled
+                ? 'Submitting new samples will overwrite existing biometric vectors via PUT /face/employees/:id/re-enroll.'
+                : 'Captures and generates 128-dimensional biometric embeddings via POST /face/employees/:id/enroll.'}
+            </div>
 
             <Button
               variant="primary"
               icon={ScanFace}
               loading={registering}
               onClick={handleRegisterFace}
-              disabled={!regPhoto || !regEmpId}
-              style={{ width: '100%', marginTop: 20, padding: '12px', fontWeight: 600, borderRadius: 10 }}
+              disabled={regPhotos.length === 0 || !regEmpId}
+              style={{ width: '100%', marginTop: 16, padding: '12px', fontWeight: 600, borderRadius: 10 }}
             >
-              {selectedRegEmployee?.isFaceEnrolled ? 'Re-Enroll / Update Biometrics' : 'Enroll Face Profile'}
+              {regPhotos.length === 0
+                ? 'Capture At Least 1 Image'
+                : selectedRegEmployee?.isFaceEnrolled
+                ? `Re-Enroll / Update Biometrics (${regPhotos.length}/3 Samples)`
+                : `Enroll Face Profile (${regPhotos.length}/3 Samples)`}
             </Button>
           </div>
         </div>
@@ -1278,29 +1458,55 @@ export const FacePunch = () => {
               </div>
             </div>
 
-            {/* Filter by Verdict */}
-            <div style={{ display: 'flex', gap: 6 }}>
-              {[
-                { key: 'ALL', label: 'All Results' },
-                { key: 'MATCH', label: 'Matches Only' },
-                { key: 'MISMATCH', label: 'Mismatches' },
-              ].map((f) => (
-                <button
-                  key={f.key}
-                  type="button"
-                  onClick={() => setLogResultFilter(f.key)}
-                  style={S.filterBtn(logResultFilter === f.key)}
-                >
-                  {f.label}
-                </button>
-              ))}
+            {/* Filter by Verdict & Search */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ position: 'relative' }}>
+                <Search size={13} color="var(--text-muted)" style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)' }} />
+                <input
+                  type="text"
+                  placeholder="Filter logs by name / code..."
+                  value={logSearchQuery}
+                  onChange={(e) => setLogSearchQuery(e.target.value)}
+                  style={{ height: 32, paddingLeft: 28, paddingRight: 10, borderRadius: 16, border: '1px solid var(--border-color)', fontSize: '0.78rem', outline: 'none' }}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {[
+                  { key: 'ALL', label: 'All Results' },
+                  { key: 'MATCH', label: 'Matches Only' },
+                  { key: 'MISMATCH', label: 'Mismatches' },
+                ].map((f) => (
+                  <button
+                    key={f.key}
+                    type="button"
+                    onClick={() => setLogResultFilter(f.key)}
+                    style={S.filterBtn(logResultFilter === f.key)}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
           <div style={{ marginTop: 16 }}>
             <Table
               columns={logColumns}
-              data={verificationLogs}
+              data={verificationLogs.filter((r) => {
+                if (logSearchQuery) {
+                  const q = logSearchQuery.toLowerCase();
+                  const n = getEmpName(r.employee).toLowerCase();
+                  const c = String(getEmpCode(r.employee)).toLowerCase();
+                  if (!n.includes(q) && !c.includes(q)) return false;
+                }
+                if (logResultFilter !== 'ALL') {
+                  const v = r.verificationResult || r.matchResult || (r.isPassed ? 'MATCH' : 'MISMATCH');
+                  const isMatch = v === 'MATCH' || v === 'MATCHED' || r.isPassed === true;
+                  if (logResultFilter === 'MATCH' && !isMatch) return false;
+                  if (logResultFilter === 'MISMATCH' && isMatch) return false;
+                }
+                return true;
+              })}
               loading={loadingLogs}
               emptyMessage="No biometric verification logs found."
             />
@@ -1321,7 +1527,7 @@ export const FacePunch = () => {
               <div>
                 <div style={S.sectionTitle}>System Recognition Threshold Control</div>
                 <div style={S.sectionSub}>
-                  Configures the minimum cosine biometric similarity required for gate match
+                  Configures minimum cosine biometric similarity required for gate match (Default 0.80)
                 </div>
               </div>
             </div>
@@ -1340,7 +1546,7 @@ export const FacePunch = () => {
                       Current Configured Threshold
                     </div>
                     <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--primary)', marginTop: 2 }}>
-                      {Math.round(tempThreshold * 100)}%
+                      {Math.round(tempThreshold * 100)}% ({tempThreshold.toFixed(2)})
                     </div>
                     {thresholdUpdatedAt && (
                       <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 4 }}>
@@ -1350,9 +1556,47 @@ export const FacePunch = () => {
                   </div>
 
                   <div style={{ textAlign: 'right' }}>
-                    <Badge variant={tempThreshold >= 0.85 ? 'success' : tempThreshold >= 0.70 ? 'info' : 'warning'}>
-                      {tempThreshold >= 0.85 ? 'High Security' : tempThreshold >= 0.70 ? 'Balanced' : 'Permissive'}
+                    <Badge variant={tempThreshold >= 0.85 ? 'success' : tempThreshold >= 0.75 ? 'info' : 'warning'}>
+                      {tempThreshold >= 0.85 ? 'High Security' : tempThreshold >= 0.75 ? 'Standard / Recommended' : 'Permissive'}
                     </Badge>
+                  </div>
+                </div>
+
+                {/* Quick Preset Buttons */}
+                <div>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 8 }}>
+                    Quick Threshold Presets:
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {[
+                      { label: '70% (Permissive)', val: 0.70 },
+                      { label: '75% (Relaxed)', val: 0.75 },
+                      { label: '80% (Default Recommended)', val: 0.80 },
+                      { label: '85% (Strict)', val: 0.85 },
+                      { label: '90% (Maximum Security)', val: 0.90 },
+                    ].map((preset) => {
+                      const isSel = Math.round(tempThreshold * 100) === Math.round(preset.val * 100);
+                      return (
+                        <button
+                          key={preset.val}
+                          type="button"
+                          onClick={() => setTempThreshold(preset.val)}
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: 8,
+                            fontSize: '0.76rem',
+                            fontWeight: isSel ? 700 : 500,
+                            border: `1.5px solid ${isSel ? 'var(--primary)' : 'var(--border-color)'}`,
+                            background: isSel ? 'var(--primary)' : '#fff',
+                            color: isSel ? '#fff' : 'var(--text-main)',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s',
+                          }}
+                        >
+                          {preset.label}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -1360,7 +1604,7 @@ export const FacePunch = () => {
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: 8 }}>
                     <span>Sensitivity Adjustment</span>
-                    <span style={{ color: 'var(--primary)' }}>{tempThreshold.toFixed(2)}</span>
+                    <span style={{ color: 'var(--primary)', fontWeight: 700 }}>{tempThreshold.toFixed(2)}</span>
                   </div>
                   <input
                     type="range"
@@ -1373,13 +1617,13 @@ export const FacePunch = () => {
                   />
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 6 }}>
                     <span>50% (Permissive)</span>
-                    <span>85% (Recommended Default)</span>
+                    <span style={{ fontWeight: 700, color: 'var(--primary)' }}>80% (Default Recommended)</span>
                     <span>99% (Strict Biometric Match)</span>
                   </div>
                 </div>
 
                 <div style={{ padding: '12px 16px', borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0', fontSize: '0.8rem', color: '#475569', lineHeight: 1.5 }}>
-                  <strong>How threshold controls work:</strong> When an employee presents their face at an attendance gate, the system computes facial similarity between 0.0 and 1.0. If the score meets or exceeds <strong>{Math.round(tempThreshold * 100)}%</strong>, access is approved and attendance is recorded.
+                  <strong>How threshold controls work:</strong> When an employee presents their face at an attendance gate, the system computes facial similarity against their registered sample(s). If the score meets or exceeds <strong>{Math.round(tempThreshold * 100)}%</strong>, access is approved and attendance is recorded.
                 </div>
 
                 {/* Save Button */}

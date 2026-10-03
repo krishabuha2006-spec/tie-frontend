@@ -10,8 +10,15 @@ export const leaveHolidayApi = {
 
   // GET /leave-types
   getLeaveTypes: async (params) => {
-    const res = await apiClient.get('/leave-types', { params });
-    return res.data;
+    try {
+      const res = await apiClient.get('/leave-types', { params });
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 400 || err.response?.status === 403 || err.response?.status === 401) {
+        return { success: true, data: [], leaveTypes: [] };
+      }
+      throw err;
+    }
   },
 
   // PUT /leave-types/:id
@@ -43,8 +50,6 @@ export const leaveHolidayApi = {
     }
   },
 
-  // --- Module 12: Leave Requests ---
-  // POST /leave/requests
   applyLeave: async (data) => {
     const payload = {
       leaveType: data.leaveType,
@@ -70,7 +75,6 @@ export const leaveHolidayApi = {
     }
   },
 
-  // GET /leave/requests/pending-approval
   getPendingLeaveApprovals: async (params) => {
     try {
       const res = await apiClient.get('/leave/requests/pending-approval', { params });
@@ -161,8 +165,15 @@ export const leaveHolidayApi = {
     if (!queryParams.scope) {
       queryParams.scope = 'COMPANY';
     }
-    const res = await apiClient.get('/holidays', { params: queryParams });
-    return res.data;
+    try {
+      const res = await apiClient.get('/holidays', { params: queryParams });
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 400 || err.response?.status === 403 || err.response?.status === 401) {
+        return { success: true, data: [], holidays: [] };
+      }
+      throw err;
+    }
   },
 
   // PUT /holidays/:id
@@ -212,8 +223,15 @@ export const leaveHolidayApi = {
 
   // GET /holidays/upcoming
   getUpcomingHolidays: async (params) => {
-    const res = await apiClient.get('/holidays/upcoming', { params });
-    return res.data;
+    try {
+      const res = await apiClient.get('/holidays/upcoming', { params });
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 400 || err.response?.status === 403 || err.response?.status === 401) {
+        return { success: true, data: [], holidays: [] };
+      }
+      throw err;
+    }
   },
 
   // --- Module 13: Weekly-Off Configs ---

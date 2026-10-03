@@ -33,9 +33,9 @@ export const employeeApi = {
         }
         return { data: [], employees: [] };
       }
-      if (err.response?.status === 400) {
-        console.warn('Employees filter error 400, returning empty list fallback:', err);
-        return { data: [], employees: [] };
+      if (err.response?.status === 400 || err.response?.status === 404) {
+        console.warn('Employees filter response', err.response?.status, ', returning empty list:', err);
+        return { success: true, count: 0, total: 0, data: [], employees: [] };
       }
       throw err;
     }
@@ -115,8 +115,17 @@ export const employeeApi = {
         },
       };
 
-      if (data.reportingManager && /^[0-9a-fA-F]{24}$/.test(String(data.reportingManager))) {
-        employmentInfo.reportingManager = String(data.reportingManager);
+      const mgrId = typeof data.reportingManager === 'object'
+        ? (data.reportingManager?._id || data.reportingManager?.id)
+        : data.reportingManager;
+      if (
+        mgrId &&
+        /^[0-9a-fA-F]{24}$/.test(String(mgrId)) &&
+        !String(mgrId).startsWith('user-bridge') &&
+        !data.isUserBridge &&
+        !data.isBridged
+      ) {
+        employmentInfo.reportingManager = String(mgrId);
       }
 
       payload = {
@@ -195,7 +204,26 @@ export const employeeApi = {
       const res = await apiClient.post('/employees', payload);
       return res.data?.data || res.data;
     } catch (err1) {
-      console.warn('POST /employees initial attempt failed:', err1.response?.status, err1.response?.data?.message);
+      // Strategy 0: If reporting manager does not exist or fails verification on backend, strip and retry
+      if (
+        (err1.response?.status === 404 && String(err1.response?.data?.message).toLowerCase().includes('reporting manager')) ||
+        String(err1.response?.data?.message).toLowerCase().includes('reporting manager')
+      ) {
+        try {
+          const noMgrPayload = JSON.parse(JSON.stringify(payload));
+          if (noMgrPayload.employmentInfo) {
+            delete noMgrPayload.employmentInfo.reportingManager;
+            delete noMgrPayload.employmentInfo.reportingManagers;
+          }
+          delete noMgrPayload.reportingManager;
+          delete noMgrPayload.reportingManagers;
+
+          const resMgr = await apiClient.post('/employees', noMgrPayload);
+          return resMgr.data?.data || resMgr.data;
+        } catch (mgrErr) {
+          console.warn('POST /employees without reporting manager failed:', mgrErr.response?.status, mgrErr.response?.data?.message);
+        }
+      }
 
       // Strategy 2: If department or designation was ObjectId, try resolving to department name & designation name
       const deptVal = payload?.employmentInfo?.department;
@@ -371,8 +399,8 @@ export const employeeApi = {
     const safeEmpType = validEmpTypes.includes(empType) ? empType : 'FULL_TIME';
 
     const workType = String(data.workType || curEm.workType || 'OFFICE').toUpperCase().replace(/\s+/g, '_');
-    const validWorkTypes = ['OFFICE', 'FIELD', 'HYBRID'];
-    const safeWorkType = validWorkTypes.includes(workType) ? workType : (workType === 'SITE' ? 'FIELD' : 'OFFICE');
+    const validWorkTypes = ['OFFICE', 'FIELD', 'SITE', 'HYBRID'];
+    const safeWorkType = validWorkTypes.includes(workType) ? workType : 'OFFICE';
 
     // Roles array support
     const rolesArrUp = Array.isArray(data.employeeRoles) && data.employeeRoles.length > 0

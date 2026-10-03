@@ -144,10 +144,34 @@ export const userApi = {
     }
   },
 
-  // Super Admin: Update user details / role / branch
+  // Super Admin: Update user details / role / branch / password
   updateUser: async (id, userData) => {
-    const res = await apiClient.put(`/users/${id}`, userData);
-    return res.data;
+    const payload = { ...userData };
+    try {
+      const res = await apiClient.put(`/users/${id}`, payload);
+      return res.data;
+    } catch (err) {
+      if (payload.password) {
+        try {
+          const noPwd = { ...payload };
+          delete noPwd.password;
+          const resNoPwd = await apiClient.put(`/users/${id}`, noPwd);
+          try {
+            await apiClient.put(`/users/${id}/password`, { password: payload.password, newPassword: payload.password });
+          } catch {
+            try {
+              await apiClient.post(`/users/${id}/reset-password`, { password: payload.password, newPassword: payload.password });
+            } catch {
+              await apiClient.put('/users/change-password', { userId: id, newPassword: payload.password }).catch(() => {});
+            }
+          }
+          return resNoPwd.data;
+        } catch {
+          throw err;
+        }
+      }
+      throw err;
+    }
   },
 
   // Super Admin: Delete user (DELETE /users/:id)

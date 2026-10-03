@@ -42,9 +42,10 @@ import Select from '../../components/common/Select';
 import Badge from '../../components/common/Badge';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { attendanceNav } from '../../routes/moduleNavConfig';
+import { formatDateOnlyIST, formatTimeIST, getErrorMessage } from '../../utils/formatters';
 
 export const TimingRules = () => {
-  const { isSuperAdmin, isHrAdmin, user } = useAuth();
+  const { isSuperAdmin, isHrAdmin, user, branch: globalBranch } = useAuth();
   const { showToast } = useToast();
   const confirm = useConfirm();
   const canManage = isSuperAdmin || isHrAdmin;
@@ -184,10 +185,15 @@ export const TimingRules = () => {
   // Load Employees and Masters
   const loadMasters = async () => {
     try {
+      const empParams = { limit: 100 };
+      const branchId = globalBranch?._id || globalBranch?.id;
+      if (branchId && branchId !== 'ALL') {
+        empParams.branch = branchId;
+      }
       const [compRes, branchRes, empRes] = await Promise.allSettled([
         masterApi.getCompanies(),
         masterApi.getBranches(),
-        employeeApi.getEmployees({ limit: 100 }),
+        employeeApi.getEmployees(empParams),
       ]);
 
       if (compRes.status === 'fulfilled') {
@@ -215,7 +221,17 @@ export const TimingRules = () => {
   useEffect(() => {
     loadConfigs();
     loadMasters();
-  }, []);
+  }, [globalBranch]);
+
+  useEffect(() => {
+    const handleContextChange = () => {
+      loadConfigs();
+      loadMasters();
+      if (activeTab === 'occurrences') loadLateOccurrences();
+    };
+    window.addEventListener('tie:context-changed', handleContextChange);
+    return () => window.removeEventListener('tie:context-changed', handleContextChange);
+  }, [globalBranch, activeTab]);
 
   useEffect(() => {
     if (activeTab === 'occurrences') {
@@ -532,7 +548,7 @@ export const TimingRules = () => {
       key: 'attendanceDate',
       render: (occ) => (
         <div style={{ fontSize: '0.86rem' }}>
-          <strong>{occ.attendanceDate ? new Date(occ.attendanceDate).toLocaleDateString() : '-'}</strong>
+          <strong>{occ.attendanceDate ? formatDateOnlyIST(occ.attendanceDate) : '-'}</strong>
           <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
             Period: {occ.trackingPeriodKey || '-'}
           </div>
@@ -543,7 +559,7 @@ export const TimingRules = () => {
       header: 'Arrival Timing',
       key: 'checkInTime',
       render: (occ) => {
-        const checkIn = occ.checkInTime ? new Date(occ.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-';
+        const checkIn = occ.checkInTime ? formatTimeIST(occ.checkInTime) : '-';
         return (
           <div style={{ fontSize: '0.86rem' }}>
             <div>Check-in: <strong style={{ color: '#b91c1c' }}>{checkIn}</strong></div>
@@ -1206,8 +1222,8 @@ export const TimingRules = () => {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {attendanceRecords.map((rec) => {
-                const inTime = rec.firstCheckInTime ? new Date(rec.firstCheckInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-';
-                const outTime = rec.lastCheckOutTime ? new Date(rec.lastCheckOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : rec.isOpen ? 'On Duty' : '-';
+                const inTime = rec.firstCheckInTime ? formatTimeIST(rec.firstCheckInTime) : '-';
+                const outTime = rec.lastCheckOutTime ? formatTimeIST(rec.lastCheckOutTime) : rec.isOpen ? 'On Duty' : '-';
 
                 return (
                   <div

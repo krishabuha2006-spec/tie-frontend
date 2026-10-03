@@ -1,0 +1,489 @@
+/* Modern Professional SaaS Dashboard Styling */
+
+.dashboard-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 4px 0 24px 0;
+}
+
+/* ─── 1. Welcome Card Banner ─── */
+.dash-welcome-card {
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+}
+
+.dash-welcome-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.dash-user-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--primary, #2e7b85), #1b4b52);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 1.15rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 10px rgba(46, 123, 133, 0.25);
+  flex-shrink: 0;
+}
+
+.dash-greeting-title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dash-greeting-subtitle {
+  margin-top: 4px;
+  font-size: 0.82rem;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dash-welcome-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dash-context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.dash-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.dash-refresh-btn:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+.dash-refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ─── 2. Quick Action Pills Bar ─── */
+.dash-actions-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+
+.dash-action-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+.dash-action-pill:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #0f172a;
+  transform: translateY(-1px);
+}
+
+.dash-action-pill.primary {
+  background: var(--primary, #2e7b85);
+  color: #ffffff;
+  border-color: var(--primary, #2e7b85);
+  box-shadow: 0 2px 6px rgba(46, 123, 133, 0.25);
+}
+
+.dash-action-pill.primary:hover {
+  filter: brightness(1.08);
+  color: #ffffff;
+}
+
+/* ─── 3. KPI Grid ─── */
+.dash-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.dash-kpi-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.03);
+}
+
+.dash-kpi-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.07);
+  transform: translateY(-2px);
+}
+
+.dash-kpi-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-kpi-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.dash-kpi-value {
+  font-size: 1.55rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin-top: 4px;
+}
+
+.dash-kpi-subtext {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-top: 3px;
+}
+
+.dash-kpi-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* ─── 4. Main Two-Column Content Grid ─── */
+.dash-content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.85fr) minmax(320px, 1fr);
+  gap: 20px;
+  align-items: flex-start;
+}
+
+@media (max-width: 1024px) {
+  .dash-content-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dash-panel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.03);
+  overflow: hidden;
+}
+
+.dash-panel-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dash-panel-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dash-panel-link {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--primary, #2e7b85);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.dash-panel-link:hover {
+  text-decoration: underline;
+}
+
+.dash-panel-body {
+  padding: 20px;
+}
+
+/* ─── Table Styling ─── */
+.dash-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.dash-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+  text-align: left;
+}
+
+.dash-table th {
+  background: #f8fafc;
+  color: #64748b;
+  font-weight: 600;
+  padding: 11px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.dash-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid #f1f5f9;
+  color: #334155;
+  vertical-align: middle;
+}
+
+.dash-table tbody tr:hover {
+  background-color: #fbfcfe;
+}
+
+.dash-code-tag {
+  font-family: monospace;
+  font-size: 0.78rem;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: 1px solid #e2e8f0;
+  font-weight: 600;
+}
+
+/* ─── Daily Punch Widget ─── */
+.dash-punch-widget {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.03);
+}
+
+.dash-punch-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.dash-punch-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.dash-punch-status-badge.checked-in {
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+}
+
+.dash-punch-status-badge.checked-out {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+
+.dash-punch-status-badge.not-checked {
+  background: #fffbeb;
+  color: #d97706;
+  border: 1px solid #fde68a;
+}
+
+.dash-punch-time-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  margin-bottom: 14px;
+}
+
+.dash-punch-time-col {
+  text-align: center;
+}
+
+.dash-punch-time-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  display: block;
+}
+
+.dash-punch-time-val {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin-top: 2px;
+}
+
+.dash-punch-action-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 16px;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s ease;
+}
+
+.dash-punch-action-btn.in {
+  background: var(--primary, #2e7b85);
+  color: #ffffff;
+  box-shadow: 0 3px 10px rgba(46, 123, 133, 0.28);
+}
+
+.dash-punch-action-btn.in:hover {
+  filter: brightness(1.08);
+}
+
+.dash-punch-action-btn.out {
+  background: #dc2626;
+  color: #ffffff;
+  box-shadow: 0 3px 10px rgba(220, 38, 38, 0.28);
+}
+
+.dash-punch-action-btn.out:hover {
+  filter: brightness(1.08);
+}
+
+.dash-punch-sublinks {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding: 0 4px;
+  font-size: 0.75rem;
+}
+
+.dash-punch-sublink {
+  color: var(--primary, #2e7b85);
+  text-decoration: none;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dash-punch-sublink:hover {
+  text-decoration: underline;
+}
+
+/* ─── Branch Overview Box ─── */
+.dash-branch-overview {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.03);
+}
+
+.dash-overview-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 0;
+  border-bottom: 1px dashed #f1f5f9;
+  font-size: 0.8rem;
+}
+
+.dash-overview-item:last-child {
+  border-bottom: none;
+}
+
+.dash-overview-label {
+  color: #64748b;
+  font-weight: 500;
+}
+
+.dash-overview-val {
+  color: #0f172a;
+  font-weight: 600;
+}

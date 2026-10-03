@@ -16,9 +16,10 @@ import Button from '../../components/common/Button';
 import Badge from '../../components/common/Badge';
 import StaffPicker from '../../components/common/StaffPicker';
 import { extractApiData } from '../../utils/apiUtils';
+import { formatDateOnlyIST, getErrorMessage } from '../../utils/formatters';
 
 export const LeavesHolidays = () => {
-  const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager, userRole, hasPermission } = useAuth();
+  const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager, userRole, hasPermission, branch: globalBranch } = useAuth();
   const { showToast } = useToast();
   const confirm = useConfirm();
 
@@ -138,7 +139,12 @@ export const LeavesHolidays = () => {
     try {
       const calls = [leaveHolidayApi.getLeaveTypes(), masterApi.getCompanies()];
       if (canApprove || canManagePolicy) {
-        calls.push(employeeApi.getEmployees({ limit: 150 }));
+        const empParams = { limit: 150 };
+        const branchId = globalBranch?._id || globalBranch?.id;
+        if (branchId && branchId !== 'ALL') {
+          empParams.branch = branchId;
+        }
+        calls.push(employeeApi.getEmployees(empParams));
       }
       const results = await Promise.allSettled(calls);
 
@@ -278,6 +284,15 @@ export const LeavesHolidays = () => {
     loadMyLeaves();
     loadMyBalance();
     if (canApprove) loadPending();
+
+    const handleContextChange = () => {
+      loadMasters();
+      loadMyLeaves();
+      loadMyBalance();
+      if (canApprove) loadPending();
+    };
+    window.addEventListener('tie:context-changed', handleContextChange);
+    return () => window.removeEventListener('tie:context-changed', handleContextChange);
   }, [loadMasters, loadMyLeaves, loadMyBalance, loadPending, canApprove]);
 
   // Tab switch effect: dynamically refresh tab data

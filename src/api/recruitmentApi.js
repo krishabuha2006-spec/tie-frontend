@@ -3,8 +3,15 @@ import apiClient from './client';
 export const recruitmentApi = {
   // Step 1: Letter Templates (Pure API)
   getLetterTemplates: async (params) => {
-    const res = await apiClient.get('/letter-templates', { params });
-    return res.data;
+    try {
+      const res = await apiClient.get('/letter-templates', { params });
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 403 || err.response?.status === 404) {
+        return { success: true, data: [], templates: [] };
+      }
+      throw err;
+    }
   },
   getLetterTemplateById: async (id) => {
     const res = await apiClient.get(`/letter-templates/${id}`);
@@ -41,8 +48,15 @@ export const recruitmentApi = {
 
   // Step 2: Job Openings (Pure API)
   getJobOpenings: async (params) => {
-    const res = await apiClient.get('/job-openings', { params });
-    return res.data;
+    try {
+      const res = await apiClient.get('/job-openings', { params });
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 403 || err.response?.status === 401) {
+        return { success: true, data: [], jobs: [], jobOpenings: [], total: 0 };
+      }
+      throw err;
+    }
   },
   getJobOpeningById: async (id) => {
     const res = await apiClient.get(`/job-openings/${id}`);
@@ -98,8 +112,15 @@ export const recruitmentApi = {
 
   // Step 3: Candidates
   getCandidates: async (params) => {
-    const res = await apiClient.get('/candidates', { params });
-    return res.data;
+    try {
+      const res = await apiClient.get('/candidates', { params });
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 403 || err.response?.status === 401) {
+        return { success: true, data: [], candidates: [], total: 0 };
+      }
+      throw err;
+    }
   },
   getCandidateById: async (id) => {
     const res = await apiClient.get(`/candidates/${id}`);
@@ -127,7 +148,7 @@ export const recruitmentApi = {
     }
 
     const payload = {
-      jobOpening,
+      jobOpening: data.jobOpening || data.jobId || data.job || undefined,
       fullName,
       mobileNumber,
       email,

@@ -46,9 +46,10 @@ import Badge from '../../components/common/Badge';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { attendanceNav } from '../../routes/moduleNavConfig';
 import { extractApiData } from '../../utils/apiUtils';
+import { formatDateOnlyIST, formatTimeIST, getErrorMessage } from '../../utils/formatters';
 
 export const FieldAttendance = () => {
-  const { isSuperAdmin, isHrAdmin, user } = useAuth();
+  const { isSuperAdmin, isHrAdmin, user, branch: globalBranch } = useAuth();
   const { showToast } = useToast();
   const canCorrect = Boolean(
     isSuperAdmin ||
@@ -236,9 +237,14 @@ export const FieldAttendance = () => {
   // Load Masters (Branches, Employees, Projects with Sites, and Tasks)
   const loadMasters = async () => {
     try {
+      const empParams = { limit: 500 };
+      const branchId = globalBranch?._id || globalBranch?.id;
+      if (branchId && branchId !== 'ALL') {
+        empParams.branch = branchId;
+      }
       const [bRes, eRes, pRes, tRes] = await Promise.allSettled([
         masterApi.getBranches(),
-        employeeApi.getEmployees({ limit: 500 }),
+        employeeApi.getEmployees(empParams),
         projectTaskApi.getProjects(),
         projectTaskApi.getTasks(),
       ]);
@@ -359,7 +365,8 @@ export const FieldAttendance = () => {
     try {
       const params = {};
       if (filters.date) params.date = filters.date;
-      if (filters.branch) params.branch = filters.branch;
+      const activeBr = (globalBranch?._id && globalBranch._id !== 'ALL') ? globalBranch._id : filters.branch;
+      if (activeBr) params.branch = activeBr;
       if (filters.attendanceStatus) params.attendanceStatus = filters.attendanceStatus;
       if (filters.isOpen !== '') params.isOpen = filters.isOpen === 'true';
 
@@ -407,7 +414,16 @@ export const FieldAttendance = () => {
 
   useEffect(() => {
     loadMasters();
-  }, []);
+  }, [globalBranch]);
+
+  useEffect(() => {
+    const handleContextChange = () => {
+      loadMasters();
+      if (activeTab === 'records') loadRecords();
+    };
+    window.addEventListener('tie:context-changed', handleContextChange);
+    return () => window.removeEventListener('tie:context-changed', handleContextChange);
+  }, [globalBranch, activeTab]);
 
   useEffect(() => {
     if (activeTab === 'records') {

@@ -389,10 +389,18 @@ svg.lucide, .lucide {
 /* --------------------------------------------------------------------------
    BREAKPOINT: TABLET LANDSCAPE & PORTRAIT (768px - 1024px)
    -------------------------------------------------------------------------- */
-@media (max-width: 1024px) {
+@media (min-width: 769px) and (max-width: 1024px) {
   .header-menu-btn {
-    display: inline-flex;
+    display: inline-flex !important;
   }
+}
+@media (max-width: 768px) {
+  .header-menu-btn {
+    display: none !important;
+  }
+}
+
+@media (max-width: 1024px) {
 
   .grid-4,
   .form-grid-4,

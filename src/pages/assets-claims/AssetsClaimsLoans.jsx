@@ -48,9 +48,10 @@ import Input from '../../components/common/Input';
 import Select from '../../components/common/Select';
 import Badge from '../../components/common/Badge';
 import { extractApiData } from '../../utils/apiUtils';
+import { formatDateOnlyIST, formatMoneyINR, getErrorMessage } from '../../utils/formatters';
 
 export const AssetsClaimsLoans = () => {
-  const { user, isSuperAdmin, isHrAdmin } = useAuth();
+  const { user, isSuperAdmin, isHrAdmin, branch: globalBranch } = useAuth();
   const canManage = isSuperAdmin || isHrAdmin;
   const { showToast } = useToast();
   const confirm = useConfirm();
@@ -284,7 +285,19 @@ export const AssetsClaimsLoans = () => {
   // -------------------------------------------------------------------------
   useEffect(() => {
     loadMasters();
-  }, []);
+  }, [globalBranch]);
+
+  useEffect(() => {
+    const handleContextChange = () => {
+      loadMasters();
+      if (activeTab === 'assets') loadAssets();
+      else if (activeTab === 'claims') loadClaims();
+      else if (activeTab === 'categories') loadCategories();
+      else if (activeTab === 'loans') loadLoans();
+    };
+    window.addEventListener('tie:context-changed', handleContextChange);
+    return () => window.removeEventListener('tie:context-changed', handleContextChange);
+  }, [globalBranch, activeTab]);
 
   useEffect(() => {
     if (activeTab === 'assets') loadAssets();
@@ -305,8 +318,13 @@ export const AssetsClaimsLoans = () => {
 
   const loadMasters = async () => {
     try {
+      const empParams = { limit: 200 };
+      const branchId = globalBranch?._id || globalBranch?.id;
+      if (branchId && branchId !== 'ALL') {
+        empParams.branch = branchId;
+      }
       const [eRes, cRes, bRes, catRes, ltRes] = await Promise.all([
-        employeeApi.getEmployees({ limit: 200 }).catch(() => ({ data: [] })),
+        employeeApi.getEmployees(empParams).catch(() => ({ data: [] })),
         masterApi.getCompanies().catch(() => ({ data: [] })),
         masterApi.getBranches().catch(() => ({ data: [] })),
         assetsLoansApi.getReimbursementCategories().catch(() => ({ data: [] })),

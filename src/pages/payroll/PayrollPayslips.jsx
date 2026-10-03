@@ -10,7 +10,8 @@ import {
   DollarSign, FileText, CheckCircle2, Clock, Plus, Edit2,
   Download, Printer, Eye, Users, Calendar, AlertCircle, Loader2,
   Building2, Trash2, Search, Sliders, Briefcase, FileSpreadsheet, Check,
-  Send, ShieldCheck, Layers, RotateCcw, CreditCard, ChevronRight, CheckCircle
+  Send, ShieldCheck, Layers, RotateCcw, CreditCard, ChevronRight, CheckCircle,
+  AlertTriangle, ArrowRight
 } from 'lucide-react';
 import Modal from '../../components/common/Modal';
 import Button from '../../components/common/Button';
@@ -18,6 +19,7 @@ import Badge from '../../components/common/Badge';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { payrollNav } from '../../routes/moduleNavConfig';
 import { extractApiData } from '../../utils/apiUtils';
+import { formatDateOnlyIST, formatTimeIST, formatMoneyINR, getErrorMessage } from '../../utils/formatters';
 import PayrollApprovalsTab from './PayrollApprovalsTab';
 import PayslipTemplatesTab from './PayslipTemplatesTab';
 import SalaryPaymentsTab from './SalaryPaymentsTab';
@@ -30,7 +32,7 @@ const MONTH_NAMES = [
 export const PayrollPayslips = ({ defaultTab = 'runs' }) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, isSuperAdmin, isHrAdmin, isDirector, isAccountant, isBranchManager, hasPermission } = useAuth();
+  const { user, isSuperAdmin, isHrAdmin, isDirector, isAccountant, isBranchManager, hasPermission, branch: globalBranch } = useAuth();
   const { showToast } = useToast();
   const confirm = useConfirm();
   const isManagerOrAdmin =
@@ -232,7 +234,12 @@ export const PayrollPayslips = ({ defaultTab = 'runs' }) => {
   const loadPayrollRuns = useCallback(async () => {
     setLoadingRuns(true);
     try {
-      const res = await payrollApi.getPayrollRuns();
+      const params = {};
+      const branchId = globalBranch?._id || globalBranch?.id;
+      if (branchId && branchId !== 'ALL') {
+        params.branch = branchId;
+      }
+      const res = await payrollApi.getPayrollRuns(params);
       const list = toList(res);
       setRuns(list);
       runsRef.current = list;
@@ -250,7 +257,7 @@ export const PayrollPayslips = ({ defaultTab = 'runs' }) => {
     } finally {
       setLoadingRuns(false);
     }
-  }, []);
+  }, [globalBranch]);
 
   // Load line items when a run is selected
   useEffect(() => {
@@ -810,6 +817,14 @@ export const PayrollPayslips = ({ defaultTab = 'runs' }) => {
     loadPayrollRuns();
     loadPayslips();
     loadSalaryStructures();
+
+    const handleContextChange = () => {
+      loadPayrollRuns();
+      loadPayslips();
+      loadSalaryStructures();
+    };
+    window.addEventListener('tie:context-changed', handleContextChange);
+    return () => window.removeEventListener('tie:context-changed', handleContextChange);
   }, [loadPayrollRuns, loadPayslips, loadSalaryStructures]);
 
   // Tab change handler
@@ -1308,13 +1323,13 @@ export const PayrollPayslips = ({ defaultTab = 'runs' }) => {
                       textAlign: 'left',
                       marginTop: 6
                     }}>
-                      <div style={{ fontWeight: 700, marginBottom: 4 }}>
-                        ⚠️ Salary Structure Missing (Structure 0)
+                      <div style={{ fontWeight: 700, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <AlertTriangle size={15} color="#d97706" /> Salary Structure Missing (Structure 0)
                       </div>
                       <div style={{ fontSize: '0.8rem', lineHeight: 1.5 }}>
                         Backend calculation require an active <strong>Salary Structure</strong> for employees. Since no structure exists under the <strong>Salary Structures</strong> tab, gross salary is ₹0.
-                        <div style={{ marginTop: 8 }}>
-                          👉 Go to the <strong>Salary Structures</strong> tab above, create a structure (Basic + HRA + Allowances), ensure employees have salary structures assigned, then click <strong>&ldquo;Recalculate&rdquo;</strong>.
+                        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <ArrowRight size={13} color="var(--primary)" /> Go to the <strong>Salary Structures</strong> tab above, create a structure (Basic + HRA + Allowances), ensure employees have salary structures assigned, then click <strong>&ldquo;Recalculate&rdquo;</strong>.
                         </div>
                       </div>
                     </div>

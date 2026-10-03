@@ -5,6 +5,7 @@ import masterApi from '../../api/masterApi';
 import { useToast } from '../../context/ToastContext';
 import { useConfirm } from '../../context/ConfirmContext';
 import { validateEmail, validatePhone } from '../../utils/validation';
+import { useAuth } from '../../context/AuthContext';
 import {
   Plus,
   UserPlus,
@@ -38,6 +39,10 @@ export const Candidates = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const confirm = useConfirm();
   const { showToast } = useToast();
+  const { branch: globalBranch } = useAuth();
+
+  const activeBranchId = globalBranch?._id || globalBranch?.id;
+  const isAllBranches = !activeBranchId || activeBranchId === 'ALL';
 
   const filterJobId = searchParams.get('jobId') || '';
 
@@ -132,7 +137,10 @@ export const Candidates = () => {
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+    const handleContextChange = () => loadData();
+    window.addEventListener('tie:context-changed', handleContextChange);
+    return () => window.removeEventListener('tie:context-changed', handleContextChange);
+  }, [loadData, globalBranch]);
 
   // View Candidate Details (GET /candidates/:id)
   const handleViewDetails = async (cand) => {
@@ -353,25 +361,6 @@ export const Candidates = () => {
     }
   };
 
-  // Quick Pipeline Stats
-  const stats = useMemo(() => {
-    const total = candidates.length;
-    const inPipeline = candidates.filter((c) => {
-      const st = c.currentStage || c.stage || 'APPLIED';
-      return ['APPLIED', 'SCREENING', 'INTERVIEW'].includes(st);
-    }).length;
-    const offers = candidates.filter((c) => {
-      const st = c.currentStage || c.stage || 'APPLIED';
-      return ['OFFER', 'OFFER_ACCEPTED'].includes(st);
-    }).length;
-    const converted = candidates.filter((c) => {
-      const st = c.currentStage || c.stage || 'APPLIED';
-      return c.isFrozen || ['CONVERTED', 'HIRED', 'ONBOARDED'].includes(st);
-    }).length;
-
-    return { total, inPipeline, offers, converted };
-  }, [candidates]);
-
   // Stage Badge Visuals
   const getStageVariant = (st) => {
     switch (st) {
@@ -398,6 +387,19 @@ export const Candidates = () => {
   // Filtered List
   const filteredCandidates = useMemo(() => {
     return candidates.filter((c) => {
+      // Branch Filter
+      if (!isAllBranches && activeBranchId) {
+        const cBranchId = c.jobOpening?.branch?._id || c.jobOpening?.branch?.id || c.jobOpening?.branch || c.branch?._id || c.branch?.id || (typeof c.branch === 'string' ? c.branch : null);
+        const cBranchName = (c.jobOpening?.branch?.name || c.branch?.name || '').toLowerCase().trim();
+        const activeBranchName = (globalBranch?.name || '').toLowerCase().trim();
+
+        if (cBranchId) {
+          if (String(cBranchId) !== String(activeBranchId)) return false;
+        } else if (cBranchName && activeBranchName) {
+          if (cBranchName !== activeBranchName) return false;
+        }
+      }
+
       // Job Filter
       if (selectedJobFilter) {
         const cJobId = c.jobOpening?._id || c.jobOpening?.id || (typeof c.jobOpening === 'string' ? c.jobOpening : null);
@@ -427,7 +429,26 @@ export const Candidates = () => {
 
       return true;
     });
-  }, [candidates, selectedJobFilter, stageFilter, search]);
+  }, [candidates, selectedJobFilter, stageFilter, search, isAllBranches, activeBranchId, globalBranch]);
+
+  // Quick Pipeline Stats (computed on filtered list)
+  const stats = useMemo(() => {
+    const total = filteredCandidates.length;
+    const inPipeline = filteredCandidates.filter((c) => {
+      const st = c.currentStage || c.stage || 'APPLIED';
+      return ['APPLIED', 'SCREENING', 'INTERVIEW'].includes(st);
+    }).length;
+    const offers = filteredCandidates.filter((c) => {
+      const st = c.currentStage || c.stage || 'APPLIED';
+      return ['OFFER', 'OFFER_ACCEPTED'].includes(st);
+    }).length;
+    const converted = filteredCandidates.filter((c) => {
+      const st = c.currentStage || c.stage || 'APPLIED';
+      return c.isFrozen || ['CONVERTED', 'HIRED', 'ONBOARDED'].includes(st);
+    }).length;
+
+    return { total, inPipeline, offers, converted };
+  }, [filteredCandidates]);
 
   const currentFilteredJob = selectedJobFilter ? jobOpenings.find((j) => j._id === selectedJobFilter) : null;
 

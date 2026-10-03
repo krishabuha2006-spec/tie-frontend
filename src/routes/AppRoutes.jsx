@@ -36,12 +36,10 @@ import JobOpenings from '../pages/recruitment/JobOpenings';
 import Candidates from '../pages/recruitment/Candidates';
 import LetterTemplates from '../pages/recruitment/LetterTemplates';
 
-// Operations
 import ProjectsSites from '../pages/operations/ProjectsSites';
 import SiteLogs from '../pages/operations/SiteLogs';
 import Tasks from '../pages/operations/Tasks';
 
-// Leaves, Payroll, Assets & Performance
 import LeavesHolidays from '../pages/leaves/LeavesHolidays';
 import HolidayManagement from '../pages/holidays/HolidayManagement';
 import AttendanceCalendar from '../pages/calendar/AttendanceCalendar';
@@ -49,7 +47,6 @@ import PayrollPayslips from '../pages/payroll/PayrollPayslips';
 import AssetsClaimsLoans from '../pages/assets-claims/AssetsClaimsLoans';
 import PerformanceReviews from '../pages/performance/PerformanceReviews';
 
-// Lifecycle Transitions, Reports & Analytics, System Integration
 import LifecycleEvents from '../pages/lifecycle/LifecycleEvents';
 import ReportsAnalytics from '../pages/reports/ReportsAnalytics';
 import IntegrationCenter from '../pages/integration/IntegrationCenter';
@@ -86,7 +83,6 @@ export const AppRoutes = () => {
         <Route path="hrm/recruitment" element={<Navigate to="/recruitment/jobs" replace />} />
         <Route path="hrm/assets-claims" element={<Navigate to="/assets-claims" replace />} />
 
-        {/* Backend Menu Aliases (/hrms/*, /admin/*, /project/*, /accounting) */}
         <Route path="hrms" element={<Navigate to="/employees" replace />} />
         <Route path="hrms/employees" element={<Navigate to="/employees" replace />} />
         <Route path="hrms/attendance" element={<Navigate to="/attendance" replace />} />

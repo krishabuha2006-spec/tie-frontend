@@ -3,7 +3,7 @@ import authApi from '../api/authApi';
 import userApi from '../api/userApi';
 import masterApi from '../api/masterApi';
 import employeeApi from '../api/employeeApi';
-import { ensureValidToken } from '../api/client';
+import { ensureValidToken, clearAuthSession } from '../api/client';
 import { saveRegisteredSelfie } from '../utils/faceComparison';
 import { extractApiData } from '../utils/apiUtils';
 
@@ -243,6 +243,42 @@ export const AuthProvider = ({ children }) => {
     if (u.title) return String(u.title).toLowerCase();
     return '';
   };
+
+  // ─── Computed RBAC Flags (available early for context scoping) ────────────
+  const roleId = getRoleIdentifier(user);
+  const roleIds = getRoleIdentifiers(user);
+  const desigId = getDesignationIdentifier(user);
+
+  const isSuperAdmin =
+    (Array.isArray(user?.roles) ? user.roles : []).some((r) => r?.isSuperAdmin === true) ||
+    user?.role?.isSuperAdmin === true ||
+    user?.isSuperAdmin === true ||
+    roleIds.some((rid) => rid.includes('super_admin') || rid.includes('super admin'));
+
+  const isDirector = roleIds.some((rid) => rid === 'director' || rid.includes('director')) || desigId.includes('director');
+
+  const isHrAdmin =
+    roleIds.some((rid) => rid === 'hr_admin' || rid.includes('hr_admin') || rid.includes('hr admin') || rid.includes('human resource')) ||
+    desigId.includes('hr') || desigId.includes('human resource');
+
+  const isBranchManager =
+    roleIds.some((rid) => rid === 'branch_manager' || rid.includes('branch_manager') || rid.includes('branch manager')) ||
+    desigId.includes('branch manager');
+
+  const isProjectExecutive =
+    roleIds.some((rid) => rid === 'project_executive' || rid.includes('project_executive') || rid.includes('project executive')) ||
+    desigId.includes('project executive');
+
+  const isAccountant =
+    roleIds.some((rid) => rid === 'accountant' || rid === 'finance_head' || rid.includes('account') || rid.includes('finance')) ||
+    desigId.includes('account') || desigId.includes('finance');
+
+  const isEmployee = !isSuperAdmin && !isDirector && !isHrAdmin && !isBranchManager && !isProjectExecutive && !isAccountant;
+
+  const isFieldStaff =
+    String(user?.employee?.employmentInfo?.workType || user?.employee?.workType || user?.workType || '').toUpperCase().includes('FIELD') ||
+    String(user?.employee?.employmentInfo?.workType || user?.employee?.workType || user?.workType || '').toUpperCase().includes('SITE') ||
+    roleIds.some((rid) => rid.includes('field') || rid.includes('site'));
 
   const rolesLoadedRef = useRef(false);
 
@@ -562,6 +598,17 @@ export const AuthProvider = ({ children }) => {
       const activeCompanyId = localStorage.getItem('tie_active_company_id');
       const activeBranchId = localStorage.getItem('tie_active_branch_id');
       if (token) {
+        // Validate or refresh token before hydrating session
+        const validToken = await ensureValidToken();
+        if (!validToken) {
+          localStorage.removeItem('tie_access_token');
+          localStorage.removeItem('tie_refresh_token');
+          localStorage.removeItem('tie_user');
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+
         if (savedUser) {
           try {
             const parsed = JSON.parse(savedUser);
@@ -572,17 +619,25 @@ export const AuthProvider = ({ children }) => {
               if (activeComp) parsed.company = activeComp;
             }
             if (activeBranchId) {
-              const savedBranches = localStorage.getItem('tie_all_branches');
-              const branchList = savedBranches ? JSON.parse(savedBranches) : [];
-              const activeBr = branchList.find((b) => String(b._id || b.id) === String(activeBranchId));
-              if (activeBr) parsed.branch = activeBr;
+              if (activeBranchId === 'ALL') {
+                const allBr = { _id: 'ALL', id: 'ALL', name: 'All Branches' };
+                parsed.branch = allBr;
+                setActiveBranchState(allBr);
+              } else {
+                const savedBranches = localStorage.getItem('tie_all_branches');
+                const branchList = savedBranches ? JSON.parse(savedBranches) : [];
+                const activeBr = branchList.find((b) => String(b._id || b.id) === String(activeBranchId));
+                if (activeBr) {
+                  parsed.branch = activeBr;
+                  setActiveBranchState(activeBr);
+                }
+              }
             }
             setUser(parsed);
           } catch (e) {
             console.error('Failed to parse cached user:', e);
           }
         }
-        await ensureValidToken();
         await fetchUserProfile();
         const freshUserStr = localStorage.getItem('tie_user');
         let isAdmin = false;
@@ -602,6 +657,88 @@ export const AuthProvider = ({ children }) => {
     };
     initializeAuth();
   }, [fetchUserProfile, refreshCompanies, refreshBranches]);
+
+  // 1. Session Expiration Listener: Immediately auto-refresh and redirect to login
+  useEffect(() => {
+    const handleSessionExpired = (e) => {
+      setUser(null);
+      const msg = e.detail?.message || 'You were logged in from another device.';
+      try {
+        sessionStorage.setItem('tie_session_expired_notice', msg);
+      } catch {}
+
+      // Automatically refresh and navigate to login screen immediately
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+        window.location.href = '/login?expired=1';
+      }
+    };
+    window.addEventListener('tie:session-expired', handleSessionExpired);
+    return () => window.removeEventListener('tie:session-expired', handleSessionExpired);
+  }, []);
+
+  // 2. Proactive Session Heartbeat & Concurrent Login Monitor:
+  // Detects if user logged in on another device and auto-refreshes/logs out immediately
+  useEffect(() => {
+    if (!user) return;
+
+    let isChecking = false;
+    const checkActiveSession = async () => {
+      if (isChecking) return;
+      const token = localStorage.getItem('tie_access_token');
+      if (!token) return;
+
+      isChecking = true;
+      try {
+        // Quick verify session validity against backend
+        await authApi.getProfile();
+      } catch (err) {
+        const status = err.response?.status;
+        const msg = String(err.response?.data?.message || err.message || '');
+        const code = String(err.response?.data?.code || '');
+        if (
+          status === 401 ||
+          code === 'SESSION_EXPIRED' ||
+          msg.toLowerCase().includes('another device') ||
+          msg.toLowerCase().includes('session expired') ||
+          msg.toLowerCase().includes('invalid session')
+        ) {
+          clearAuthSession({
+            reason: 'SESSION_EXPIRED',
+            message: 'You were logged in from another device.',
+          });
+        }
+      } finally {
+        isChecking = false;
+      }
+    };
+
+    // 1. Periodic Heartbeat every 4 seconds for instant logout
+    const intervalId = setInterval(checkActiveSession, 4000);
+
+    // 2. Immediate check on Tab Focus or Window Visibility Change
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        checkActiveSession();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
+    // 3. Cross-Tab Sync (if user logged in on same browser in another tab/window)
+    const handleStorageEvent = (e) => {
+      if (e.key === 'tie_access_token' || e.key === 'tie_session_id') {
+        checkActiveSession();
+      }
+    };
+    window.addEventListener('storage', handleStorageEvent);
+
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      window.removeEventListener('storage', handleStorageEvent);
+    };
+  }, [user]);
 
   useEffect(() => {
     const handlePermissionsUpdated = () => {
@@ -769,20 +906,40 @@ export const AuthProvider = ({ children }) => {
   };
 
   const selectBranch = useCallback((branchId) => {
-    if (!branchId) {
-      setActiveBranchState(null);
-      localStorage.removeItem('tie_active_branch_id');
-      localStorage.removeItem('tie_active_branch');
-      setUser((prev) => {
-        if (!prev) return prev;
-        const updated = { ...prev, branch: null, branchId: undefined };
-        localStorage.setItem('tie_user', JSON.stringify(updated));
-        return updated;
-      });
-      return;
+    // Strict Branch Isolation: Non-Super Admin / Non-Director cannot switch to 'ALL' or other branches
+    if (!isSuperAdmin && !isDirector) {
+      const uBId = String(user?.branch?._id || user?.branch?.id || (typeof user?.branch === 'string' ? user?.branch : ''));
+      if (uBId && String(branchId) !== uBId) {
+        return;
+      }
     }
 
     const currentCompId = user?.company?._id || user?.company?.id || (typeof user?.company === 'string' ? user?.company : '') || localStorage.getItem('tie_active_company_id');
+
+    if (!branchId || branchId === 'ALL') {
+      if (!isSuperAdmin && !isDirector) return;
+
+      const allBranchObj = { _id: 'ALL', id: 'ALL', name: 'All Branches' };
+      setActiveBranchState(allBranchObj);
+      localStorage.setItem('tie_active_branch_id', 'ALL');
+      localStorage.setItem('tie_active_branch', JSON.stringify(allBranchObj));
+      setUser((prev) => {
+        if (!prev) return prev;
+        const updated = { ...prev, branch: allBranchObj, branchId: 'ALL' };
+        localStorage.setItem('tie_user', JSON.stringify(updated));
+        return updated;
+      });
+
+      window.dispatchEvent(new CustomEvent('tie:context-changed', {
+        detail: {
+          companyId: currentCompId,
+          branchId: 'ALL',
+          branch: allBranchObj,
+        }
+      }));
+      return;
+    }
+
     const targetBranch = allBranches.find((b) => String(b._id || b.id) === String(branchId)) || { _id: branchId, name: 'Branch' };
 
     setActiveBranchState(targetBranch);
@@ -802,7 +959,7 @@ export const AuthProvider = ({ children }) => {
         branch: targetBranch,
       }
     }));
-  }, [allBranches, user?.company]);
+  }, [allBranches, user?.company, user?.branch, isSuperAdmin, isDirector]);
 
   const refreshSession = async () => {
     const refreshToken = localStorage.getItem('tie_refresh_token');
@@ -847,42 +1004,7 @@ export const AuthProvider = ({ children }) => {
     return await userApi.changePassword(passwords, userId);
   };
 
-  // ─── Computed RBAC Flags (checked across ALL roles) ───────────────────────
-
-  const roleId = getRoleIdentifier(user);
-  const roleIds = getRoleIdentifiers(user);
-  const desigId = getDesignationIdentifier(user);
-
-  const isSuperAdmin =
-    (Array.isArray(user?.roles) ? user.roles : []).some((r) => r?.isSuperAdmin === true) ||
-    user?.role?.isSuperAdmin === true ||
-    user?.isSuperAdmin === true ||
-    roleIds.some((rid) => rid.includes('super_admin') || rid.includes('super admin'));
-
-  const isDirector = roleIds.some((rid) => rid === 'director' || rid.includes('director')) || desigId.includes('director');
-
-  const isHrAdmin =
-    roleIds.some((rid) => rid === 'hr_admin' || rid.includes('hr_admin') || rid.includes('hr admin') || rid.includes('human resource')) ||
-    desigId.includes('hr') || desigId.includes('human resource');
-
-  const isBranchManager =
-    roleIds.some((rid) => rid === 'branch_manager' || rid.includes('branch_manager') || rid.includes('branch manager')) ||
-    desigId.includes('branch manager');
-
-  const isProjectExecutive =
-    roleIds.some((rid) => rid === 'project_executive' || rid.includes('project_executive') || rid.includes('project executive')) ||
-    desigId.includes('project executive');
-
-  const isAccountant =
-    roleIds.some((rid) => rid === 'accountant' || rid === 'finance_head' || rid.includes('account') || rid.includes('finance')) ||
-    desigId.includes('account') || desigId.includes('finance');
-
-  const isEmployee = !isSuperAdmin && !isDirector && !isHrAdmin && !isBranchManager && !isProjectExecutive && !isAccountant;
-
-  const isFieldStaff =
-    String(user?.employee?.employmentInfo?.workType || user?.employee?.workType || user?.workType || '').toUpperCase().includes('FIELD') ||
-    String(user?.employee?.employmentInfo?.workType || user?.employee?.workType || user?.workType || '').toUpperCase().includes('SITE') ||
-    roleIds.some((rid) => rid.includes('field') || rid.includes('site'));
+  // ─── RBAC Helpers ─────────────────────────────────────────────────────────
 
   const hasRole = useCallback(
     (roles) => {
@@ -945,6 +1067,7 @@ export const AuthProvider = ({ children }) => {
     departments:     { subKeys: ['masters.departments', 'masters', 'administration.systemSettings', 'departments', 'admin'], parentKey: 'masters' },
     designations:    { subKeys: ['masters.designations', 'masters', 'administration.systemSettings', 'designations', 'admin'], parentKey: 'masters' },
     roles:           { subKeys: ['masters.roles', 'masters', 'administration.rolePermissionManagement', 'roles', 'admin.roles'], parentKey: 'masters' },
+    users:           { subKeys: ['masters.users', 'masters.roles', 'masters', 'administration.rolePermissionManagement', 'users', 'admin.users'], parentKey: 'masters' },
     claims:          { subKeys: ['hrm.assets-claims', 'hrms.assetCustody', 'assets-claims', 'claims', 'accounting'], parentKey: 'hrm' },
     assets:          { subKeys: ['hrm.assets-claims', 'hrms.assetCustody', 'hrms.assets', 'assets-claims', 'assets'], parentKey: 'hrm' },
     amc:             { subKeys: ['amc', 'amc.contracts', 'amc.visits', 'amcManagement', 'amcContracts'], parentKey: 'amc' },
@@ -952,7 +1075,7 @@ export const AuthProvider = ({ children }) => {
     hrm:             { isGroup: true, groupChildren: ['recruitment', 'employees', 'attendance', 'calendar', 'leaves', 'holidays', 'payroll', 'assets-claims', 'performance', 'reports'] },
     projectManagement: { isGroup: true, groupChildren: ['projects', 'site-logs', 'tasks'] },
     operations:      { isGroup: true, groupChildren: ['projects', 'site-logs', 'tasks'] },
-    masters:         { isGroup: true, groupChildren: ['companies', 'branches', 'departments', 'designations', 'roles'] },
+    masters:         { isGroup: true, groupChildren: ['companies', 'branches', 'departments', 'designations', 'roles', 'users'] },
     accounting:      { isGroup: true, groupChildren: ['payroll', 'claims'] },
     inventory:       { isGroup: true, groupChildren: ['assets', 'assets-claims'] },
     crm:             { isGroup: true, groupChildren: ['recruitment'] },
@@ -963,7 +1086,7 @@ export const AuthProvider = ({ children }) => {
       if (isSuperAdmin) return true;
       if (!user) return false;
       let perms = getMergedPermissions(user, allRoles);
-      if (!perms || Object.keys(perms).length === 0) return false;
+      const hasConfiguredPerms = perms && typeof perms === 'object' && !Array.isArray(perms) && Object.keys(perms).length > 0;
 
       let mod = permissionKey;
       let act = actionParam || 'view';
@@ -994,7 +1117,8 @@ export const AuthProvider = ({ children }) => {
         });
       }
 
-      if (typeof perms === 'object') {
+      // 1. If explicit permissions are configured in matrix, check them:
+      if (hasConfiguredPerms) {
         if (perms['*'] === true || perms.all === true) return true;
 
         // 1. Direct flat check: perms['employees']
@@ -1004,7 +1128,7 @@ export const AuthProvider = ({ children }) => {
         if (perms[permissionKey] !== undefined && isActionGranted(perms[permissionKey], act)) return true;
 
         // 3. Check group dot-notation keys
-        for (const prefix of ['hrm', 'operations', 'masters', 'hrms', 'admin', 'project']) {
+        for (const prefix of ['hrm', 'operations', 'masters', 'hrms', 'admin', 'project', 'projectManagement']) {
           const dk = `${prefix}.${mod}`;
           if (perms[dk] !== undefined && isActionGranted(perms[dk], act)) return true;
         }
@@ -1016,10 +1140,50 @@ export const AuthProvider = ({ children }) => {
             if (perms[sk] !== undefined && isActionGranted(perms[sk], act)) return true;
           }
         }
+        return false;
       }
+
+      // 2. Fallback for unconfigured roles (matrix ma permission nathi to intelligent role-based fallback)
+      if (isDirector) return true;
+      if (isHrAdmin) {
+        const hrmSubmods = ['recruitment', 'employees', 'attendance', 'calendar', 'leaves', 'holidays', 'payroll', 'assets-claims', 'performance', 'reports'];
+        if (hrmSubmods.includes(mod) || mod === 'hrm') return true;
+      }
+      if (isBranchManager) {
+        const bmSubmods = ['employees', 'attendance', 'calendar', 'leaves', 'holidays', 'projects', 'site-logs', 'tasks', 'reports'];
+        if (bmSubmods.includes(mod) || ['hrm', 'operations', 'projectManagement'].includes(mod)) return true;
+      }
+      if (isProjectExecutive) {
+        const peSubmods = ['projects', 'site-logs', 'tasks', 'attendance', 'calendar', 'leaves', 'holidays'];
+        if (peSubmods.includes(mod) || ['operations', 'projectManagement'].includes(mod)) return true;
+      }
+      if (isAccountant) {
+        const accSubmods = ['payroll', 'assets-claims', 'assets', 'claims', 'reports', 'attendance', 'calendar', 'leaves', 'holidays'];
+        if (accSubmods.includes(mod) || ['accounting', 'hrm'].includes(mod)) return true;
+      }
+      if (isEmployee) {
+        if (isFieldStaff) {
+          const fsSubmods = ['attendance', 'calendar', 'leaves', 'holidays', 'projects', 'site-logs', 'tasks'];
+          if (fsSubmods.includes(mod) || ['operations', 'projectManagement'].includes(mod)) {
+            if (['view', 'create', 'download', 'print'].includes(act)) return true;
+            if (['tasks', 'site-logs'].includes(mod) && (act === 'edit' || act === 'uploadDocuments')) return true;
+            if (act === 'view') return true;
+          }
+          if (mod === 'payroll' && (act === 'view' || act === 'download' || act === 'print')) return true; // payslips
+        } else {
+          // Standard Office Employee
+          const empSubmods = ['attendance', 'calendar', 'leaves', 'holidays'];
+          if (empSubmods.includes(mod)) {
+            if (['view', 'create', 'download', 'print'].includes(act)) return true;
+            if (act === 'view') return true;
+          }
+          if (mod === 'payroll' && (act === 'view' || act === 'download' || act === 'print')) return true; // payslips
+        }
+      }
+
       return false;
     },
-    [isSuperAdmin, user, allRoles]
+    [isSuperAdmin, user, allRoles, isDirector, isHrAdmin, isBranchManager, isProjectExecutive, isAccountant, isEmployee, isFieldStaff]
   );
 
   const canAccessModule = useCallback(
@@ -1089,15 +1253,15 @@ export const AuthProvider = ({ children }) => {
 
       // 3. Fallback for unconfigured/legacy roles without explicit permissions matrix
       if (isDirector) return true;
-      if (isHrAdmin) return ['hrm', 'employees', 'attendance', 'leaves', 'payroll', 'recruitment', 'performance', 'reports', 'assets-claims'].includes(moduleKey);
-      if (isBranchManager) return ['hrm', 'attendance', 'leaves', 'operations', 'projects', 'tasks', 'employees'].includes(moduleKey);
-      if (isProjectExecutive) return ['operations', 'projects', 'site-logs', 'tasks', 'attendance', 'leaves'].includes(moduleKey);
-      if (isAccountant) return ['payroll', 'assets-claims', 'assets', 'claims', 'reports', 'attendance', 'leaves', 'hrm'].includes(moduleKey);
+      if (isHrAdmin) return ['hrm', 'employees', 'attendance', 'calendar', 'leaves', 'holidays', 'payroll', 'recruitment', 'performance', 'reports', 'assets-claims'].includes(moduleKey);
+      if (isBranchManager) return ['hrm', 'attendance', 'calendar', 'leaves', 'holidays', 'operations', 'projects', 'site-logs', 'tasks', 'employees', 'projectManagement', 'reports'].includes(moduleKey);
+      if (isProjectExecutive) return ['operations', 'projects', 'site-logs', 'tasks', 'attendance', 'calendar', 'leaves', 'holidays', 'projectManagement'].includes(moduleKey);
+      if (isAccountant) return ['payroll', 'assets-claims', 'assets', 'claims', 'reports', 'attendance', 'calendar', 'leaves', 'holidays', 'hrm', 'accounting'].includes(moduleKey);
       if (isEmployee) {
         if (isFieldStaff) {
-          return ['attendance', 'leaves', 'operations', 'site-logs', 'tasks'].includes(moduleKey);
+          return ['attendance', 'calendar', 'leaves', 'holidays', 'operations', 'projects', 'site-logs', 'tasks', 'projectManagement', 'payroll'].includes(moduleKey);
         }
-        return ['attendance', 'leaves'].includes(moduleKey);
+        return ['attendance', 'calendar', 'leaves', 'holidays', 'payroll'].includes(moduleKey);
       }
       return false;
     },
@@ -1144,6 +1308,20 @@ export const AuthProvider = ({ children }) => {
   }, [user?.company]);
 
   const accessibleBranches = useMemo(() => {
+    // Strict Multi-Branch Isolation:
+    // If NOT Super Admin and NOT Director, user is restricted ONLY to their assigned branch.
+    if (!isSuperAdmin && !isDirector) {
+      const uBranch = user?.branch;
+      if (uBranch) {
+        const uBranchId = String(uBranch._id || uBranch.id || uBranch);
+        const match = allBranches.find((b) => String(b._id || b.id) === uBranchId || b.name === uBranchId);
+        if (match) return [match];
+        if (typeof uBranch === 'object' && uBranch.name) return [uBranch];
+        return [{ _id: uBranchId, id: uBranchId, name: 'Assigned Branch' }];
+      }
+      return [];
+    }
+
     if (!activeCompanyId) return allBranches;
     const filtered = allBranches.filter((b) => {
       const bComp = b.company?._id || b.company?.id || (typeof b.company === 'string' ? b.company : '');
@@ -1156,14 +1334,38 @@ export const AuthProvider = ({ children }) => {
       }
     }
     return filtered;
-  }, [allBranches, activeCompanyId, activeBranchState]);
+  }, [allBranches, activeCompanyId, activeBranchState, isSuperAdmin, isDirector, user?.branch]);
 
   const branch = useMemo(() => {
+    // Non-Super Admin / Non-Director is strictly locked to their assigned branch:
+    if (!isSuperAdmin && !isDirector) {
+      const uBranch = user?.branch;
+      if (uBranch) {
+        const uBranchId = String(uBranch._id || uBranch.id || uBranch);
+        const match = allBranches.find((b) => String(b._id || b.id) === uBranchId || b.name === uBranchId);
+        if (match) return match;
+        if (typeof uBranch === 'object' && uBranch.name) return uBranch;
+        return { _id: uBranchId, id: uBranchId, name: 'Assigned Branch' };
+      }
+      return null;
+    }
+
     if (activeBranchState) {
+      if (activeBranchState._id === 'ALL' || activeBranchState.id === 'ALL') {
+        return activeBranchState;
+      }
       const bComp = activeBranchState.company?._id || activeBranchState.company?.id || (typeof activeBranchState.company === 'string' ? activeBranchState.company : '');
       if (!bComp || !activeCompanyId || String(bComp) === String(activeCompanyId)) {
         return activeBranchState;
       }
+    }
+    const savedActiveBranchId = localStorage.getItem('tie_active_branch_id');
+    if (savedActiveBranchId === 'ALL') {
+      return { _id: 'ALL', id: 'ALL', name: 'All Branches' };
+    }
+    if (savedActiveBranchId && allBranches.length > 0) {
+      const match = allBranches.find((b) => String(b._id || b.id) === String(savedActiveBranchId));
+      if (match) return match;
     }
     if (accessibleBranches.length > 0) {
       return accessibleBranches[0];
@@ -1176,7 +1378,7 @@ export const AuthProvider = ({ children }) => {
       }
     }
     return null;
-  }, [activeBranchState, accessibleBranches, activeCompanyId, user?.branch]);
+  }, [activeBranchState, accessibleBranches, activeCompanyId, user?.branch, allBranches, isSuperAdmin, isDirector]);
 
   const company = useMemo(() => {
     if (user?.company && typeof user.company === 'object') return user.company;

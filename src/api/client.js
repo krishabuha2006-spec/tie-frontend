@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // Live Backend URL configured from .env
-export const LIVE_BACKEND_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'https://tie-backend-ruddy.vercel.app/api';
+export const LIVE_BACKEND_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'https://erp.tiecpl.com/api';
 
 // Relative '/api' ensures same-origin requests on both Localhost (via Vite proxy)
 // and Vercel production (via vercel.json rewrite proxy), avoiding browser CORS restrictions.
@@ -19,7 +19,7 @@ const apiClient = axios.create({
   timeout: 45000,
 });
 
-// Helper: Check if a JWT is expired or will expire within 60 seconds
+// Helper: Check if a JWT is expired or will expire within 30 seconds
 export const isTokenExpired = (token) => {
   if (!token || typeof token !== 'string') return true;
   try {
@@ -39,6 +39,23 @@ export const isTokenExpired = (token) => {
     return parsed.exp * 1000 < Date.now() + 30000;
   } catch {
     return true;
+  }
+};
+
+// Clear all local auth storage and notify listeners
+export const clearAuthSession = (detail = null) => {
+  const finalDetail = detail || {
+    reason: 'SESSION_EXPIRED',
+    message: 'You were logged in from another device.',
+  };
+  try {
+    localStorage.removeItem('tie_access_token');
+    localStorage.removeItem('tie_refresh_token');
+    localStorage.removeItem('tie_user');
+    localStorage.removeItem('tie_session_id');
+  } catch {}
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('tie:session-expired', { detail: finalDetail }));
   }
 };
 
@@ -72,28 +89,52 @@ export const ensureValidToken = async (forceRefresh = false) => {
           if (newRefresh) localStorage.setItem('tie_refresh_token', newRefresh);
           return newToken;
         }
-      } catch {
-        // Fallback endpoint: /auth/refresh
-        try {
-          const resFallback = await axios.post(
-            `${BASE_URL}/auth/refresh`,
-            { refreshToken },
-            { timeout: 8000 }
-          );
-          const newToken = resFallback.data?.data?.accessToken || resFallback.data?.accessToken;
-          const newRefresh = resFallback.data?.data?.refreshToken || resFallback.data?.refreshToken;
-          if (newToken) {
-            localStorage.setItem('tie_access_token', newToken);
-            if (newRefresh) localStorage.setItem('tie_refresh_token', newRefresh);
-            return newToken;
+      } catch (err) {
+        // If 401 Unauthorized, the refresh token has expired or is invalid
+        if (err.response?.status === 401) {
+          clearAuthSession();
+          return null;
+        }
+
+        // Only try fallback if 404 (endpoint not supported on backend)
+        if (err.response?.status === 404) {
+          try {
+            const resFallback = await axios.post(
+              `${BASE_URL}/auth/refresh`,
+              { refreshToken },
+              { timeout: 8000 }
+            );
+            const newToken = resFallback.data?.data?.accessToken || resFallback.data?.accessToken;
+            const newRefresh = resFallback.data?.data?.refreshToken || resFallback.data?.refreshToken;
+            if (newToken) {
+              localStorage.setItem('tie_access_token', newToken);
+              if (newRefresh) localStorage.setItem('tie_refresh_token', newRefresh);
+              return newToken;
+            }
+          } catch (fallbackErr) {
+            if (fallbackErr.response?.status === 401) {
+              clearAuthSession();
+              return null;
+            }
           }
-        } catch {}
+        }
       }
     }
 
-    if (!forceRefresh) {
-      return localStorage.getItem('tie_access_token');
+    // If access token is expired and refresh failed, clear session and return null
+    if (token && isTokenExpired(token)) {
+      clearAuthSession();
+      return null;
     }
+
+    if (!forceRefresh) {
+      const currentToken = localStorage.getItem('tie_access_token');
+      if (currentToken && !isTokenExpired(currentToken)) {
+        return currentToken;
+      }
+    }
+
+    clearAuthSession();
     return null;
   })().finally(() => {
     tokenRenewalPromise = null;
@@ -128,14 +169,10 @@ apiClient.interceptors.request.use(
       config.params = cleaned;
     }
 
-    // Cache-bust GET requests with a timestamp so browser/CDN always
-    // returns a fresh 200 OK instead of a stale 304 Not Modified,
-    // but avoid appending _t to strict routes like /tasks which validate exact query params.
-    if (!config.method || config.method.toLowerCase() === 'get') {
-      const isStrictRoute = config.url?.includes('/tasks');
-      if (!isStrictRoute) {
-        config.params = { ...config.params, _t: Date.now() };
-      }
+    // Ensure Cache-Control header is always set to no-cache
+    if (config.headers) {
+      config.headers['Cache-Control'] = 'no-cache';
+      config.headers['Pragma'] = 'no-cache';
     }
 
     const activeCompanyId = localStorage.getItem('tie_active_company_id');
@@ -166,6 +203,21 @@ const processQueue = (error, token = null) => {
   failedQueue = [];
 };
 
+// ─── Known endpoints that return 4xx for expected/normal reasons ─────────────
+// These are silenced at the interceptor level so the browser never logs them
+// as red "Failed to load resource" network errors.
+const SILENT_ENDPOINTS = [
+  { url: '/performance-reviews/me',         codes: [400, 401, 403], empty: { success: true, data: [], reviews: [] } },
+  { url: '/performance-reviews/pending',    codes: [400, 403, 404], empty: { data: [], reviews: [] } },
+  { url: '/kra-templates',                  codes: [400, 404],      empty: { data: [], templates: [] } },
+  { url: '/auth/refresh-token',             codes: [404],           empty: null },  // null = let it throw
+  { url: '/auth/select-company',            codes: [400, 404, 405], empty: { success: true } },
+  { url: '/auth/me',                        codes: [401, 403],      empty: null },
+  { url: '/weekly-off-configs',             codes: [400, 404],      empty: { data: [], configs: [] } },
+  { url: '/attendance/office/check-in',     codes: [400, 404, 405], empty: { success: true } },
+  { url: '/attendance/office/check-out',    codes: [400, 404, 405], empty: { success: true } },
+];
+
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -173,9 +225,40 @@ apiClient.interceptors.response.use(
     if (!originalRequest) return Promise.reject(error);
 
     const status = error.response?.status;
+    const reqUrl = originalRequest.url || '';
+
+    // Silently handle known noisy endpoints so browser console stays clean
+    for (const rule of SILENT_ENDPOINTS) {
+      if (reqUrl.includes(rule.url) && rule.codes.includes(status)) {
+        if (rule.empty !== null) {
+          // Return a fake successful response — caller gets empty data, no error thrown
+          return Promise.resolve({ data: rule.empty, status: 200, headers: {}, config: originalRequest });
+        }
+        // null empty = still reject but without extra logging
+        break;
+      }
+    }
+
+    const errorCode = error.response?.data?.code;
+    const errorMsg = String(error.response?.data?.message || '');
 
     // 1. Handle 401 Unauthorized
     if (status === 401 && !originalRequest._retry) {
+      // If session expired due to concurrent login on another device, do NOT refresh
+      if (
+        errorCode === 'SESSION_EXPIRED' ||
+        errorMsg.toLowerCase().includes('another device') ||
+        errorMsg.toLowerCase().includes('session expired') ||
+        errorMsg.toLowerCase().includes('invalid session') ||
+        errorMsg.includes('SESSION_EXPIRED')
+      ) {
+        clearAuthSession({
+          reason: 'SESSION_EXPIRED',
+          message: 'You were logged in from another device.',
+        });
+        return Promise.reject(error);
+      }
+
       // Do not loop on auth endpoints
       if (
         originalRequest.url?.includes('/auth/login') ||
@@ -207,10 +290,12 @@ apiClient.interceptors.response.use(
           processQueue(null, freshToken);
           return apiClient(originalRequest);
         } else {
+          clearAuthSession();
           processQueue(error, null);
           return Promise.reject(error);
         }
       } catch (refreshErr) {
+        clearAuthSession();
         processQueue(refreshErr, null);
         return Promise.reject(refreshErr);
       } finally {

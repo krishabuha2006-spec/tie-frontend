@@ -23,6 +23,10 @@ import {
   XCircle,
   Loader2,
   Camera,
+  Plus,
+  Calendar,
+  Sparkles,
+  ChevronRight,
 } from 'lucide-react';
 import employeeApi from '../../api/employeeApi';
 import masterApi from '../../api/masterApi';
@@ -33,6 +37,7 @@ import { payrollApi } from '../../api/payrollApi';
 import { assetsLoansApi } from '../../api/assetsLoansApi';
 import { projectTaskApi } from '../../api/projectTaskApi';
 import faceApi from '../../api/faceApi';
+import { userApi } from '../../api/userApi';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import Loader from '../../components/common/Loader';
@@ -44,6 +49,7 @@ import GeoLocationPicker from '../../components/common/GeoLocationPicker';
 import { calculateDistanceMeters, resolveBranchLocation } from '../../utils/geoUtils';
 import { compareFacePhotos, resolveRegisteredSelfie } from '../../utils/faceComparison';
 import { extractApiData } from '../../utils/apiUtils';
+import './Dashboard.css';
 
 export const Dashboard = () => {
   const {
@@ -181,12 +187,9 @@ export const Dashboard = () => {
     'Management & Leadership';
 
   const userBranch =
-    user?.branch?.name ||
-    (typeof user?.branch === 'string' ? user.branch : null) ||
-    user?.employee?.employmentInfo?.branch?.name ||
-    user?.employee?.branch?.name ||
-    user?.employmentInfo?.branch?.name ||
-    'Head Office';
+    branch?._id === 'ALL'
+      ? 'All Branches'
+      : (branch?.name || user?.branch?.name || user?.employee?.employmentInfo?.branch?.name || 'Head Office');
 
   const fetchDashboardData = useCallback(
     async (isManual = false) => {
@@ -209,15 +212,16 @@ export const Dashboard = () => {
       try {
         const todayStr = new Date().toISOString().split('T')[0];
 
+        const activeBrId = branch?._id && branch._id !== 'ALL' ? branch._id : undefined;
         // STAGE 1: Core Daily Metrics (Employees, Attendance, Leaves)
         // Dispatched first so core numbers show up immediately
         const stage1Calls = [
           isOrgAdmin && canAccessModule('employees')
-            ? employeeApi.getEmployees({ limit: 5 }).catch(() => ({ data: [] }))
+            ? employeeApi.getEmployees({ limit: 5, branch: activeBrId }).catch(() => ({ data: [] }))
             : Promise.resolve({ data: [] }),
           canAccessModule('attendance')
             ? isOrgAdmin
-              ? attendanceApi.getAllOfficeAttendance({ date: todayStr }).catch(() => [])
+              ? attendanceApi.getAllOfficeAttendance({ date: todayStr, branch: activeBrId }).catch(() => [])
               : (user?.employee ? attendanceApi.getMyOfficeAttendance({ date: todayStr }).catch(() => []) : Promise.resolve([]))
             : Promise.resolve([]),
           canAccessModule('leaves')
@@ -231,7 +235,15 @@ export const Dashboard = () => {
 
         const empDataVal = empRes.status === 'fulfilled' ? empRes.value : {};
         const employeesList = extractApiData(empDataVal, 'employees');
-        const totalEmps = empDataVal?.count ?? (empDataVal?.total || employeesList.length);
+        // Properly read total count — backend returns total/totalCount/count at root or nested
+        const totalEmps =
+          empDataVal?.totalCount ??
+          empDataVal?.total ??
+          empDataVal?.count ??
+          empDataVal?.data?.totalCount ??
+          empDataVal?.data?.total ??
+          empDataVal?.data?.count ??
+          employeesList.length;
 
         const attDataVal = attRes.status === 'fulfilled' ? attRes.value : {};
         const todayAttList = extractApiData(attDataVal, 'attendance', 'records', 'sessions');
@@ -239,9 +251,45 @@ export const Dashboard = () => {
         const leaveDataVal = leaveRes.status === 'fulfilled' ? leaveRes.value : {};
         const leavesList = extractApiData(leaveDataVal, 'leaves', 'leaveRequests', 'pendingRequests', 'requests');
 
+        // Merge employees + users (User = Employee in this system via syncUserEmployee)
+        // Same bridge logic as EmployeeList.jsx to get accurate total
+        let actualTotalEmps = totalEmps;
+        try {
+          // Fetch all employees (no branch filter for total count)
+          const allEmpRes = await employeeApi.getEmployees({ limit: 1000, branch: activeBrId }).catch(() => ({}));
+          const allEmpList = extractApiData(allEmpRes, 'employees');
+
+          // Fetch all users (they are also employees in this system)
+          const usersRes = await userApi.getUsers({ limit: 100 }).catch(() => ({ data: [] }));
+          const rawUsers = extractApiData(usersRes, 'users', 'data') || (Array.isArray(usersRes) ? usersRes : []);
+          const candidateUsers = Array.isArray(rawUsers) ? rawUsers : [];
+
+          // Build set of emails already in employee list
+          const existingEmails = new Set(
+            allEmpList.map((e) => (e.basicInfo?.email || e.email || '').toLowerCase()).filter(Boolean)
+          );
+
+          // Count users not already in employee list (they are bridged employees)
+          let bridgedCount = 0;
+          candidateUsers.forEach((u) => {
+            const uEmail = (u.email || '').toLowerCase();
+            if (uEmail && !existingEmails.has(uEmail)) {
+              // Branch filter for bridged users
+              if (activeBrId) {
+                const uBranchId = u.branch?._id || u.branch?.id || (typeof u.branch === 'string' ? u.branch : '');
+                if (uBranchId && String(uBranchId) !== String(activeBrId)) return;
+              }
+              bridgedCount++;
+              existingEmails.add(uEmail);
+            }
+          });
+
+          actualTotalEmps = allEmpList.length + bridgedCount;
+        } catch { }
+
         setStats((prev) => ({
           ...prev,
-          employees: totalEmps,
+          employees: actualTotalEmps,
           todayAttendance: todayAttList.length,
           pendingLeaves: leaveDataVal?.count ?? leavesList.length,
         }));
@@ -274,10 +322,10 @@ export const Dashboard = () => {
             try {
               const raw = localStorage.getItem(`tie_today_att_${actualEmpId}_${todayStr}`);
               if (raw) cachedToday = JSON.parse(raw);
-            } catch {}
+            } catch { }
 
             setMyTodayAttendance(cachedToday || myRecord || null);
-          } catch {}
+          } catch { }
 
           try {
             const st = await faceApi.getFaceStatus(actualEmpId);
@@ -381,7 +429,7 @@ export const Dashboard = () => {
         setIsRefreshing(false);
       }
     },
-    [isSuperAdmin, isHrAdmin, isDirector, isBranchManager, canAccessModule, user]
+    [isSuperAdmin, isHrAdmin, isDirector, isBranchManager, canAccessModule, user, branch]
   );
 
   const handleOpenFaceModal = async (mode = 'CHECK_IN') => {
@@ -486,7 +534,7 @@ export const Dashboard = () => {
         return;
       }
 
-      const compareResult = await compareFacePhotos(regPhoto, capturedPhoto, 0.55);
+      const compareResult = await compareFacePhotos(regPhoto, capturedPhoto, 0.70);
       if (!compareResult.matched) {
         const mismatchReason = compareResult.reason || `Face biometric mismatch (${compareResult.confidencePct || 35}% match). Live camera face does not match the registered employee selfie! Check-in rejected.`;
         setPunchError(mismatchReason);
@@ -589,7 +637,7 @@ export const Dashboard = () => {
       setMyTodayAttendance(updatedAttendance);
       try {
         localStorage.setItem(`tie_today_att_${myEmpId}_${todayStr}`, JSON.stringify(updatedAttendance));
-      } catch {}
+      } catch { }
 
       setPunchSuccess({
         mode: punchMode,
@@ -611,12 +659,20 @@ export const Dashboard = () => {
     }
   };
 
-  // Trigger fetch once when user profile is loaded
+  // Trigger fetch when user profile is loaded or active branch changes
   useEffect(() => {
-    if (user?._id && !initialLoadedRef.current) {
-      fetchDashboardData();
+    if (user?._id) {
+      fetchDashboardData(true);
     }
-  }, [user?._id, fetchDashboardData]);
+  }, [user?._id, branch?._id, fetchDashboardData]);
+
+  useEffect(() => {
+    const handleContextChange = () => {
+      fetchDashboardData(true);
+    };
+    window.addEventListener('tie:context-changed', handleContextChange);
+    return () => window.removeEventListener('tie:context-changed', handleContextChange);
+  }, [fetchDashboardData]);
 
   // Dynamically assemble authorized modules list for RBAC summary
   const accessibleModulesList = [];
@@ -637,23 +693,25 @@ export const Dashboard = () => {
 
   if (canAccessModule('employees')) {
     statCards.push({
-      title: 'Total Employees',
+      title: isOrgAdmin ? 'Total Employees' : 'Team Directory',
       value: stats.employees,
       icon: Users,
       color: '#0d9488',
       bg: 'rgba(13, 148, 136, 0.1)',
       link: '/employees',
+      subtext: isOrgAdmin ? 'Staff in selected branch' : 'Team members',
     });
   }
 
   if (canAccessModule('attendance')) {
     statCards.push({
       title: isEmployee && !isSuperAdmin && !isHrAdmin && !isBranchManager ? "My Today's Status" : "Today's Attendance",
-      value: isEmployee && !isSuperAdmin && !isHrAdmin && !isBranchManager ? "Active" : stats.todayAttendance,
+      value: isEmployee && !isSuperAdmin && !isHrAdmin && !isBranchManager ? (myTodayAttendance?.checkInTime ? 'Checked In' : 'Pending') : stats.todayAttendance,
       icon: CalendarCheck,
       color: '#16a34a',
       bg: 'rgba(22, 163, 74, 0.1)',
       link: '/attendance',
+      subtext: isEmployee && !isSuperAdmin && !isHrAdmin && !isBranchManager ? 'Daily presence' : 'Recorded present today',
     });
   }
 
@@ -665,10 +723,11 @@ export const Dashboard = () => {
       color: 'var(--logo-orange, #f5a532)',
       bg: 'rgba(245, 165, 50, 0.12)',
       link: '/leaves',
+      subtext: isEmployee && !isSuperAdmin && !isHrAdmin && !isBranchManager ? 'Application status' : 'Awaiting admin review',
     });
   }
 
-  if (canAccessModule('recruitment')) {
+  if (canAccessModule('recruitment') && isOrgAdmin) {
     statCards.push({
       title: 'Open Job Vacancies',
       value: stats.openJobs,
@@ -676,28 +735,31 @@ export const Dashboard = () => {
       color: 'var(--primary, #3f929a)',
       bg: 'rgba(63, 146, 154, 0.1)',
       link: '/recruitment/jobs',
+      subtext: 'Active job openings',
     });
   }
 
   if (canAccessModule('payroll')) {
     statCards.push({
-      title: 'Payroll & Salaries',
+      title: isOrgAdmin ? 'Payroll & Salaries' : 'My Payslips',
       value: stats.payrollRuns || 'Active',
       icon: TrendingUp,
       color: '#8b5cf6',
       bg: 'rgba(139, 92, 246, 0.1)',
-      link: '/payroll',
+      link: isOrgAdmin ? '/payroll' : '/payroll/payslips',
+      subtext: isOrgAdmin ? 'Monthly cycles & runs' : 'View monthly statements',
     });
   }
 
   if (canAccessModule('assets-claims') || canAccessModule('assets')) {
     statCards.push({
-      title: 'Assets & Custody',
+      title: isOrgAdmin ? 'Assets & Custody' : 'My Assigned Assets',
       value: stats.assets || 'Active',
       icon: Shield,
       color: 'var(--logo-orange, #f5a532)',
       bg: 'rgba(245, 165, 50, 0.1)',
       link: '/assets-claims',
+      subtext: 'Hardware & inventory',
     });
   }
 
@@ -709,17 +771,19 @@ export const Dashboard = () => {
       color: '#059669',
       bg: 'rgba(5, 150, 105, 0.1)',
       link: '/operations/projects',
+      subtext: 'Field sites & operations',
     });
   }
 
   if (canAccessModule('tasks')) {
     statCards.push({
-      title: 'Tasks & Milestones',
+      title: isOrgAdmin ? 'Tasks & Milestones' : 'My Open Tasks',
       value: stats.tasks || 'Active',
       icon: Layers,
       color: '#e11d48',
       bg: 'rgba(225, 29, 72, 0.1)',
       link: '/operations/tasks',
+      subtext: 'Action items & deliverables',
     });
   }
 
@@ -852,50 +916,61 @@ export const Dashboard = () => {
     );
   }
 
+  // Dynamic User Greeting & Context
+  const currentHour = new Date().getHours();
+  const greeting = currentHour < 12 ? 'Good morning' : currentHour < 18 ? 'Good afternoon' : 'Good evening';
+  const userName = user?.name || user?.basicInfo?.fullName || user?.firstName || 'User';
+  const userInitials = userName
+    .split(' ')
+    .filter(Boolean)
+    .map((w) => w[0])
+    .join('')
+    .substring(0, 2)
+    .toUpperCase() || 'U';
+
+  const todayFormattedDate = new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  }).format(new Date());
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Welcome Banner */}
-      <div
-        className="card"
-        style={{
-          padding: '18px 22px',
-          background: 'linear-gradient(135deg, #ffffff 0%, rgba(42, 171, 160, 0.05) 100%)',
-          borderLeft: '4px solid var(--primary)',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: 12,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <h1 style={{ fontSize: '1.35rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>
-            Welcome back, {user?.name || user?.basicInfo?.fullName || 'User'}!
-          </h1>
-          <Badge variant="primary">{userRole || 'Employee'}</Badge>
+    <div className="dashboard-container">
+      {/* ─── 1. Modern Header Welcome Banner ─── */}
+      <div className="dash-welcome-card">
+        <div className="dash-welcome-left">
+          <div className="dash-user-avatar">
+            {userInitials}
+          </div>
+          <div>
+            <h1 className="dash-greeting-title">
+              {greeting}, {userName}!
+              <Badge variant="primary" style={{ fontSize: '0.72rem', padding: '3px 8px', fontWeight: 600 }}>
+                {userRole || 'Employee'}
+              </Badge>
+            </h1>
+            <div className="dash-greeting-subtitle">
+              <span>{userDept}</span>
+              <span>•</span>
+              <span style={{ color: 'var(--primary)', fontWeight: 600 }}>{userBranch}</span>
+              <span>•</span>
+              <span>{todayFormattedDate}</span>
+            </div>
+          </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-            <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{userDept}</span>
-            <span>•</span>
+
+        <div className="dash-welcome-right">
+          <div className="dash-context-chip" title="Current Active Branch">
+            <MapPin size={13} color="var(--primary)" />
             <span>{userBranch}</span>
           </div>
           <button
             type="button"
             onClick={() => fetchDashboardData(true)}
             disabled={isRefreshing}
-            className="btn btn-light btn-sm"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '4px 10px',
-              fontSize: '0.78rem',
-              fontWeight: 500,
-              cursor: isRefreshing ? 'not-allowed' : 'pointer',
-              opacity: isRefreshing ? 0.7 : 1,
-            }}
-            title="Refresh dashboard stats"
+            className="dash-refresh-btn"
+            title="Refresh dashboard metrics"
           >
             <RefreshCw size={13} style={{ animation: isRefreshing ? 'spin 1s linear infinite' : 'none' }} />
             <span>{isRefreshing ? 'Refreshing...' : 'Refresh'}</span>
@@ -903,291 +978,70 @@ export const Dashboard = () => {
         </div>
       </div>
 
-      {/* Daily Face Biometric Attendance Card */}
-      {(() => {
-        const isCheckedIn = Boolean(
-          myTodayAttendance &&
-          (myTodayAttendance.checkInTime || myTodayAttendance.firstCheckInTime || myTodayAttendance.dutyCheckedIn || myTodayAttendance.isOpen === true) &&
-          !myTodayAttendance.checkOutTime &&
-          !myTodayAttendance.lastCheckOutTime &&
-          !myTodayAttendance.dutyCheckedOut &&
-          myTodayAttendance.isOpen !== false
-        );
-
-        const isCheckedOut = Boolean(
-          myTodayAttendance &&
-          (myTodayAttendance.checkOutTime || myTodayAttendance.lastCheckOutTime || myTodayAttendance.dutyCheckedOut || myTodayAttendance.isOpen === false) &&
-          (myTodayAttendance.checkInTime || myTodayAttendance.firstCheckInTime || myTodayAttendance.dutyCheckedIn)
-        );
-
-        const rawInTime = myTodayAttendance?.firstCheckInTime || myTodayAttendance?.checkInTime;
-        const todayCheckInTimeStr = rawInTime ? new Date(rawInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
-        const rawOutTime = myTodayAttendance?.lastCheckOutTime || myTodayAttendance?.checkOutTime;
-        const todayCheckOutTimeStr = rawOutTime ? new Date(rawOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
-
-        const checkInTitle = isFieldStaffUser ? 'Field Check-In' : 'Office Check-In';
-        const checkOutTitle = isFieldStaffUser ? 'Field Check-Out' : 'Office Check-Out';
-        const cardTitle = isHybridUser
-          ? `Daily Attendance (Hybrid: ${hybridPunchMode === 'FIELD' ? 'Field Staff' : 'Office'})`
-          : isFieldStaffUser
-          ? 'Daily Field Staff Attendance'
-          : 'Daily Office Attendance';
-
-        return (
-          <div
-            className="card"
-            style={{
-              padding: '16px 20px',
-              background: isCheckedIn
-                ? 'linear-gradient(135deg, rgba(240, 253, 244, 0.95) 0%, #ffffff 100%)'
-                : isCheckedOut
-                ? 'linear-gradient(135deg, rgba(239, 246, 255, 0.9) 0%, #ffffff 100%)'
-                : 'linear-gradient(135deg, rgba(254, 243, 199, 0.6) 0%, #ffffff 100%)',
-              border: isCheckedIn ? '1px solid #bbf7d0' : isCheckedOut ? '1px solid #bfdbfe' : '1px solid #fde68a',
-              borderRadius: 12,
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: 16,
-              boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <div
-                style={{
-                  width: 48,
-                  height: 48,
-                  borderRadius: '50%',
-                  backgroundColor: isCheckedIn ? '#dcfce7' : isCheckedOut ? 'var(--primary-light, #edf7f8)' : '#fef3c7',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: isCheckedIn ? '#16a34a' : isCheckedOut ? 'var(--primary, #3f929a)' : '#d97706',
-                  flexShrink: 0,
-                }}
-              >
-                <ScanFace size={24} />
-              </div>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <span style={{ fontWeight: 700, fontSize: '1.05rem', color: 'var(--text-main)' }}>
-                    {cardTitle}
-                  </span>
-                  <Badge variant={isCheckedIn ? 'success' : isCheckedOut ? 'primary' : 'warning'}>
-                    {isCheckedIn ? (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <CheckCircle2 size={12} /> On Duty • {checkInTitle} Recorded
-                      </span>
-                    ) : isCheckedOut ? (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <CheckCircle2 size={12} /> Shift Completed • {checkOutTitle} Recorded
-                      </span>
-                    ) : (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <AlertCircle size={12} /> Not Checked In Today
-                      </span>
-                    )}
-                  </Badge>
-                  {myFaceStatus && (
-                    <Badge variant={myFaceStatus.isEnrolled ? 'success' : 'danger'}>
-                      {myFaceStatus.isEnrolled ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                          <CheckCircle2 size={12} /> Face Registered
-                        </span>
-                      ) : (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                          <AlertTriangle size={12} /> Face Not Registered
-                        </span>
-                      )}
-                    </Badge>
-                  )}
-                  {coords && (
-                    <span style={{ fontSize: '0.74rem', background: '#f1f5f9', color: '#475569', padding: '2px 8px', borderRadius: 6, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      <MapPin size={12} color="#0d9488" /> GPS Active ({coords.latitude.toFixed(3)}°, {coords.longitude.toFixed(3)}°)
-                    </span>
-                  )}
-                </div>
-                <div style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginTop: 3 }}>
-                  {!myFaceStatus?.isEnrolled ? (
-                    <span style={{ color: '#b91c1c', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      <AlertCircle size={13} /> Face registration required: Super Admin must register your face photograph before you can check in.
-                    </span>
-                  ) : isCheckedIn ? (
-                    <span>
-                      {checkInTitle} recorded at <strong style={{ color: 'var(--text-main)' }}>{todayCheckInTimeStr || 'Today'}</strong>. Click below to punch out.
-                    </span>
-                  ) : isCheckedOut ? (
-                    <span>
-                      {checkInTitle}: <strong style={{ color: 'var(--text-main)' }}>{todayCheckInTimeStr || 'Today'}</strong> • {checkOutTitle}: <strong style={{ color: 'var(--text-main)' }}>{todayCheckOutTimeStr || 'Today'}</strong>
-                    </span>
-                  ) : (
-                    <span>Verify your face via live camera match to mark today&apos;s {checkInTitle}.</span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              {isHybridUser && (
-                <div style={{ display: 'inline-flex', background: '#e2e8f0', borderRadius: 6, padding: 2 }}>
-                  <button
-                    type="button"
-                    onClick={() => setHybridPunchMode('OFFICE')}
-                    style={{
-                      border: 'none',
-                      borderRadius: 5,
-                      padding: '5px 10px',
-                      fontSize: '0.75rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      background: hybridPunchMode === 'OFFICE' ? 'var(--primary)' : 'transparent',
-                      color: hybridPunchMode === 'OFFICE' ? '#ffffff' : '#64748b',
-                      transition: 'all 0.15s ease',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 4,
-                    }}
-                  >
-                    <Building2 size={12} /> Office
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setHybridPunchMode('FIELD')}
-                    style={{
-                      border: 'none',
-                      borderRadius: 5,
-                      padding: '5px 10px',
-                      fontSize: '0.75rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      background: hybridPunchMode === 'FIELD' ? 'var(--primary)' : 'transparent',
-                      color: hybridPunchMode === 'FIELD' ? '#ffffff' : '#64748b',
-                      transition: 'all 0.15s ease',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 4,
-                    }}
-                  >
-                    <MapPin size={12} /> Field
-                  </button>
-                </div>
-              )}
-              {/* Check-In / Check-Out Dynamic Primary Button */}
-              {!isCheckedIn && !isCheckedOut ? (
-                <button
-                  type="button"
-                  onClick={() => handleOpenFaceModal('CHECK_IN')}
-                  className="btn btn-primary"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '10px 18px',
-                    fontWeight: 600,
-                    fontSize: '0.88rem',
-                    borderRadius: 8,
-                    boxShadow: '0 2px 8px rgba(63, 146, 154, 0.25)',
-                  }}
-                >
-                  <LogIn size={16} /> {checkInTitle} (Face Match)
-                </button>
-              ) : isCheckedIn ? (
-                <button
-                  type="button"
-                  onClick={() => handleOpenFaceModal('CHECK_OUT')}
-                  className="btn btn-danger"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '10px 18px',
-                    fontWeight: 600,
-                    fontSize: '0.88rem',
-                    borderRadius: 8,
-                    backgroundColor: '#dc2626',
-                    borderColor: '#dc2626',
-                    color: '#fff',
-                    boxShadow: '0 2px 8px rgba(220, 38, 38, 0.25)',
-                  }}
-                >
-                  <LogOut size={16} /> {checkOutTitle} (Face Match)
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => handleOpenFaceModal('CHECK_IN')}
-                  className="btn btn-secondary btn-sm"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '8px 14px',
-                    fontSize: '0.82rem',
-                  }}
-                >
-                  <RefreshCw size={14} /> Punch Again ({checkInTitle})
-                </button>
-              )}
-
-              <Link
-                to="/attendance/face-punch"
-                className="btn btn-light btn-sm"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '8px 14px',
-                  fontSize: '0.82rem',
-                  textDecoration: 'none',
-                }}
-              >
-                <Clock size={14} /> Gate View
+      {/* ─── 2. Quick Action Pills Bar (Role Tailored) ─── */}
+      <div className="dash-actions-bar">
+        {isOrgAdmin ? (
+          <>
+            <Link to="/employees" className="dash-action-pill primary">
+              <Plus size={14} /> Add Employee
+            </Link>
+            <Link to="/operations/tasks" className="dash-action-pill">
+              <Plus size={14} /> Assign Task
+            </Link>
+            <Link to="/leaves" className="dash-action-pill">
+              <CalendarOff size={14} /> Leave Approvals {stats.pendingLeaves > 0 && `(${stats.pendingLeaves})`}
+            </Link>
+            {canAccessModule('payroll') && (
+              <Link to="/payroll" className="dash-action-pill">
+                <TrendingUp size={14} /> Process Payroll
               </Link>
-            </div>
-          </div>
-        );
-      })()}
+            )}
+            {canAccessModule('attendance') && (
+              <Link to="/attendance/face-punch" className="dash-action-pill">
+                <ScanFace size={14} /> Biometric Gate
+              </Link>
+            )}
+            {isMasterAdmin && (
+              <Link to="/masters/branches" className="dash-action-pill">
+                <Building2 size={14} /> Branches Directory
+              </Link>
+            )}
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => handleOpenFaceModal(myTodayAttendance?.checkInTime ? 'CHECK_OUT' : 'CHECK_IN')}
+              className="dash-action-pill primary"
+              style={{ cursor: 'pointer' }}
+            >
+              <ScanFace size={14} /> {myTodayAttendance?.checkInTime ? 'Punch Check-Out' : 'Punch Check-In'}
+            </button>
+            <Link to="/leaves" className="dash-action-pill">
+              <Plus size={14} /> Apply for Leave
+            </Link>
+            <Link to="/payroll/payslips" className="dash-action-pill">
+              <TrendingUp size={14} /> View Payslips
+            </Link>
+            <Link to="/operations/tasks" className="dash-action-pill">
+              <Layers size={14} /> My Tasks
+            </Link>
+          </>
+        )}
+      </div>
 
-      {/* KPI Stats Grid */}
-      <div className="dashboard-stats-grid">
+      {/* ─── 3. KPI Stat Cards Grid ─── */}
+      <div className="dash-kpi-grid">
         {statCards.map((card, idx) => {
           const Icon = card.icon;
           return (
-            <Link
-              key={idx}
-              to={card.link}
-              className="card"
-              style={{
-                textDecoration: 'none',
-                padding: '18px 20px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                transition: 'transform 0.15s ease, box-shadow 0.15s ease',
-              }}
-            >
-              <div>
-                <div style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginBottom: 6, fontWeight: 500 }}>
-                  {card.title}
-                </div>
-                <div style={{ fontSize: '1.85rem', fontWeight: 700, color: 'var(--text-main)', lineHeight: 1 }}>
-                  {card.value}
-                </div>
+            <Link key={idx} to={card.link} className="dash-kpi-card">
+              <div className="dash-kpi-info">
+                <span className="dash-kpi-title">{card.title}</span>
+                <span className="dash-kpi-value">{card.value}</span>
+                {card.subtext && <span className="dash-kpi-subtext">{card.subtext}</span>}
               </div>
-              <div
-                style={{
-                  width: 46,
-                  height: 46,
-                  borderRadius: 12,
-                  backgroundColor: card.bg,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: card.color,
-                  flexShrink: 0,
-                }}
-              >
+              <div className="dash-kpi-icon" style={{ backgroundColor: card.bg, color: card.color }}>
                 <Icon size={22} />
               </div>
             </Link>
@@ -1195,240 +1049,335 @@ export const Dashboard = () => {
         })}
       </div>
 
-      {/* Role-Scoped Bottom Section: Recent Employees for HR/Admins OR Workspace Activity for Staff */}
-      {canAccessModule('employees') ? (
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div
-            style={{
-              padding: '14px 18px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              borderBottom: '1px solid var(--border-color)',
-              backgroundColor: 'var(--bg-subtle)',
-            }}
-          >
-            <h3 style={{ margin: 0, fontSize: '0.98rem', fontWeight: 700, color: 'var(--text-main)' }}>
-              Recently Onboarded Employees
-            </h3>
-            <Link
-              to="/employees"
-              style={{
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                color: 'var(--primary)',
-                textDecoration: 'none',
-              }}
-            >
-              View All Employees <ArrowRight size={13} />
-            </Link>
-          </div>
-
-          <div className="table-responsive">
-            <table style={{ width: '100%', minWidth: 600, borderCollapse: 'collapse', fontSize: '0.84rem' }}>
-              <thead>
-                <tr style={{ backgroundColor: '#ffffff', borderBottom: '1px solid var(--border-color)' }}>
-                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', width: 120 }}>
-                    Code
-                  </th>
-                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)' }}>
-                    Employee Name
-                  </th>
-                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)' }}>
-                    Department
-                  </th>
-                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)' }}>
-                    Designation
-                  </th>
-                  <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', width: 100 }}>
-                    Status
-                  </th>
-                  <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', width: 150 }}>
-                    Biometric Face
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentEmployees.length === 0 ? (
+      {/* ─── 4. Main Two-Column Content Grid ─── */}
+      <div className="dash-content-grid">
+        {/* Left Column (65%): Recently Onboarded Employees OR My Workplace */}
+        {canAccessModule('employees') ? (
+          <div className="dash-panel">
+            <div className="dash-panel-header">
+              <h3 className="dash-panel-title">
+                <Users size={16} color="var(--primary)" />
+                Recently Onboarded Employees
+              </h3>
+              <Link to="/employees" className="dash-panel-link">
+                View All Directory <ChevronRight size={13} />
+              </Link>
+            </div>
+            <div className="dash-table-wrap">
+              <table className="dash-table">
+                <thead>
                   <tr>
-                    <td colSpan={6} style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>
-                      No recent employees found.
-                    </td>
+                    <th style={{ width: 110 }}>Code</th>
+                    <th>Employee Name</th>
+                    <th>Department</th>
+                    <th>Designation</th>
+                    <th style={{ textAlign: 'center', width: 95 }}>Status</th>
+                    <th style={{ textAlign: 'center', width: 140 }}>Biometric Face</th>
                   </tr>
-                ) : (
-                  recentEmployees.map((emp, eIdx) => {
-                    const empCode =
-                      emp?.basicInfo?.employeeCode ||
-                      emp?.employeeCode ||
-                      (typeof emp?._id === 'string' && emp._id.length >= 4 ? `EMP-${emp._id.substring(emp._id.length - 4).toUpperCase()}` : `EMP-00${eIdx + 1}`);
+                </thead>
+                <tbody>
+                  {recentEmployees.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: 'center', padding: 28, color: '#94a3b8' }}>
+                        No employees found in selected branch.
+                      </td>
+                    </tr>
+                  ) : (
+                    recentEmployees.map((emp, eIdx) => {
+                      const empCode =
+                        emp?.basicInfo?.employeeCode ||
+                        emp?.employeeCode ||
+                        (typeof emp?._id === 'string' && emp._id.length >= 4 ? `EMP-${emp._id.substring(emp._id.length - 4).toUpperCase()}` : `EMP-00${eIdx + 1}`);
 
-                    const rawName =
-                      emp?.basicInfo?.fullName ||
-                      emp?.name ||
-                      emp?.fullName ||
-                      (emp?.firstName ? `${emp.firstName} ${emp.lastName || ''}`.trim() : 'Employee');
+                      const rawName =
+                        emp?.basicInfo?.fullName ||
+                        emp?.name ||
+                        emp?.fullName ||
+                        (emp?.firstName ? `${emp.firstName} ${emp.lastName || ''}`.trim() : 'Employee');
 
-                    const empName = rawName
-                      .split(' ')
-                      .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : ''))
-                      .join(' ');
+                      const empName = rawName
+                        .split(' ')
+                        .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : ''))
+                        .join(' ');
 
-                    const empEmail = emp?.basicInfo?.email || emp?.email || '';
-                    const empId = typeof emp?._id === 'string' ? emp._id : `emp-${eIdx}`;
+                      const empEmail = emp?.basicInfo?.email || emp?.email || '';
+                      const empId = typeof emp?._id === 'string' ? emp._id : `emp-${eIdx}`;
 
-                    const deptName =
-                      emp?.department?.name ||
-                      emp?.employmentInfo?.department?.name ||
-                      (typeof emp?.department === 'string' ? emp.department : 'General Operations');
+                      const deptName =
+                        emp?.department?.name ||
+                        emp?.employmentInfo?.department?.name ||
+                        (typeof emp?.department === 'string' ? emp.department : 'General Operations');
 
-                    const desigTitle =
-                      emp?.designation?.name ||
-                      emp?.designation?.title ||
-                      emp?.employmentInfo?.designation?.name ||
-                      (typeof emp?.designation === 'string' ? emp.designation : 'Staff Member');
+                      const desigTitle =
+                        emp?.designation?.name ||
+                        emp?.designation?.title ||
+                        emp?.employmentInfo?.designation?.name ||
+                        (typeof emp?.designation === 'string' ? emp.designation : 'Staff Member');
 
-                    const empStatus = emp?.employeeStatus || emp?.employmentInfo?.employeeStatus || 'Active';
-                    const isFacePending = emp?.faceRegistrationPending !== false && !emp?.faceVectorStored;
+                      const empStatus = emp?.employeeStatus || emp?.employmentInfo?.employeeStatus || 'Active';
+                      const isFacePending = emp?.faceRegistrationPending !== false && !emp?.faceVectorStored;
 
-                    const initials = empName
-                      .split(' ')
-                      .filter(Boolean)
-                      .map((w) => w[0])
-                      .join('')
-                      .substring(0, 2)
-                      .toUpperCase();
+                      const initials = empName
+                        .split(' ')
+                        .filter(Boolean)
+                        .map((w) => w[0])
+                        .join('')
+                        .substring(0, 2)
+                        .toUpperCase();
 
-                    return (
-                      <tr
-                        key={empId}
-                        style={{
-                          borderBottom: '1px solid var(--border-color)',
-                          transition: 'background-color 0.12s ease',
-                        }}
-                      >
-                        <td style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--text-main)', fontFamily: 'monospace' }}>
-                          {empCode}
-                        </td>
-
-                        <td style={{ padding: '12px 16px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <div
-                              style={{
-                                width: 32,
-                                height: 32,
-                                borderRadius: '50%',
-                                backgroundColor: 'rgba(42, 171, 160, 0.12)',
-                                color: 'var(--primary)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontSize: '0.78rem',
-                                fontWeight: 700,
-                                flexShrink: 0,
-                              }}
-                            >
-                              {initials || 'EM'}
+                      return (
+                        <tr key={empId}>
+                          <td>
+                            <span className="dash-code-tag">{empCode}</span>
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <div
+                                style={{
+                                  width: 32,
+                                  height: 32,
+                                  borderRadius: 8,
+                                  backgroundColor: 'rgba(46, 123, 133, 0.12)',
+                                  color: 'var(--primary)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '0.76rem',
+                                  fontWeight: 700,
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {initials || 'EM'}
+                              </div>
+                              <div>
+                                <div style={{ fontWeight: 600, color: '#0f172a' }}>{empName}</div>
+                                {empEmail && (
+                                  <div style={{ fontSize: '0.73rem', color: '#64748b' }}>{empEmail}</div>
+                                )}
+                              </div>
                             </div>
-                            <div>
-                              <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>{empName}</div>
-                              {empEmail && (
-                                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>{empEmail}</div>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-
-                        <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>
-                          {deptName}
-                        </td>
-
-                        <td style={{ padding: '12px 16px', color: 'var(--text-main)', fontWeight: 500 }}>
-                          {desigTitle}
-                        </td>
-
-                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          <Badge variant={empStatus.toLowerCase() === 'active' ? 'success' : 'secondary'}>
-                            {empStatus.charAt(0).toUpperCase() + empStatus.slice(1).toLowerCase()}
-                          </Badge>
-                        </td>
-
-                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          {isFacePending ? (
-                            <Link to={`/attendance/face-punch?tab=register&empId=${empId}`} style={{ textDecoration: 'none' }}>
-                              <Badge variant="warning" style={{ cursor: 'pointer' }}>Pending Registration</Badge>
-                            </Link>
-                          ) : (
-                            <Badge variant="success">Face Stored • Ready</Badge>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+                          </td>
+                          <td style={{ color: '#475569' }}>{deptName}</td>
+                          <td style={{ color: '#334155', fontWeight: 500 }}>{desigTitle}</td>
+                          <td style={{ textAlign: 'center' }}>
+                            <Badge variant={empStatus.toLowerCase() === 'active' ? 'success' : 'secondary'}>
+                              {empStatus.charAt(0).toUpperCase() + empStatus.slice(1).toLowerCase()}
+                            </Badge>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            {isFacePending ? (
+                              <Link to={`/attendance/face-punch?tab=register&empId=${empId}`} style={{ textDecoration: 'none' }}>
+                                <Badge variant="warning" style={{ cursor: 'pointer' }}>Pending Registration</Badge>
+                              </Link>
+                            ) : (
+                              <Badge variant="success">Face Stored • Ready</Badge>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-      ) : (
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div
-            style={{
-              padding: '14px 18px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              borderBottom: '1px solid var(--border-color)',
-              backgroundColor: 'var(--bg-subtle)',
-            }}
-          >
-            <h3 style={{ margin: 0, fontSize: '0.98rem', fontWeight: 700, color: 'var(--text-main)' }}>
-              My Department & Workplace Activity
-            </h3>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              Role: <strong style={{ color: 'var(--primary)' }}>{userRole || 'Employee'}</strong>
-            </span>
-          </div>
-
-          <div style={{ padding: 20 }}>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-                gap: 16,
-              }}
-            >
-              <div style={{ padding: 16, borderRadius: 8, border: '1px solid var(--border-color)', backgroundColor: '#ffffff' }}>
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 4 }}>Department & Branch</div>
-                <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-main)' }}>{userDept}</div>
-                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: 4 }}>Location: {userBranch}</div>
-              </div>
-
-              <div style={{ padding: 16, borderRadius: 8, border: '1px solid var(--border-color)', backgroundColor: '#ffffff' }}>
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 4 }}>Biometric Face Punch</div>
-                <div style={{ fontWeight: 700, fontSize: '1rem', color: '#16a34a', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <CheckCircle2 size={16} /> Biometrics Active
+        ) : (
+          <div className="dash-panel">
+            <div className="dash-panel-header">
+              <h3 className="dash-panel-title">
+                <Users size={16} color="var(--primary)" />
+                My Workplace & Department Summary
+              </h3>
+              <Badge variant="primary">{userRole || 'Employee'}</Badge>
+            </div>
+            <div className="dash-panel-body">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
+                <div style={{ padding: 14, borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Department</div>
+                  <div style={{ fontWeight: 700, fontSize: '0.96rem', color: '#0f172a', marginTop: 3 }}>{userDept}</div>
+                  <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: 2 }}>Location: {userBranch}</div>
                 </div>
-                <Link to="/attendance/face-punch" style={{ fontSize: '0.82rem', color: 'var(--primary)', textDecoration: 'none', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
-                  Punch Attendance Now <ArrowRight size={12} />
-                </Link>
-              </div>
 
-              <div style={{ padding: 16, borderRadius: 8, border: '1px solid var(--border-color)', backgroundColor: '#ffffff' }}>
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 4 }}>Access Level</div>
-                <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-main)' }}>
-                  {accessibleModulesList.length} Authorized Modules
+                <div style={{ padding: 14, borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Work Type</div>
+                  <div style={{ fontWeight: 700, fontSize: '0.96rem', color: '#0f172a', marginTop: 3 }}>
+                    {isFieldStaffUser ? 'Field Staff' : 'Office Staff'}
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--primary)', marginTop: 2 }}>
+                    {isFieldStaffUser ? 'Office & Field Attendance' : 'Office Biometric Attendance'}
+                  </div>
                 </div>
-                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                  RBAC Scoped to {userRole}
+
+                <div style={{ padding: 14, borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Biometrics Status</div>
+                  <div style={{ fontWeight: 700, fontSize: '0.96rem', color: '#16a34a', display: 'flex', alignItems: 'center', gap: 5, marginTop: 3 }}>
+                    <CheckCircle2 size={15} /> Biometrics Active
+                  </div>
+                  <Link to="/attendance/face-punch" style={{ fontSize: '0.78rem', color: 'var(--primary)', textDecoration: 'none', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 3, marginTop: 2 }}>
+                    Gate View <ChevronRight size={12} />
+                  </Link>
                 </div>
               </div>
             </div>
           </div>
+        )}
+
+        {/* Right Column (35%): Attendance Widget + Branch Overview */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Daily Biometric Attendance Punch Widget */}
+          {(() => {
+            const isCheckedIn = Boolean(
+              myTodayAttendance &&
+              (myTodayAttendance.checkInTime || myTodayAttendance.firstCheckInTime || myTodayAttendance.dutyCheckedIn || myTodayAttendance.isOpen === true) &&
+              !myTodayAttendance.checkOutTime &&
+              !myTodayAttendance.lastCheckOutTime &&
+              !myTodayAttendance.dutyCheckedOut &&
+              myTodayAttendance.isOpen !== false
+            );
+
+            const isCheckedOut = Boolean(
+              myTodayAttendance &&
+              (myTodayAttendance.checkOutTime || myTodayAttendance.lastCheckOutTime || myTodayAttendance.dutyCheckedOut || myTodayAttendance.isOpen === false) &&
+              (myTodayAttendance.checkInTime || myTodayAttendance.firstCheckInTime || myTodayAttendance.dutyCheckedIn)
+            );
+
+            const rawInTime = myTodayAttendance?.firstCheckInTime || myTodayAttendance?.checkInTime;
+            const todayCheckInTimeStr = rawInTime ? new Date(rawInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
+            const rawOutTime = myTodayAttendance?.lastCheckOutTime || myTodayAttendance?.checkOutTime;
+            const todayCheckOutTimeStr = rawOutTime ? new Date(rawOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
+
+            // Work type rules: Office staff only sees Office. Field staff sees both Office and Field.
+            const punchLabel = isCheckedIn ? 'Check-Out (Face Match)' : 'Check-In (Face Match)';
+
+            return (
+              <div className="dash-punch-widget">
+                <div className="dash-punch-status-row">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <ScanFace size={16} color="var(--primary)" />
+                    <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#0f172a' }}>Daily Attendance</span>
+                  </div>
+                  <span className={`dash-punch-status-badge ${isCheckedIn ? 'checked-in' : isCheckedOut ? 'checked-out' : 'not-checked'}`}>
+                    {isCheckedIn ? <CheckCircle2 size={11} /> : isCheckedOut ? <CheckCircle2 size={11} /> : <Clock size={11} />}
+                    {isCheckedIn ? 'Checked In' : isCheckedOut ? 'Shift Done' : 'Not In Today'}
+                  </span>
+                </div>
+
+                {/* Work Type: Field staff has Office / Field toggle; Office staff is locked to Office */}
+                {isFieldStaffUser && (
+                  <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: 7, padding: 2, marginBottom: 12 }}>
+                    <button
+                      type="button"
+                      onClick={() => setHybridPunchMode('OFFICE')}
+                      style={{
+                        flex: 1,
+                        border: 'none',
+                        borderRadius: 5,
+                        padding: '4px 8px',
+                        fontSize: '0.74rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        background: hybridPunchMode === 'OFFICE' ? 'var(--primary)' : 'transparent',
+                        color: hybridPunchMode === 'OFFICE' ? '#ffffff' : '#64748b',
+                        transition: 'all 0.15s ease',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 4,
+                      }}
+                    >
+                      <Building2 size={12} /> Office
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setHybridPunchMode('FIELD')}
+                      style={{
+                        flex: 1,
+                        border: 'none',
+                        borderRadius: 5,
+                        padding: '4px 8px',
+                        fontSize: '0.74rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        background: hybridPunchMode === 'FIELD' ? 'var(--primary)' : 'transparent',
+                        color: hybridPunchMode === 'FIELD' ? '#ffffff' : '#64748b',
+                        transition: 'all 0.15s ease',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 4,
+                      }}
+                    >
+                      <MapPin size={12} /> Site / Field
+                    </button>
+                  </div>
+                )}
+
+                {/* Check In / Out Time Display */}
+                <div className="dash-punch-time-display">
+                  <div className="dash-punch-time-col">
+                    <span className="dash-punch-time-label">Check-In</span>
+                    <div className="dash-punch-time-val">{todayCheckInTimeStr}</div>
+                  </div>
+                  <div style={{ width: 1, height: 26, background: '#cbd5e1' }} />
+                  <div className="dash-punch-time-col">
+                    <span className="dash-punch-time-label">Check-Out</span>
+                    <div className="dash-punch-time-val">{todayCheckOutTimeStr}</div>
+                  </div>
+                </div>
+
+                {/* Primary Biometric Punch Button */}
+                <button
+                  type="button"
+                  onClick={() => handleOpenFaceModal(isCheckedIn ? 'CHECK_OUT' : 'CHECK_IN')}
+                  className={`dash-punch-action-btn ${isCheckedIn ? 'out' : 'in'}`}
+                >
+                  {isCheckedIn ? <LogOut size={16} /> : <LogIn size={16} />}
+                  <span>{punchLabel}</span>
+                </button>
+
+                {/* Sub-links */}
+                <div className="dash-punch-sublinks">
+                  <Link to="/attendance/face-punch" className="dash-punch-sublink">
+                    <Clock size={12} /> Full Gate View
+                  </Link>
+                  {coords && (
+                    <span style={{ color: '#0d9488', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                      <MapPin size={12} /> GPS Active
+                    </span>
+                  )}
+                </div>
+
+                {!myFaceStatus?.isEnrolled && (
+                  <div style={{ marginTop: 10, padding: '6px 10px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 7, fontSize: '0.73rem', color: '#b91c1c', display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <AlertCircle size={13} style={{ flexShrink: 0 }} />
+                    <span>Admin face enrollment required for attendance.</span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Branch & Organization Status Widget */}
+          <div className="dash-branch-overview">
+            <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#0f172a', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Building2 size={15} color="var(--primary)" />
+              Branch &amp; Organization Context
+            </div>
+            <div className="dash-overview-item">
+              <span className="dash-overview-label">Active Branch</span>
+              <span className="dash-overview-val" style={{ color: 'var(--primary)' }}>{userBranch}</span>
+            </div>
+            <div className="dash-overview-item">
+              <span className="dash-overview-label">Assigned Role</span>
+              <span className="dash-overview-val">{userRole || 'Employee'}</span>
+            </div>
+            <div className="dash-overview-item">
+              <span className="dash-overview-label">Biometric System</span>
+              <span className="dash-overview-val" style={{ color: '#16a34a' }}>Active &amp; Live</span>
+            </div>
+          </div>
         </div>
-      )}
+      </div>
 
       {/* Quick Biometric Face Attendance Modal */}
       <Modal
@@ -1603,17 +1552,54 @@ export const Dashboard = () => {
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                      <Clock size={16} color="var(--primary)" />
-                      <span style={{ fontSize: '0.88rem', fontWeight: 600 }}>2. Mode &amp; Location</span>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Clock size={16} color="var(--primary)" />
+                        <span style={{ fontSize: '0.88rem', fontWeight: 600 }}>2. Mode &amp; Location</span>
+                      </div>
+                      <span style={{ fontSize: '0.72rem', color: isFieldStaffUser ? '#0284c7' : '#64748b', fontWeight: 600 }}>
+                        {isFieldStaffUser ? 'Field Staff' : 'Office Staff'}
+                      </span>
                     </div>
+
+                    {isFieldStaffUser && (
+                      <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: 6, padding: 2, marginBottom: 10 }}>
+                        <button
+                          type="button"
+                          onClick={() => setHybridPunchMode('OFFICE')}
+                          style={{
+                            flex: 1, border: 'none', borderRadius: 4, padding: '4px',
+                            fontSize: '0.74rem', fontWeight: 600, cursor: 'pointer',
+                            background: hybridPunchMode === 'OFFICE' ? 'var(--primary)' : 'transparent',
+                            color: hybridPunchMode === 'OFFICE' ? '#fff' : '#64748b',
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4
+                          }}
+                        >
+                          <Building2 size={12} /> Office Check-In
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setHybridPunchMode('FIELD')}
+                          style={{
+                            flex: 1, border: 'none', borderRadius: 4, padding: '4px',
+                            fontSize: '0.74rem', fontWeight: 600, cursor: 'pointer',
+                            background: hybridPunchMode === 'FIELD' ? 'var(--primary)' : 'transparent',
+                            color: hybridPunchMode === 'FIELD' ? '#fff' : '#64748b',
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4
+                          }}
+                        >
+                          <MapPin size={12} /> Site / Field
+                        </button>
+                      </div>
+                    )}
+
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
                       <button
                         type="button"
                         onClick={() => setPunchMode('CHECK_IN')}
                         className={`btn ${punchMode === 'CHECK_IN' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
                       >
-                        {isFieldStaffUser ? 'Site-In' : 'Office Check-In'}
+                        {isFieldStaffUser && hybridPunchMode === 'FIELD' ? 'Site-In (GPS)' : 'Office Check-In'}
                       </button>
                       <button
                         type="button"
@@ -1621,12 +1607,12 @@ export const Dashboard = () => {
                         className={`btn ${punchMode === 'CHECK_OUT' ? 'btn-danger' : 'btn-secondary'} btn-sm`}
                         style={punchMode === 'CHECK_OUT' ? { backgroundColor: '#dc2626', borderColor: '#dc2626', color: '#fff' } : {}}
                       >
-                        {isFieldStaffUser ? 'Site-Out' : 'Office Check-Out'}
+                        {isFieldStaffUser && hybridPunchMode === 'FIELD' ? 'Site-Out (GPS)' : 'Office Check-Out'}
                       </button>
                     </div>
                     <GeoLocationPicker
                       onLocationChange={(c) => setCoords(c)}
-                      targetLocation={branchLocation}
+                      targetLocation={hybridPunchMode === 'OFFICE' ? branchLocation : null}
                     />
                   </div>
 
@@ -1662,10 +1648,10 @@ export const Dashboard = () => {
                     {verifyingFace
                       ? 'Matching Face with Registered Selfie...'
                       : submittingPunch
-                      ? 'Recording Attendance with GPS...'
-                      : punchMode === 'CHECK_IN'
-                      ? (isFieldStaffUser ? 'Match Face & Submit Site-In' : 'Match Face & Submit Office Check-In')
-                      : (isFieldStaffUser ? 'Match Face & Submit Site-Out' : 'Match Face & Submit Office Check-Out')}
+                        ? 'Recording Attendance with GPS...'
+                        : punchMode === 'CHECK_IN'
+                          ? (isFieldStaffUser ? 'Match Face & Submit Site-In' : 'Match Face & Submit Office Check-In')
+                          : (isFieldStaffUser ? 'Match Face & Submit Site-Out' : 'Match Face & Submit Office Check-Out')}
                   </Button>
                 </div>
               </div>

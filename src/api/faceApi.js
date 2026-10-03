@@ -9,66 +9,78 @@ export const faceApi = {
     else faceStatusCache.clear();
   },
 
-  // 1. POST /face/self-enroll - Self-Enroll Biometric Face Profile on First Login
+  // 1. POST /face/self-enroll - Self-Enroll Biometric Face Profile on First Login (Max 3 Images)
   selfEnroll: async (faceImages, targetEmployeeId = null) => {
-    const imagesArray = Array.isArray(faceImages) ? faceImages : [faceImages];
+    const rawArray = Array.isArray(faceImages) ? faceImages : [faceImages];
+    const imagesArray = rawArray.filter(Boolean).slice(0, 3);
     const primaryImage = imagesArray[0];
     const myEmpId = targetEmployeeId || localStorage.getItem('tie_employee_id');
 
     try {
       if (primaryImage) {
         localStorage.setItem('tie_last_enrolled_selfie', primaryImage);
+        localStorage.setItem('tie_last_enrolled_selfies', JSON.stringify(imagesArray));
         if (myEmpId) {
           localStorage.setItem(`tie_reg_selfie_${myEmpId}`, primaryImage);
+          localStorage.setItem(`tie_reg_selfies_${myEmpId}`, JSON.stringify(imagesArray));
           localStorage.setItem(`tie_face_binary_${myEmpId}`, primaryImage);
           localStorage.setItem(`tie_face_enrolled_${myEmpId}`, 'true');
         }
       }
     } catch {}
 
+    const payload = {
+      images: imagesArray,
+      sampleImages: imagesArray,
+      photos: imagesArray,
+      image: primaryImage,
+      count: imagesArray.length,
+      notes: 'Self-Enroll Biometric Face Profile (Max 3 Images)',
+    };
+
     try {
-      const res = await apiClient.post('/face/self-enroll', {
-        images: imagesArray,
-        sampleImages: imagesArray,
-      });
+      const res = await apiClient.post('/face/self-enroll', payload);
       return res.data?.data || res.data;
     } catch (err) {
       if (err.response?.status === 404 && myEmpId) {
-        // When backend hasn't exposed /face/self-enroll, route to employee enrollment which returns 201 Created
-        const res = await apiClient.post(`/face/employees/${myEmpId}/enroll`, {
-          images: imagesArray,
-          sampleImages: imagesArray,
-          notes: 'Self-Enroll Biometric Face Profile on First Login',
-        });
+        const res = await apiClient.post(`/face/employees/${myEmpId}/enroll`, payload);
         return res.data?.data || res.data;
       }
       throw err;
     }
   },
 
-  // 2. POST /face/employees/{employeeId}/enroll - Enroll Employee Face Profile
-  enrollFace: async (employeeId, faceImages, notes = 'Web Biometric Enrollment') => {
+  // 2. POST /face/employees/{employeeId}/enroll - Enroll Employee Face Profile (Max 3 Images)
+  enrollFace: async (employeeId, faceImages, notes = 'Web Biometric Enrollment (Max 3 Images)') => {
     if (!employeeId || employeeId === 'undefined') throw new Error('Employee ID required for face enrollment');
     faceStatusCache.delete(employeeId);
-    const imagesArray = Array.isArray(faceImages) ? faceImages : [faceImages];
+    const rawArray = Array.isArray(faceImages) ? faceImages : [faceImages];
+    const imagesArray = rawArray.filter(Boolean).slice(0, 3);
     const primaryImage = imagesArray[0];
 
     // Always persist to local cache immediately so face is recognized permanently
     try {
       if (primaryImage) {
         localStorage.setItem(`tie_reg_selfie_${employeeId}`, primaryImage);
+        localStorage.setItem(`tie_reg_selfies_${employeeId}`, JSON.stringify(imagesArray));
         localStorage.setItem(`tie_face_binary_${employeeId}`, primaryImage);
         localStorage.setItem(`tie_face_enrolled_${employeeId}`, 'true');
         localStorage.setItem('tie_last_enrolled_selfie', primaryImage);
+        localStorage.setItem('tie_last_enrolled_selfies', JSON.stringify(imagesArray));
       }
     } catch {}
 
+    const payload = {
+      sampleImages: imagesArray,
+      images: imagesArray,
+      photos: imagesArray,
+      image: primaryImage,
+      count: imagesArray.length,
+      notes,
+    };
+
     try {
-      const res = await apiClient.post(`/face/employees/${employeeId}/enroll`, {
-        sampleImages: imagesArray,
-        images: imagesArray,
-        notes,
-      });
+      const res = await apiClient.post(`/face/employees/${employeeId}/enroll`, payload);
       return res.data?.data || res.data;
     } catch (err) {
       if (err.response?.status === 403 || err.response?.status === 404) {
@@ -77,6 +89,7 @@ export const faceApi = {
           status: 'REGISTERED',
           isRegistered: true,
           isEnrolled: true,
+          enrolledCount: imagesArray.length,
           message: 'Face biometrics enrolled and stored for employee.',
         };
         faceStatusCache.set(employeeId, fallbackRes);
@@ -86,28 +99,36 @@ export const faceApi = {
     }
   },
 
-  // 3. PUT /face/employees/{employeeId}/re-enroll - Re-enroll / Update Employee Face Profile
-  reEnrollFace: async (employeeId, faceImages, notes = 'Web Biometric Re-enrollment') => {
+  // 3. PUT /face/employees/{employeeId}/re-enroll - Re-enroll / Update Employee Face Profile (Max 3 Images)
+  reEnrollFace: async (employeeId, faceImages, notes = 'Web Biometric Re-enrollment (Max 3 Images)') => {
     if (!employeeId || employeeId === 'undefined') throw new Error('Employee ID required for face re-enrollment');
     faceStatusCache.delete(employeeId);
-    const imagesArray = Array.isArray(faceImages) ? faceImages : [faceImages];
+    const rawArray = Array.isArray(faceImages) ? faceImages : [faceImages];
+    const imagesArray = rawArray.filter(Boolean).slice(0, 3);
     const primaryImage = imagesArray[0];
 
     try {
       if (primaryImage) {
         localStorage.setItem(`tie_reg_selfie_${employeeId}`, primaryImage);
+        localStorage.setItem(`tie_reg_selfies_${employeeId}`, JSON.stringify(imagesArray));
         localStorage.setItem(`tie_face_binary_${employeeId}`, primaryImage);
         localStorage.setItem(`tie_face_enrolled_${employeeId}`, 'true');
         localStorage.setItem('tie_last_enrolled_selfie', primaryImage);
+        localStorage.setItem('tie_last_enrolled_selfies', JSON.stringify(imagesArray));
       }
     } catch {}
 
+    const payload = {
+      images: imagesArray,
+      sampleImages: imagesArray,
+      photos: imagesArray,
+      image: primaryImage,
+      count: imagesArray.length,
+      notes,
+    };
+
     try {
-      const res = await apiClient.put(`/face/employees/${employeeId}/re-enroll`, {
-        images: imagesArray,
-        sampleImages: imagesArray,
-        notes,
-      });
+      const res = await apiClient.put(`/face/employees/${employeeId}/re-enroll`, payload);
       return res.data?.data || res.data;
     } catch (err) {
       if (err.response?.status === 403 || err.response?.status === 404) {
@@ -116,6 +137,7 @@ export const faceApi = {
           status: 'REGISTERED',
           isRegistered: true,
           isEnrolled: true,
+          enrolledCount: imagesArray.length,
           message: 'Face biometrics re-enrolled and stored for employee.',
         };
         faceStatusCache.set(employeeId, fallbackRes);
@@ -311,7 +333,7 @@ export const faceApi = {
         ? Number(data.matchConfidenceThreshold)
         : data.threshold != null
         ? Number(data.threshold)
-        : 0.85;
+        : 0.80;
       return {
         success: res.data?.success ?? true,
         threshold: thresholdVal,
@@ -320,7 +342,7 @@ export const faceApi = {
         updatedBy: data.updatedBy,
       };
     } catch {
-      return { success: true, threshold: 0.85, matchConfidenceThreshold: 0.85 };
+      return { success: true, threshold: 0.80, matchConfidenceThreshold: 0.80 };
     }
   },
 

@@ -39,9 +39,10 @@ import Select from '../../components/common/Select';
 import Badge from '../../components/common/Badge';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { attendanceNav } from '../../routes/moduleNavConfig';
+import { formatDateOnlyIST, formatTimeIST, getErrorMessage } from '../../utils/formatters';
 
 export const SiteAttendance = () => {
-  const { isSuperAdmin, isHrAdmin, user } = useAuth();
+  const { isSuperAdmin, isHrAdmin, user, branch: globalBranch } = useAuth();
   const { showToast } = useToast();
   const canCorrect = isSuperAdmin || isHrAdmin;
 
@@ -134,9 +135,14 @@ export const SiteAttendance = () => {
   // Load Masters
   const loadMasters = async () => {
     try {
+      const empParams = { limit: 100 };
+      const branchId = globalBranch?._id || globalBranch?.id;
+      if (branchId && branchId !== 'ALL') {
+        empParams.branch = branchId;
+      }
       const [pRes, eRes] = await Promise.allSettled([
         projectTaskApi.getProjects(),
-        employeeApi.getEmployees({ limit: 100 }),
+        employeeApi.getEmployees(empParams),
       ]);
       if (pRes.status === 'fulfilled') {
         setProjects(pRes.value?.projects || pRes.value?.data || []);
@@ -160,6 +166,10 @@ export const SiteAttendance = () => {
     try {
       const params = {};
       if (filters.date) params.date = filters.date;
+      const branchId = globalBranch?._id || globalBranch?.id;
+      if (branchId && branchId !== 'ALL') {
+        params.branch = branchId;
+      }
       if (filters.project) params.project = filters.project;
       if (filters.site) params.site = filters.site;
       if (filters.taskStatus) params.taskStatus = filters.taskStatus;
@@ -209,7 +219,16 @@ export const SiteAttendance = () => {
 
   useEffect(() => {
     loadMasters();
-  }, []);
+  }, [globalBranch]);
+
+  useEffect(() => {
+    const handleContextChange = () => {
+      loadMasters();
+      if (activeTab === 'records') loadRecords();
+    };
+    window.addEventListener('tie:context-changed', handleContextChange);
+    return () => window.removeEventListener('tie:context-changed', handleContextChange);
+  }, [globalBranch, activeTab]);
 
   useEffect(() => {
     if (activeTab === 'records') {

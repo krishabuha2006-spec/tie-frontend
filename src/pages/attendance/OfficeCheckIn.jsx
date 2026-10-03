@@ -6,7 +6,7 @@ import geoApi from '../../api/geoApi';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import { calculateDistanceMeters, resolveBranchLocation } from '../../utils/geoUtils';
-import { compareFacePhotos, resolveRegisteredSelfie } from '../../utils/faceComparison';
+import { compareFacePhotos, resolveRegisteredSelfie, resolveRegisteredSelfies } from '../../utils/faceComparison';
 import {
   Building2, ScanFace, MapPin, Clock, CheckCircle2, XCircle,
   Camera, RefreshCw, LogIn, Loader2,
@@ -18,9 +18,10 @@ import CameraCapture from '../../components/common/CameraCapture';
 import GeoLocationPicker from '../../components/common/GeoLocationPicker';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { attendanceNav } from '../../routes/moduleNavConfig';
+import { formatDateOnlyIST, formatTimeIST, getErrorMessage } from '../../utils/formatters';
 
 export const OfficeCheckIn = () => {
-  const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager } = useAuth();
+  const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager, branch: globalBranch } = useAuth();
   const isOrgAdmin = isSuperAdmin || isHrAdmin || isDirector || isBranchManager;
   const { showToast } = useToast();
 
@@ -95,7 +96,12 @@ export const OfficeCheckIn = () => {
           return;
         }
 
-        const res = await employeeApi.getEmployees({ limit: 200 });
+        const params = { limit: 200 };
+        const branchId = globalBranch?._id || globalBranch?.id;
+        if (branchId && branchId !== 'ALL') {
+          params.branch = branchId;
+        }
+        const res = await employeeApi.getEmployees(params);
         const list = res?.data || [];
         const enriched = await Promise.all(
           list.map(async (emp) => {
@@ -114,6 +120,8 @@ export const OfficeCheckIn = () => {
           setSelectedEmpId(myId);
         } else if (enriched.length > 0) {
           setSelectedEmpId(enriched[0]._id);
+        } else {
+          setSelectedEmpId('');
         }
       } catch {
         showToast('Failed to load employees', 'error');
@@ -121,7 +129,7 @@ export const OfficeCheckIn = () => {
         setLoadingEmps(false);
       }
     })();
-  }, [user, isOrgAdmin]);
+  }, [user, isOrgAdmin, globalBranch]);
 
   const selectedEmp = employees.find((e) => e._id === selectedEmpId);
   const empName = getEmpName(selectedEmp);
@@ -153,24 +161,24 @@ export const OfficeCheckIn = () => {
     setFaceResult(null);
     setFaceVerifying(true);
     try {
-      // 1. Resolve registered selfie from all storage layers
-      const regPhoto = await resolveRegisteredSelfie(selectedEmpId, empCode, selectedEmp);
+      // 1. Resolve registered selfie samples from all storage layers
+      const regPhotosList = await resolveRegisteredSelfies(selectedEmpId, empCode, selectedEmp);
 
-      if (!regPhoto) {
+      if (!regPhotosList || regPhotosList.length === 0) {
         setFaceResult({
           matched: false,
           confidence: 0,
           logId: null,
           matchResult: 'NO_REGISTERED_FACE',
-          reason: 'No registered selfie found for this employee. Please register your selfie with Admin first before marking attendance.',
+          reason: 'No registered face template found for this employee. Please enroll face biometrics first before marking attendance.',
         });
-        showToast('No registered selfie found! Please contact Admin to register your selfie.', 'error');
+        showToast('No registered face template found! Please enroll face biometrics first.', 'error');
         setFaceVerifying(false);
         return;
       }
 
-      // 2. Compare live webcam capture with registered selfie
-      const comp = await compareFacePhotos(regPhoto, img, 0.60);
+      // 2. Compare live webcam capture with registered selfie samples (Threshold: 0.80)
+      const comp = await compareFacePhotos(regPhotosList, img, 0.80);
 
       // 3. Also log with backend faceApi
       let logId = null;
@@ -294,11 +302,11 @@ export const OfficeCheckIn = () => {
       showToast('Check-In successfully recorded! Face & 500m location verified.', 'success');
       setCheckinResult({
         success: true, empName, empCode,
-        checkInTime: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        date: now.toLocaleDateString(), confidence, address,
+        checkInTime: formatTimeIST(now),
+        date: formatDateOnlyIST(now), confidence, address,
       });
     } catch (err) {
-      const msg = err.response?.data?.message || 'Check-In submission failed';
+      const msg = getErrorMessage(err, 'Check-In submission failed');
       showToast(msg, 'error');
       setCheckinResult({ success: false, reason: msg });
     } finally {

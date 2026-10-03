@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment variables (sensitive - never push)
+.env
+.env.local
+.env.production
+.env.*.local

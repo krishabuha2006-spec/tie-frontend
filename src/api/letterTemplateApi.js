@@ -7,7 +7,7 @@ export const letterTemplateApi = {
     return res.data;
   },
 
-  // 2. POST /letter-templates - Create / Update Letter Template (Pure API)
+
   createLetterTemplate: async (data) => {
     const payload = {
       type: data.type || 'JOINING_LETTER',

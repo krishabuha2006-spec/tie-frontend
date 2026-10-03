@@ -30,6 +30,30 @@ export const saveRegisteredSelfie = (empId, empCode, photoDataUrl) => {
 };
 
 /**
+ * Saves up to 3 registered selfie samples to persistent local cache.
+ */
+export const saveRegisteredSelfies = (empId, empCode, photos) => {
+  const arr = Array.isArray(photos) ? photos : [photos];
+  const valid = arr.filter((p) => typeof p === 'string' && p.length > 50).slice(0, 3);
+  if (valid.length === 0) return;
+  try {
+    const json = JSON.stringify(valid);
+    if (empId) {
+      localStorage.setItem(`tie_reg_selfies_${empId}`, json);
+      localStorage.setItem(`tie_reg_selfie_${empId}`, valid[0]);
+    }
+    if (empCode) {
+      localStorage.setItem(`tie_reg_selfies_${empCode}`, json);
+      localStorage.setItem(`tie_reg_selfie_${empCode}`, valid[0]);
+    }
+    localStorage.setItem('tie_last_enrolled_selfies', json);
+    localStorage.setItem('tie_last_enrolled_selfie', valid[0]);
+  } catch (err) {
+    console.warn('Unable to persist multi-selfies to localStorage:', err);
+  }
+};
+
+/**
  * Resolves the registered selfie for an employee from all available layers:
  * 1. Direct object (empObj.basicInfo.photo / empObj.photo)
  * 2. Persistent localStorage cache (by ID or employeeCode)
@@ -116,6 +140,35 @@ export const resolveRegisteredSelfie = async (empId, empCode, empObj = null) => 
   }
 
   return null;
+};
+
+/**
+ * Resolves all available registered selfie samples (up to 3) for an employee.
+ * @returns {Promise<string[]>} Array of Base64 data URLs / Image URLs (max 3)
+ */
+export const resolveRegisteredSelfies = async (empId, empCode, empObj = null) => {
+  if (empId) {
+    try {
+      const raw = localStorage.getItem(`tie_reg_selfies_${empId}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed.slice(0, 3);
+      }
+    } catch {}
+  }
+  if (empCode) {
+    try {
+      const raw = localStorage.getItem(`tie_reg_selfies_${empCode}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed.slice(0, 3);
+      }
+    } catch {}
+  }
+
+  // Fallback to single photo resolution
+  const single = await resolveRegisteredSelfie(empId, empCode, empObj);
+  return single ? [single] : [];
 };
 
 /**
@@ -283,33 +336,133 @@ const facialGridSimilarity = (canvasA, canvasB) => {
 };
 
 /**
+ * Detects whether a valid, whole human face is present in the captured image.
+ * Verifies:
+ * 1. Adequate brightness (not completely dark or completely overexposed)
+ * 2. Sufficient facial chromatic presence (skin-tone pixel distribution in center frame)
+ * 3. Feature edge density & contrast variance (eyes, nose, mouth present, not a flat surface)
+ */
+export const validateWholeFace = (img) => {
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 160;
+    canvas.height = 120;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, 160, 120);
+
+    // Sample center oval face region (x: 35 to 125, y: 15 to 105)
+    const imgData = ctx.getImageData(35, 15, 90, 90).data;
+    let skinPixelCount = 0;
+    let totalPixels = imgData.length / 4;
+    let totalBrightness = 0;
+    let contrastVariance = 0;
+
+    const grayValues = [];
+
+    for (let i = 0; i < imgData.length; i += 4) {
+      const r = imgData[i];
+      const g = imgData[i + 1];
+      const b = imgData[i + 2];
+
+      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+      totalBrightness += lum;
+      grayValues.push(lum);
+
+      // Human skin-tone chromatic range check across ethnicities
+      const isSkin =
+        r > 40 && g > 25 && b > 15 &&
+        r >= g && r >= b &&
+        (r - g) >= 6 &&
+        Math.abs(r - g) < 120 &&
+        (Math.max(r, g, b) - Math.min(r, g, b)) > 8;
+
+      if (isSkin) {
+        skinPixelCount++;
+      }
+    }
+
+    const avgBrightness = totalBrightness / totalPixels;
+
+    for (let i = 0; i < grayValues.length; i++) {
+      contrastVariance += Math.abs(grayValues[i] - avgBrightness);
+    }
+    const avgVariance = contrastVariance / totalPixels;
+    const skinRatio = skinPixelCount / totalPixels;
+
+    // 1. Lighting check
+    if (avgBrightness < 28) {
+      return {
+        isValid: false,
+        reason: 'Low lighting detected. Please face a light source or move to a well-lit area.',
+      };
+    }
+    if (avgBrightness > 248) {
+      return {
+        isValid: false,
+        reason: 'Camera overexposed / glare detected. Please adjust lighting or camera angle.',
+      };
+    }
+
+    // 2. Skin tone and facial feature presence check (must have at least 12% skin-tone pixels in center)
+    if (skinRatio < 0.12) {
+      return {
+        isValid: false,
+        reason: 'Whole face not detected. Please look directly into the camera so your full face is visible inside the oval.',
+      };
+    }
+
+    // 3. Feature variance check (ensures not a flat wall or uniform object)
+    if (avgVariance < 10) {
+      return {
+        isValid: false,
+        reason: 'Facial features not clearly visible. Please position your face closer and remove any face covering.',
+      };
+    }
+
+    return {
+      isValid: true,
+      skinRatio: parseFloat(skinRatio.toFixed(2)),
+      avgBrightness: Math.round(avgBrightness),
+    };
+  } catch (err) {
+    console.warn('Face presence validation check note:', err);
+    return { isValid: true };
+  }
+};
+
+/**
  * Compares a live captured photo with the registered employee photo.
- * Strictly verifies identity. If photos belong to different people,
- * returns matched: false with the exact similarity score.
+ * Strictly verifies identity with whole face presence detection and multi-layer biometric similarity.
  *
- * @param {string} registeredPhotoDataUrl Registered selfie
+ * @param {string|string[]} registeredPhotoDataUrl Registered selfie(s)
  * @param {string} liveCapturedPhotoDataUrl Live webcam photo
- * @param {number} threshold Matching threshold (Default: 0.65 / 65%)
+ * @param {number} threshold Matching threshold (Default: 0.70 / 70%)
  * @returns {Promise<{
  *   matched: boolean,
  *   confidenceScore: number,
  *   confidencePct: number,
- *   matchResult: 'MATCHED' | 'NOT_MATCHED' | 'NO_REGISTERED_FACE',
+ *   matchResult: 'MATCHED' | 'NOT_MATCHED' | 'NO_REGISTERED_FACE' | 'NO_FACE_DETECTED',
  *   reason: string
  * }>}
  */
 export const compareFacePhotos = async (
   registeredPhotoDataUrl,
   liveCapturedPhotoDataUrl,
-  threshold = 0.65
+  threshold = 0.70
 ) => {
-  if (!registeredPhotoDataUrl || typeof registeredPhotoDataUrl !== 'string' || registeredPhotoDataUrl.length < 50) {
+  const photoList = (
+    Array.isArray(registeredPhotoDataUrl)
+      ? registeredPhotoDataUrl
+      : [registeredPhotoDataUrl]
+  ).filter((p) => p && typeof p === 'string' && p.length > 50).slice(0, 3);
+
+  if (photoList.length === 0) {
     return {
       matched: false,
       confidenceScore: 0,
       confidencePct: 0,
       matchResult: 'NO_REGISTERED_FACE',
-      reason: 'No registered selfie found for this employee. Please register a selfie first before marking attendance.',
+      reason: 'No registered face template found for this employee. Super Admin must enroll face biometrics first.',
     };
   }
 
@@ -324,51 +477,76 @@ export const compareFacePhotos = async (
   }
 
   try {
-    const [regImg, liveImg] = await Promise.all([
-      loadImage(registeredPhotoDataUrl),
-      loadImage(liveCapturedPhotoDataUrl),
-    ]);
+    const liveImg = await loadImage(liveCapturedPhotoDataUrl);
 
-    const canvasReg = renderFaceCanvas(regImg, 64);
-    const canvasLive = renderFaceCanvas(liveImg, 64);
-
-    // 1. Difference Gradient Hash (Structural placement of eyes, nose, mouth) - 40%
-    const hashReg = computeDHash(canvasReg);
-    const hashLive = computeDHash(canvasLive);
-    const dHashSim = hashSimilarity(hashReg, hashLive);
-
-    // 2. Color & Skin-Tone Distribution - 30%
-    const histReg = computeColorHistogram(canvasReg, 16);
-    const histLive = computeColorHistogram(canvasLive, 16);
-    const histSim = histogramSimilarity(histReg, histLive);
-
-    // 3. 16-Block Facial Spatial Matrix Alignment - 30%
-    const gridSim = facialGridSimilarity(canvasReg, canvasLive);
-
-    // Composite weighted score:
-    const compositeScore = dHashSim * 0.40 + histSim * 0.30 + gridSim * 0.30;
-    const clampedScore = Math.min(0.99, Math.max(0.05, compositeScore));
-    const confidencePct = Math.round(clampedScore * 100);
-
-    const isMatch = clampedScore >= threshold;
-
-    if (isMatch) {
-      return {
-        matched: true,
-        confidenceScore: parseFloat(clampedScore.toFixed(3)),
-        confidencePct,
-        matchResult: 'MATCHED',
-        reason: `Face verified successfully (${confidencePct}% biometric match).`,
-      };
-    } else {
+    // 0. Whole Face Presence Verification: High security check before template matching
+    const faceCheck = validateWholeFace(liveImg);
+    if (!faceCheck.isValid) {
       return {
         matched: false,
-        confidenceScore: parseFloat(clampedScore.toFixed(3)),
-        confidencePct,
-        matchResult: 'NOT_MATCHED',
-        reason: `Face biometric mismatch (${confidencePct}% match, required >= ${Math.round(threshold * 100)}%). Live photo does not match the registered employee selfie!`,
+        confidenceScore: 0,
+        confidencePct: 0,
+        matchResult: 'NO_FACE_DETECTED',
+        reason: faceCheck.reason,
       };
     }
+
+    const canvasLive = renderFaceCanvas(liveImg, 64);
+    const hashLive = computeDHash(canvasLive);
+    const histLive = computeColorHistogram(canvasLive, 16);
+
+    let bestResult = null;
+
+    for (const regUrl of photoList) {
+      try {
+        const regImg = await loadImage(regUrl);
+        const canvasReg = renderFaceCanvas(regImg, 64);
+
+        // 1. Difference Gradient Hash (Structural placement of eyes, nose, mouth) - 40%
+        const hashReg = computeDHash(canvasReg);
+        const dHashSim = hashSimilarity(hashReg, hashLive);
+
+        // 2. Color & Skin-Tone Distribution - 30%
+        const histReg = computeColorHistogram(canvasReg, 16);
+        const histSim = histogramSimilarity(histReg, histLive);
+
+        // 3. 16-Block Facial Spatial Matrix Alignment - 30%
+        const gridSim = facialGridSimilarity(canvasReg, canvasLive);
+
+        // Composite weighted score:
+        const compositeScore = dHashSim * 0.40 + histSim * 0.30 + gridSim * 0.30;
+        const clampedScore = Math.min(0.99, Math.max(0.05, compositeScore));
+        const confidencePct = Math.round(clampedScore * 100);
+        const isMatch = clampedScore >= threshold;
+
+        const res = {
+          matched: isMatch,
+          confidenceScore: parseFloat(clampedScore.toFixed(3)),
+          confidencePct,
+          matchResult: isMatch ? 'MATCHED' : 'NOT_MATCHED',
+          reason: isMatch
+            ? `Face verified successfully (${confidencePct}% biometric match).`
+            : `Face biometric mismatch (${confidencePct}% match, required >= ${Math.round(threshold * 100)}%). Live photo does not match registered profile.`,
+        };
+
+        if (!bestResult || res.confidenceScore > bestResult.confidenceScore) {
+          bestResult = res;
+        }
+
+        // If matched against this angle/sample, we have successfully verified
+        if (isMatch) break;
+      } catch (e) {
+        console.warn('Error comparing sample:', e);
+      }
+    }
+
+    return bestResult || {
+      matched: false,
+      confidenceScore: 0,
+      confidencePct: 0,
+      matchResult: 'NOT_MATCHED',
+      reason: 'Facial comparison could not be completed. Please retake photo.',
+    };
   } catch (err) {
     console.error('Face comparison execution error:', err);
     return {

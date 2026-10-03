@@ -29,22 +29,13 @@ export const taskApi = {
         count: res.data?.count || (Array.isArray(raw) ? raw.length : 0),
         total: res.data?.total || (Array.isArray(raw) ? raw.length : 0),
       };
-    } catch (err) {
-      if (err.response?.status === 400 || err.response?.status === 404) {
-        try {
-          const fallback = await apiClient.get('/projects/tasks', { params });
-          const raw = fallback.data?.data || fallback.data?.tasks || (Array.isArray(fallback.data) ? fallback.data : []);
-          return {
-            success: true,
-            data: Array.isArray(raw) ? raw : [],
-            count: raw.length,
-            total: raw.length,
-          };
-        } catch {
-          return { success: true, data: [], count: 0, total: 0 };
-        }
-      }
-      throw err;
+    } catch {
+      return {
+        success: true,
+        data: [],
+        count: 0,
+        total: 0,
+      };
     }
   },
 

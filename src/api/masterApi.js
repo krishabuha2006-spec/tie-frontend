@@ -120,8 +120,15 @@ export const masterApi = {
 
   // Departments
   getDepartments: async (params) => {
-    const res = await apiClient.get('/departments', { params });
-    return res.data;
+    try {
+      const res = await apiClient.get('/departments', { params });
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 403 || err.response?.status === 401) {
+        return { success: true, data: [], departments: [] };
+      }
+      throw err;
+    }
   },
   getDepartmentById: async (id) => {
     const res = await apiClient.get(`/departments/${id}`);
@@ -142,8 +149,15 @@ export const masterApi = {
 
   // Designations
   getDesignations: async (params) => {
-    const res = await apiClient.get('/designations', { params });
-    return res.data;
+    try {
+      const res = await apiClient.get('/designations', { params });
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 403 || err.response?.status === 401) {
+        return { success: true, data: [], designations: [] };
+      }
+      throw err;
+    }
   },
 
   // GET /designations/levels — Returns enterprise levels 1-10 from backend

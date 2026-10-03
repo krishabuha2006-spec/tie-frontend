@@ -1,6 +1,7 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import userApi from '../../api/userApi';
 import masterApi from '../../api/masterApi';
+import employeeApi from '../../api/employeeApi';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import { validateEmail, validatePhone } from '../../utils/validation';
@@ -164,9 +165,11 @@ export const Users = () => {
 
   const [editForm, setEditForm] = useState({
     name: '',
+    email: '',
     roles: [],     // Array of role IDs (multi-role)
     branchId: '',
     isActive: true,
+    password: '',
   });
 
   const { showToast } = useToast();
@@ -215,9 +218,11 @@ export const Users = () => {
     }
     setEditForm({
       name: u.name || '',
+      email: u.email || '',
       roles: resolvedRoleIds,
       branchId: typeof u.branch === 'object' ? u.branch?._id || '' : u.branchId || '',
       isActive: u.isActive !== false,
+      password: '',
     });
     setEditModalOpen(true);
   };
@@ -245,7 +250,7 @@ export const Users = () => {
       const primaryRoleObj = roles.find((r) => r._id === primaryRoleId);
       const defaultCompany = user?.company?._id || user?.company || companies[0]?._id;
 
-      await userApi.createUser({
+      const userRes = await userApi.createUser({
         name: createForm.name.trim(),
         email: createForm.email.trim().toLowerCase(),
         password: createForm.password,
@@ -259,7 +264,38 @@ export const Users = () => {
         mobile: createForm.mobile?.trim() || undefined,
         isActive: createForm.isActive,
       });
-      showToast('System user created successfully!', 'success');
+
+      // Auto-create employee record so User = Employee sync is maintained
+      // This mirrors backend syncUserEmployee.js logic on the frontend side
+      try {
+        const newUser = userRes?.data || userRes?.user || userRes;
+        const newUserId = newUser?._id || newUser?.id;
+        const nameParts = (createForm.name.trim() || 'User').split(' ');
+        const firstName = nameParts[0] || 'User';
+        const lastName = nameParts.slice(1).join(' ') || '';
+
+        await employeeApi.createEmployee({
+          firstName,
+          lastName,
+          email: createForm.email.trim().toLowerCase(),
+          phone: createForm.mobile?.trim() || '',
+          company: defaultCompany || undefined,
+          branch: createForm.branchId || undefined,
+          department: '',
+          designation: primaryRoleObj?.displayName || primaryRoleObj?.name || 'Employee',
+          employmentType: 'FULL_TIME',
+          workType: 'OFFICE',
+          employeeStatus: createForm.isActive !== false ? 'ACTIVE' : 'INACTIVE',
+          dateOfJoining: new Date().toISOString().split('T')[0],
+          userId: newUserId || undefined,
+        });
+        showToast('User and Employee profile created successfully!', 'success');
+      } catch (empErr) {
+        // Employee creation failure is non-blocking — user was created successfully
+        console.warn('Employee auto-create note:', empErr?.response?.data?.message || empErr?.message);
+        showToast('User created. Note: Employee profile may need manual setup.', 'warning');
+      }
+
       setCreateModalOpen(false);
       loadData();
     } catch (err) {
@@ -276,17 +312,31 @@ export const Users = () => {
       showToast('Please assign at least one role', 'warning');
       return;
     }
+    if (editForm.password?.trim() && editForm.password.trim().length < 6) {
+      showToast('Password must be at least 6 characters long', 'warning');
+      return;
+    }
     setSubmitting(true);
     try {
-      await userApi.updateUser(editingUserId, {
+      const updatePayload = {
         name: editForm.name.trim(),
         role: editForm.roles[0],       // primary role (backward compat)
         roles: editForm.roles,          // full roles array
         branch: editForm.branchId || undefined,
         branchId: editForm.branchId || undefined,
         isActive: editForm.isActive,
-      });
-      showToast('User details updated successfully!', 'success');
+      };
+      if (editForm.password?.trim()) {
+        updatePayload.password = editForm.password.trim();
+      }
+
+      await userApi.updateUser(editingUserId, updatePayload);
+      showToast(
+        editForm.password?.trim()
+          ? 'User details and login password updated successfully!'
+          : 'User details updated successfully!',
+        'success'
+      );
       setEditModalOpen(false);
       loadData();
     } catch (err) {
@@ -510,9 +560,26 @@ export const Users = () => {
       </Modal>
 
       {/* Edit User Modal */}
-      <Modal isOpen={editModalOpen} onClose={() => setEditModalOpen(false)} title="Edit System User Details">
+      <Modal isOpen={editModalOpen} onClose={() => setEditModalOpen(false)} title="Edit System User Details & Credentials">
         <form onSubmit={handleEditSubmit}>
           <Input label="Full Name" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} placeholder="Enter full name" required />
+
+          <Input
+            label="Login Email"
+            type="email"
+            value={editForm.email}
+            disabled
+            helperText="Official login email address associated with employee profile"
+          />
+
+          <Input
+            label="Set / Change Login Password"
+            type="password"
+            value={editForm.password}
+            onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
+            placeholder="Enter new password (leave blank to keep current)"
+            helperText="Minimum 6 characters. Leave blank if you do not want to change the password."
+          />
 
           <RoleMultiSelect
             label="Assigned RBAC Roles (Multi-Select)"

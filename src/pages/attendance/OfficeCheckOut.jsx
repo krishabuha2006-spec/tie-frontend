@@ -17,7 +17,8 @@ import GeoLocationPicker from '../../components/common/GeoLocationPicker';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { attendanceNav } from '../../routes/moduleNavConfig';
 import { calculateDistanceMeters, resolveBranchLocation } from '../../utils/geoUtils';
-import { compareFacePhotos, resolveRegisteredSelfie } from '../../utils/faceComparison';
+import { compareFacePhotos, resolveRegisteredSelfie, resolveRegisteredSelfies } from '../../utils/faceComparison';
+import { formatDateOnlyIST, formatTimeIST, getErrorMessage } from '../../utils/formatters';
 
 const formatHours = (h) => {
   if (!h || h <= 0) return '0h 0m';
@@ -33,7 +34,7 @@ const calcHours = (inISO, outISO) => {
 };
 
 export const OfficeCheckOut = () => {
-  const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager } = useAuth();
+  const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager, branch: globalBranch } = useAuth();
   const isOrgAdmin = isSuperAdmin || isHrAdmin || isDirector || isBranchManager;
   const { showToast } = useToast();
 
@@ -110,7 +111,12 @@ export const OfficeCheckOut = () => {
           return;
         }
 
-        const res = await employeeApi.getEmployees({ limit: 200 });
+        const params = { limit: 200 };
+        const branchId = globalBranch?._id || globalBranch?.id;
+        if (branchId && branchId !== 'ALL') {
+          params.branch = branchId;
+        }
+        const res = await employeeApi.getEmployees(params);
         const list = res?.data || [];
         const enriched = await Promise.all(
           list.map(async (emp) => {
@@ -129,6 +135,8 @@ export const OfficeCheckOut = () => {
           setSelectedEmpId(myId);
         } else if (enriched.length > 0) {
           setSelectedEmpId(enriched[0]._id);
+        } else {
+          setSelectedEmpId('');
         }
       } catch {
         showToast('Failed to load employees', 'error');
@@ -136,7 +144,7 @@ export const OfficeCheckOut = () => {
         setLoadingEmps(false);
       }
     })();
-  }, [user, isOrgAdmin]);
+  }, [user, isOrgAdmin, globalBranch]);
 
   useEffect(() => {
     if (!selectedEmpId) return;
@@ -201,24 +209,24 @@ export const OfficeCheckOut = () => {
     setFaceResult(null);
     setFaceVerifying(true);
     try {
-      // 1. Resolve registered selfie from all storage layers
-      const regPhoto = await resolveRegisteredSelfie(selectedEmpId, empCode, selectedEmp);
+      // 1. Resolve registered selfie samples from all storage layers
+      const regPhotosList = await resolveRegisteredSelfies(selectedEmpId, empCode, selectedEmp);
 
-      if (!regPhoto) {
+      if (!regPhotosList || regPhotosList.length === 0) {
         setFaceResult({
           matched: false,
           confidence: 0,
           logId: null,
           matchResult: 'NO_REGISTERED_FACE',
-          reason: 'No registered selfie found for this employee. Please register your selfie with Admin first before marking attendance.',
+          reason: 'No registered face template found for this employee. Please enroll face biometrics first before marking attendance.',
         });
-        showToast('No registered selfie found! Please contact Admin to register your selfie.', 'error');
+        showToast('No registered face template found! Please enroll face biometrics first.', 'error');
         setFaceVerifying(false);
         return;
       }
 
-      // 2. Compare live webcam capture with registered selfie
-      const comp = await compareFacePhotos(regPhoto, img, 0.60);
+      // 2. Compare live webcam capture with registered selfie samples (Threshold: 0.80)
+      const comp = await compareFacePhotos(regPhotosList, img, 0.80);
 
       // 3. Also log with backend faceApi
       let logId = null;
@@ -347,13 +355,13 @@ export const OfficeCheckOut = () => {
       showToast('Check-Out recorded successfully!', 'success');
       setCheckoutResult({
         success: true, empName, empCode,
-        checkOutTime: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        checkInTime: checkInTimeStr, date: now.toLocaleDateString(),
+        checkOutTime: formatTimeIST(now),
+        checkInTime: checkInTimeStr, date: formatDateOnlyIST(now),
         totalWorkingHours: finalHours, overtimeHours: finalOT,
         confidence: faceResult?.confidence || 95, address,
       });
     } catch (err) {
-      const msg = err.response?.data?.message || 'Check-Out submission failed';
+      const msg = getErrorMessage(err, 'Check-Out submission failed');
       showToast(msg, 'error');
       setCheckoutResult({ success: false, reason: msg });
     } finally {

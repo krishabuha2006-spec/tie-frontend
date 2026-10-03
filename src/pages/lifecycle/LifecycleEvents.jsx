@@ -48,7 +48,7 @@ import { extractApiData } from '../../utils/apiUtils';
 
 export const LifecycleEvents = () => {
   const confirm = useConfirm();
-  const { user, isSuperAdmin, isHrAdmin } = useAuth();
+  const { user, isSuperAdmin, isHrAdmin, branch: globalBranch } = useAuth();
   const canManage = isSuperAdmin || isHrAdmin;
   const { showToast } = useToast();
 
@@ -153,7 +153,18 @@ export const LifecycleEvents = () => {
   // -------------------------------------------------------------------------
   useEffect(() => {
     loadMasters();
-  }, []);
+  }, [globalBranch]);
+
+  useEffect(() => {
+    const handleContext = () => {
+      loadMasters();
+      if (activeTab === 'events' || activeTab === 'approvals') {
+        loadAllEvents();
+      }
+    };
+    window.addEventListener('tie:context-changed', handleContext);
+    return () => window.removeEventListener('tie:context-changed', handleContext);
+  }, [activeTab, globalBranch]);
 
   useEffect(() => {
     if (activeTab === 'events' || activeTab === 'approvals') {
@@ -167,8 +178,13 @@ export const LifecycleEvents = () => {
 
   const loadMasters = async () => {
     try {
+      const activeBranchId = globalBranch?._id || globalBranch?.id || (typeof globalBranch === 'string' ? globalBranch : '');
+      const empParams = { limit: 300 };
+      if (activeBranchId && activeBranchId !== 'ALL') {
+        empParams.branch = activeBranchId;
+      }
       const [eRes, desRes, depRes, bRes] = await Promise.all([
-        employeeApi.getEmployees({ limit: 300 }).catch(() => ({ data: [] })),
+        employeeApi.getEmployees(empParams).catch(() => ({ data: [] })),
         masterApi.getDesignations().catch(() => ({ data: [] })),
         masterApi.getDepartments().catch(() => ({ data: [] })),
         masterApi.getBranches().catch(() => ({ data: [] })),
@@ -461,6 +477,17 @@ export const LifecycleEvents = () => {
 
   // Filtered Events
   const filteredEvents = events.filter((ev) => {
+    const activeBranchId = globalBranch?._id || globalBranch?.id || (typeof globalBranch === 'string' ? globalBranch : '');
+    if (activeBranchId && activeBranchId !== 'ALL') {
+      const empBranchId =
+        ev.employee?.employmentInfo?.branch?._id ||
+        ev.employee?.employmentInfo?.branch?.id ||
+        ev.employee?.employmentInfo?.branch ||
+        ev.employee?.branch?._id ||
+        ev.employee?.branch;
+      if (empBranchId && String(empBranchId) !== String(activeBranchId)) return false;
+    }
+
     const evType = ev.type || ev.eventType || '';
     if (eventTypeFilter !== 'ALL' && evType !== eventTypeFilter) return false;
     if (statusFilter !== 'ALL' && (ev.status || '') !== statusFilter) return false;
@@ -480,7 +507,7 @@ export const LifecycleEvents = () => {
     return true;
   });
 
-  const pendingApprovalsList = events.filter(
+  const pendingApprovalsList = filteredEvents.filter(
     (ev) => ev.status === 'PENDING' || ev.status === 'PENDING_APPROVAL'
   );
 

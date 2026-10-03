@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import tieLogo from '../../assets/logo.jpg';
 import { useAuth } from '../../context/AuthContext';
@@ -328,6 +328,26 @@ export const Login = () => {
     }
   }, [urlToken]);
 
+  // Listen for concurrent device login or session expiration
+  useEffect(() => {
+    try {
+      const storedNotice = sessionStorage.getItem('tie_session_expired_notice');
+      const searchParams = new URLSearchParams(window.location.search);
+      if (storedNotice || searchParams.get('expired')) {
+        const noticeMsg = storedNotice || 'You were logged out because this account was logged in from another device.';
+        setErrorMessage(noticeMsg);
+        sessionStorage.removeItem('tie_session_expired_notice');
+      }
+    } catch {}
+
+    const handleSessionExpired = (e) => {
+      const msg = e.detail?.message || 'You were logged in from another device.';
+      setErrorMessage(msg);
+    };
+    window.addEventListener('tie:session-expired', handleSessionExpired);
+    return () => window.removeEventListener('tie:session-expired', handleSessionExpired);
+  }, []);
+
   // Ensure all companies and branches are loaded whenever entering workspace selection
   useEffect(() => {
     if (mode === 'select-workspace') {
@@ -503,8 +523,24 @@ export const Login = () => {
     setErrorMessage('');
   };
 
-  // Show all system branches so user can select any branch location in the organization
-  const branchesToDisplay = branchList;
+  // Show all system branches for super admin / director, but lock to assigned branch for branch users
+  const isSuperAdminUser = Boolean(
+    authenticatedUser?.isSuperAdmin ||
+    authenticatedUser?.role?.isSuperAdmin ||
+    (Array.isArray(authenticatedUser?.roles) && authenticatedUser.roles.some((r) => r?.isSuperAdmin)) ||
+    /(super_admin|director)/i.test(String(authenticatedUser?.role?.name || authenticatedUser?.role || ''))
+  );
+
+  const branchesToDisplay = useMemo(() => {
+    if (isSuperAdminUser) return branchList;
+    if (authenticatedUser?.branch) {
+      const uBId = authenticatedUser.branch._id || authenticatedUser.branch.id || (typeof authenticatedUser.branch === 'string' ? authenticatedUser.branch : '');
+      const matched = branchList.filter((b) => String(b._id || b.id) === String(uBId));
+      if (matched.length > 0) return matched;
+      return typeof authenticatedUser.branch === 'object' ? [authenticatedUser.branch] : branchList;
+    }
+    return branchList;
+  }, [branchList, authenticatedUser, isSuperAdminUser]);
 
   // Forgot Password Submit
   const handleForgotSubmit = async (e) => {

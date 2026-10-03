@@ -160,8 +160,16 @@ export const roleApi = {
       }
     } catch {}
 
-    const res = await apiClient.put(`/roles/${id}/permissions`, { permissions: sanitized }, { timeout: 30000 });
-    return res.data;
+    try {
+      const res = await apiClient.put(`/roles/${id}/permissions`, { permissions: sanitized }, { timeout: 30000 });
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 404 || err.response?.status === 405) {
+        const res = await apiClient.put(`/roles/${id}`, { permissions: sanitized }, { timeout: 30000 });
+        return res.data;
+      }
+      throw err;
+    }
   },
 };
 

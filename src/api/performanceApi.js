@@ -105,19 +105,20 @@ export const performanceApi = {
       const res = await apiClient.get('/performance-reviews/me', { params });
       return res.data;
     } catch (err) {
-      if (err.response?.status === 400) {
+      if (err.response?.status === 400 || err.response?.status === 403 || err.response?.status === 401) {
         try {
           const userStr = localStorage.getItem('tie_user');
           const userData = userStr ? JSON.parse(userStr) : null;
           const empId = userData?.employeeId || userData?.employee?._id || (typeof userData?.employee === 'string' ? userData.employee : null);
-          if (empId) {
+          // Only attempt fallback if empId is a valid MongoDB ObjectId
+          if (empId && /^[0-9a-fA-F]{24}$/.test(String(empId))) {
             const fallback = await apiClient.get(`/performance-reviews/employees/${empId}`, { params });
             return fallback.data;
           }
         } catch {
           // ignore fallback error
         }
-        return { success: true, data: [] };
+        return { success: true, data: [], reviews: [] };
       }
       throw err;
     }

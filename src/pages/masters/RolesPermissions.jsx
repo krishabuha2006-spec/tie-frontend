@@ -22,6 +22,10 @@ import {
   Users,
   FolderKanban,
   Building2,
+  Info,
+  Briefcase,
+  Wrench,
+  Layers,
 } from 'lucide-react';
 import Modal from '../../components/common/Modal';
 import Button from '../../components/common/Button';
@@ -107,10 +111,116 @@ export const DEFAULT_PERMISSION_CATALOG = {
         { subModuleKey: 'departments', displayName: 'Departments', description: 'Functional organizational departments' },
         { subModuleKey: 'designations', displayName: 'Designations', description: 'Job designations & title hierarchy' },
         { subModuleKey: 'roles', displayName: 'Roles & RBAC', description: 'Role profiles & granular permission matrices' },
+        { subModuleKey: 'users', displayName: 'Users & Logins', description: 'User login credentials, active accounts & role assignments' },
       ],
     },
   ],
 };
+
+// ─── 1-Click Role Presets (Templates to populate permission matrix) ─────────
+export const ROLE_PRESETS = [
+  {
+    id: 'office_staff',
+    name: 'Office Staff / Employee',
+    badge: 'Office Staff',
+    color: '#0d9488',
+    description: 'Attendance office punch, Work Calendar, Leaves, Holidays & personal Payslips view',
+    permissions: {
+      'hrm.attendance': { view: true, create: true, edit: false, delete: false, approve: false, reject: false, export: false, print: true, download: true, uploadDocuments: false, assignTasks: false, viewReports: false },
+      'hrm.calendar': { view: true, create: false, edit: false, delete: false, approve: false, reject: false, export: false, print: true, download: true, uploadDocuments: false, assignTasks: false, viewReports: false },
+      'hrm.leaves': { view: true, create: true, edit: false, delete: false, approve: false, reject: false, export: false, print: false, download: true, uploadDocuments: true, assignTasks: false, viewReports: false },
+      'hrm.holidays': { view: true, create: false, edit: false, delete: false, approve: false, reject: false, export: false, print: true, download: true, uploadDocuments: false, assignTasks: false, viewReports: false },
+      'hrm.payroll': { view: true, create: false, edit: false, delete: false, approve: false, reject: false, export: false, print: true, download: true, uploadDocuments: false, assignTasks: false, viewReports: false },
+    },
+  },
+  {
+    id: 'field_staff',
+    name: 'Field Staff / Site Engineer',
+    badge: 'Field / AMC Staff',
+    color: '#0284c7',
+    description: 'Site In/Out punch, Work Calendar, Leaves, Holidays, Active Projects, Site Logs & Tasks',
+    permissions: {
+      'hrm.attendance': { view: true, create: true, edit: false, delete: false, approve: false, reject: false, export: false, print: true, download: true, uploadDocuments: false, assignTasks: false, viewReports: false },
+      'hrm.calendar': { view: true, create: false, edit: false, delete: false, approve: false, reject: false, export: false, print: true, download: true, uploadDocuments: false, assignTasks: false, viewReports: false },
+      'hrm.leaves': { view: true, create: true, edit: false, delete: false, approve: false, reject: false, export: false, print: false, download: true, uploadDocuments: true, assignTasks: false, viewReports: false },
+      'hrm.holidays': { view: true, create: false, edit: false, delete: false, approve: false, reject: false, export: false, print: true, download: true, uploadDocuments: false, assignTasks: false, viewReports: false },
+      'hrm.payroll': { view: true, create: false, edit: false, delete: false, approve: false, reject: false, export: false, print: true, download: true, uploadDocuments: false, assignTasks: false, viewReports: false },
+      'projectManagement.projects': { view: true, create: false, edit: false, delete: false, approve: false, reject: false, export: false, print: false, download: true, uploadDocuments: false, assignTasks: false, viewReports: false },
+      'projectManagement.site-logs': { view: true, create: true, edit: true, delete: false, approve: false, reject: false, export: false, print: true, download: true, uploadDocuments: true, assignTasks: false, viewReports: false },
+      'projectManagement.tasks': { view: true, create: false, edit: true, delete: false, approve: false, reject: false, export: false, print: false, download: true, uploadDocuments: true, assignTasks: false, viewReports: false },
+    },
+  },
+  {
+    id: 'hr_admin',
+    name: 'HR Admin / Manager',
+    badge: 'HR Admin',
+    color: '#8b5cf6',
+    description: 'Full management of Recruitment, Employees, Attendance, Calendar, Leaves, Holidays, Payroll, Assets, Reviews & Reports',
+    permissions: {
+      'hrm.recruitment': { view: true, create: true, edit: true, delete: true, approve: true, reject: true, export: true, print: true, download: true, uploadDocuments: true, assignTasks: true, viewReports: true },
+      'hrm.employees': { view: true, create: true, edit: true, delete: true, approve: true, reject: true, export: true, print: true, download: true, uploadDocuments: true, assignTasks: true, viewReports: true },
+      'hrm.attendance': { view: true, create: true, edit: true, delete: true, approve: true, reject: true, export: true, print: true, download: true, uploadDocuments: true, assignTasks: true, viewReports: true },
+      'hrm.calendar': { view: true, create: true, edit: true, delete: true, approve: true, reject: true, export: true, print: true, download: true, uploadDocuments: true, assignTasks: true, viewReports: true },
+      'hrm.leaves': { view: true, create: true, edit: true, delete: true, approve: true, reject: true, export: true, print: true, download: true, uploadDocuments: true, assignTasks: true, viewReports: true },
+      'hrm.holidays': { view: true, create: true, edit: true, delete: true, approve: true, reject: true, export: true, print: true, download: true, uploadDocuments: true, assignTasks: true, viewReports: true },
+      'hrm.payroll': { view: true, create: true, edit: true, delete: true, approve: true, reject: true, export: true, print: true, download: true, uploadDocuments: true, assignTasks: true, viewReports: true },
+      'hrm.assets-claims': { view: true, create: true, edit: true, delete: true, approve: true, reject: true, export: true, print: true, download: true, uploadDocuments: true, assignTasks: true, viewReports: true },
+      'hrm.performance': { view: true, create: true, edit: true, delete: true, approve: true, reject: true, export: true, print: true, download: true, uploadDocuments: true, assignTasks: true, viewReports: true },
+      'hrm.reports': { view: true, create: true, edit: true, delete: true, approve: true, reject: true, export: true, print: true, download: true, uploadDocuments: true, assignTasks: true, viewReports: true },
+      'projectManagement.projects': { view: true, create: false, edit: false, delete: false, approve: false, reject: false, export: false, print: false, download: true, uploadDocuments: false, assignTasks: false, viewReports: false },
+    },
+  },
+  {
+    id: 'project_manager',
+    name: 'Project Manager / Supervisor',
+    badge: 'Project Lead',
+    color: '#059669',
+    description: 'Projects delivery, Site Logs, Task delegations, plus personal attendance & leave approvals',
+    permissions: {
+      'projectManagement.projects': { view: true, create: true, edit: true, delete: false, approve: true, reject: true, export: true, print: true, download: true, uploadDocuments: true, assignTasks: true, viewReports: true },
+      'projectManagement.site-logs': { view: true, create: true, edit: true, delete: false, approve: true, reject: true, export: true, print: true, download: true, uploadDocuments: true, assignTasks: true, viewReports: true },
+      'projectManagement.tasks': { view: true, create: true, edit: true, delete: false, approve: true, reject: true, export: true, print: true, download: true, uploadDocuments: true, assignTasks: true, viewReports: true },
+      'hrm.attendance': { view: true, create: true, edit: false, delete: false, approve: true, reject: false, export: true, print: true, download: true, uploadDocuments: false, assignTasks: false, viewReports: false },
+      'hrm.calendar': { view: true, create: false, edit: false, delete: false, approve: false, reject: false, export: false, print: true, download: true, uploadDocuments: false, assignTasks: false, viewReports: false },
+      'hrm.leaves': { view: true, create: true, edit: false, delete: false, approve: true, reject: true, export: false, print: false, download: true, uploadDocuments: false, assignTasks: false, viewReports: false },
+      'hrm.holidays': { view: true, create: false, edit: false, delete: false, approve: false, reject: false, export: false, print: true, download: true, uploadDocuments: false, assignTasks: false, viewReports: false },
+    },
+  },
+  {
+    id: 'branch_manager',
+    name: 'Branch Manager',
+    badge: 'Branch Manager',
+    color: '#d97706',
+    description: 'Branch Employees, Staff Attendance & Leaves approvals, Projects, Tasks & Site Logs',
+    permissions: {
+      'hrm.employees': { view: true, create: true, edit: true, delete: false, approve: false, reject: false, export: true, print: true, download: true, uploadDocuments: true, assignTasks: true, viewReports: true },
+      'hrm.attendance': { view: true, create: true, edit: true, delete: false, approve: true, reject: true, export: true, print: true, download: true, uploadDocuments: true, assignTasks: false, viewReports: true },
+      'hrm.calendar': { view: true, create: false, edit: false, delete: false, approve: false, reject: false, export: false, print: true, download: true, uploadDocuments: false, assignTasks: false, viewReports: false },
+      'hrm.leaves': { view: true, create: true, edit: false, delete: false, approve: true, reject: true, export: true, print: false, download: true, uploadDocuments: true, assignTasks: false, viewReports: false },
+      'hrm.holidays': { view: true, create: false, edit: false, delete: false, approve: false, reject: false, export: false, print: true, download: true, uploadDocuments: false, assignTasks: false, viewReports: false },
+      'projectManagement.projects': { view: true, create: true, edit: true, delete: false, approve: true, reject: false, export: true, print: true, download: true, uploadDocuments: true, assignTasks: true, viewReports: true },
+      'projectManagement.site-logs': { view: true, create: true, edit: true, delete: false, approve: true, reject: false, export: true, print: true, download: true, uploadDocuments: true, assignTasks: true, viewReports: true },
+      'projectManagement.tasks': { view: true, create: true, edit: true, delete: false, approve: true, reject: false, export: true, print: true, download: true, uploadDocuments: true, assignTasks: true, viewReports: true },
+      'hrm.reports': { view: true, create: false, edit: false, delete: false, approve: false, reject: false, export: true, print: true, download: true, uploadDocuments: false, assignTasks: false, viewReports: true },
+    },
+  },
+  {
+    id: 'accountant',
+    name: 'Accountant / Finance Head',
+    badge: 'Accountant',
+    color: '#0891b2',
+    description: 'Payroll cycles & Payslips, Assets & Reimbursement claims, Financial & Statutory Reports',
+    permissions: {
+      'hrm.payroll': { view: true, create: true, edit: true, delete: false, approve: true, reject: true, export: true, print: true, download: true, uploadDocuments: true, assignTasks: false, viewReports: true },
+      'hrm.assets-claims': { view: true, create: true, edit: true, delete: false, approve: true, reject: true, export: true, print: true, download: true, uploadDocuments: true, assignTasks: false, viewReports: true },
+      'hrm.reports': { view: true, create: true, edit: false, delete: false, approve: false, reject: false, export: true, print: true, download: true, uploadDocuments: false, assignTasks: false, viewReports: true },
+      'hrm.attendance': { view: true, create: true, edit: false, delete: false, approve: false, reject: false, export: true, print: true, download: true, uploadDocuments: false, assignTasks: false, viewReports: true },
+      'hrm.calendar': { view: true, create: false, edit: false, delete: false, approve: false, reject: false, export: false, print: true, download: true, uploadDocuments: false, assignTasks: false, viewReports: false },
+      'hrm.leaves': { view: true, create: true, edit: false, delete: false, approve: false, reject: false, export: true, print: false, download: true, uploadDocuments: false, assignTasks: false, viewReports: false },
+      'hrm.holidays': { view: true, create: false, edit: false, delete: false, approve: false, reject: false, export: false, print: true, download: true, uploadDocuments: false, assignTasks: false, viewReports: false },
+    },
+  },
+];
 
 // READ-ONLY aliases: used only when READING permissions back from backend
 // (backend may have stored them under old keys from previous sessions)
@@ -271,6 +381,36 @@ export const RolesPermissions = () => {
   const { showToast } = useToast();
   const { fetchUserProfile, refreshRoles } = useAuth();
 
+  // ── Permission Override Helpers ─────────────────────────────────────────────
+  // We persist saved permissions locally so they survive refresh even when
+  // the backend returns stale / different-shaped data.
+  const PERMS_STORE_KEY = 'tie_permissions_override';
+
+  const readPermOverrides = () => {
+    try { return JSON.parse(localStorage.getItem(PERMS_STORE_KEY) || '{}'); } catch { return {}; }
+  };
+
+  const writePermOverride = (roleId, perms) => {
+    try {
+      const store = readPermOverrides();
+      store[roleId] = perms;
+      localStorage.setItem(PERMS_STORE_KEY, JSON.stringify(store));
+    } catch {}
+  };
+
+  // Merge locally-saved permission overrides on top of roles fetched from backend
+  const mergeOverrides = (list) => {
+    const overrides = readPermOverrides();
+    if (!Object.keys(overrides).length) return list;
+    return list.map((r) => {
+      const id = r._id || r.id;
+      if (overrides[id]) {
+        return { ...r, permissions: overrides[id] };
+      }
+      return r;
+    });
+  };
+
   const loadRoles = useCallback(async () => {
     setLoading(true);
     try {
@@ -279,19 +419,27 @@ export const RolesPermissions = () => {
       const res = await masterApi.getRoles();
       const list = extractApiData(res, 'roles', 'data');
       if (Array.isArray(list) && list.length > 0) {
-        setRoles(list);
-        try { localStorage.setItem('tie_roles', JSON.stringify(list)); } catch {}
+        // Merge locally-saved permission overrides so saved perms survive refresh
+        const merged = mergeOverrides(list);
+        setRoles(merged);
+        try { localStorage.setItem('tie_roles', JSON.stringify(merged)); } catch {}
       } else {
         // Fall back to cache only when backend returns nothing
         const cached = localStorage.getItem('tie_roles');
-        if (cached) setRoles(JSON.parse(cached));
+        if (cached) {
+          const cachedList = JSON.parse(cached);
+          setRoles(mergeOverrides(cachedList));
+        }
       }
       setPendingChanges({});
     } catch (err) {
       console.error('Failed to load roles:', err);
       try {
         const cached = localStorage.getItem('tie_roles');
-        if (cached) setRoles(JSON.parse(cached));
+        if (cached) {
+          const cachedList = JSON.parse(cached);
+          setRoles(mergeOverrides(cachedList));
+        }
       } catch {}
       showToast('Failed to load roles from backend API', 'error');
     } finally {
@@ -368,6 +516,38 @@ export const RolesPermissions = () => {
     setPendingChanges((prev) => ({ ...prev, [role._id]: updatedPerms }));
   };
 
+  // Apply a 1-click Preset Template to a role
+  const handleApplyPreset = (role, preset) => {
+    if (!role || role.isSuperAdmin || role.name === 'super_admin') {
+      showToast('Super Admin already has full access to all features.', 'info');
+      return;
+    }
+
+    const updatedPerms = {};
+    const zeroActions = createActionsObject(false);
+
+    // Initialize all catalog submodules as ungranted
+    catalog.modules.forEach((mod) => {
+      if (mod.subModules) {
+        mod.subModules.forEach((sub) => {
+          updatedPerms[`${mod.moduleKey}.${sub.subModuleKey || sub.key}`] = zeroActions;
+        });
+      }
+    });
+
+    // Populate preset permissions
+    for (const [dotKey, acts] of Object.entries(preset.permissions || {})) {
+      const fullActObj = {};
+      ALL_ACTIONS.forEach((a) => {
+        fullActObj[a] = Boolean(acts[a]);
+      });
+      updatedPerms[dotKey] = fullActObj;
+    }
+
+    setPendingChanges((prev) => ({ ...prev, [role._id]: updatedPerms }));
+    showToast(`Applied "${preset.name}" preset! Review and click Save to confirm.`, 'success');
+  };
+
   // Toggle a specific action in the Granular Matrix Modal
   const handleToggleSubModuleAction = (roleId, modKey, subModuleKey, actionName) => {
     const role = roles.find((r) => r._id === roleId);
@@ -440,20 +620,37 @@ export const RolesPermissions = () => {
     setSavingRoleId(roleId);
 
     try {
-      // Send to backend first — backend is source of truth
+      // 1. Persist to guaranteed localStorage override FIRST (survives refresh)
+      writePermOverride(roleId, permsToSave);
+
+      // 2. Send to backend
       await masterApi.updateRolePermissions(roleId, permsToSave);
 
-      // Update React state and localStorage cache to match what was just saved
+      // 3. Try to re-fetch the actual stored state from backend to stay in sync
+      let finalPerms = permsToSave;
+      try {
+        const freshRes = await apiClient.get(`/roles/${roleId}`);
+        const freshRole = freshRes.data?.data || freshRes.data?.role || freshRes.data;
+        if (freshRole?.permissions && typeof freshRole.permissions === 'object' && Object.keys(freshRole.permissions).length > 0) {
+          finalPerms = freshRole.permissions;
+          // Update override with whatever backend actually stored
+          writePermOverride(roleId, finalPerms);
+        }
+      } catch {
+        // Backend re-fetch failed — keep the locally saved permsToSave
+      }
+
+      // 4. Update React state and localStorage cache
       const updatedRoles = roles.map((r) =>
-        r._id === roleId || r.id === roleId ? { ...r, permissions: permsToSave } : r
+        r._id === roleId || r.id === roleId ? { ...r, permissions: finalPerms } : r
       );
       setRoles(updatedRoles);
       try { localStorage.setItem('tie_roles', JSON.stringify(updatedRoles)); } catch {}
 
-      // Keep matrixRole in sync if modal is open
+      // 5. Keep matrixRole in sync if modal is open
       setMatrixRole((prev) =>
         prev && (prev._id === roleId || prev.id === roleId)
-          ? { ...prev, permissions: permsToSave }
+          ? { ...prev, permissions: finalPerms }
           : prev
       );
 
@@ -483,12 +680,13 @@ export const RolesPermissions = () => {
 
     setSavingAll(true);
     try {
-      // Send each to backend
       for (const roleId of ids) {
-        await masterApi.updateRolePermissions(roleId, pendingChanges[roleId] || {});
+        const perms = pendingChanges[roleId] || {};
+        // Persist to localStorage override FIRST
+        writePermOverride(roleId, perms);
+        await masterApi.updateRolePermissions(roleId, perms);
       }
 
-      // Update React state to reflect what was saved
       const updatedRoles = roles.map((r) =>
         pendingChanges[r._id] ? { ...r, permissions: pendingChanges[r._id] } : r
       );
@@ -1197,7 +1395,9 @@ export const RolesPermissions = () => {
                 </div>
               </div>
 
-              {/* The 3 Main Tabs: HRM (10), Project Management (3), Masters (5) */}
+
+
+              {/* The 3 Main Tabs: HRM (10), Project Management (3), Masters (6) */}
               <div
                 style={{
                   display: 'flex',

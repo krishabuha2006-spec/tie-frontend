@@ -8,6 +8,7 @@ import {
   getEmployeeName,
   getEmployeeCode,
   formatEmployeeOption,
+  filterEmployeesByBranch,
   extractEmployeeList,
 } from '../../utils/employeeUtils';
 import {
@@ -39,9 +40,10 @@ import Select from '../../components/common/Select';
 import Badge from '../../components/common/Badge';
 import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { operationsNav } from '../../routes/moduleNavConfig';
+import { formatDateOnlyIST, getErrorMessage } from '../../utils/formatters';
 
 export const Tasks = () => {
-  const { user, isSuperAdmin, isHrAdmin } = useAuth();
+  const { user, isSuperAdmin, isHrAdmin, branch: globalBranch } = useAuth();
   const { showToast } = useToast();
 
   // Navigation Tabs
@@ -114,12 +116,20 @@ export const Tasks = () => {
   // Load Masters
   const loadMasters = async () => {
     try {
+      const empParams = { limit: 100 };
+      const branchId = globalBranch?._id || globalBranch?.id;
+      if (branchId && branchId !== 'ALL') {
+        empParams.branch = branchId;
+      }
       const [eRes, pRes] = await Promise.allSettled([
-        employeeApi.getEmployees({ limit: 100 }),
+        employeeApi.getEmployees(empParams),
         projectTaskApi.getProjects(),
       ]);
       if (eRes.status === 'fulfilled') {
-        const list = extractEmployeeList(eRes.value);
+        let list = extractEmployeeList(eRes.value);
+        if (branchId && branchId !== 'ALL') {
+          list = filterEmployeesByBranch(list, branchId);
+        }
         setEmployees(list);
         if (list.length > 0) setSelectedEmployeeId(list[0]._id || list[0].id);
       }
@@ -239,7 +249,19 @@ export const Tasks = () => {
 
   useEffect(() => {
     loadMasters();
-  }, []);
+  }, [globalBranch]);
+
+  useEffect(() => {
+    const handleContextChange = () => {
+      loadMasters();
+      if (activeTab === 'all_tasks') loadTasks();
+      else if (activeTab === 'my_tasks') loadMyTasks();
+      else if (activeTab === 'employee_tasks' && selectedEmployeeId) loadEmployeeTasks(selectedEmployeeId);
+      else if (activeTab === 'reports') loadReports();
+    };
+    window.addEventListener('tie:context-changed', handleContextChange);
+    return () => window.removeEventListener('tie:context-changed', handleContextChange);
+  }, [globalBranch, activeTab, selectedEmployeeId]);
 
   useEffect(() => {
     if (activeTab === 'all_tasks') loadTasks();

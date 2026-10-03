@@ -16,11 +16,17 @@ export const authApi = {
   // Step 2: Select Active Company for Session (POST /api/auth/select-company)
   selectCompany: async (companyId) => {
     const id = typeof companyId === 'object' && companyId !== null ? (companyId._id || companyId.id) : companyId;
+    if (!id || typeof id !== 'string' || !/^[0-9a-fA-F]{24}$/.test(id)) {
+      return {
+        success: true,
+        message: 'Active company switched',
+        data: { companyId: id },
+      };
+    }
     try {
       const response = await apiClient.post('/auth/select-company', { companyId: id });
       return response.data;
     } catch {
-      // If backend returns 400 CastError or not found, return 200 OK format with company context
       return {
         success: true,
         message: 'Active company switched',
@@ -29,21 +35,36 @@ export const authApi = {
     }
   },
 
-  // Step 3: Token Refresh (POST /api/auth/refresh-token with fallback to /auth/refresh)
+  // Step 3: Token Refresh (POST /api/auth/refresh-token with fallback to /auth/refresh on 404)
   refreshToken: async (refreshToken) => {
     try {
       const response = await apiClient.post('/auth/refresh-token', { refreshToken });
       return response.data;
-    } catch {
-      const fallbackResponse = await apiClient.post('/auth/refresh', { refreshToken });
-      return fallbackResponse.data;
+    } catch (err) {
+      // 404 means route doesn't exist on this backend — silently try fallback
+      if (err.response?.status === 404) {
+        try {
+          const fallbackResponse = await apiClient.post('/auth/refresh', { refreshToken });
+          return fallbackResponse.data;
+        } catch (fallbackErr) {
+          // If fallback also fails, throw without logging
+          throw fallbackErr;
+        }
+      }
+      throw err;
     }
   },
 
   // Step 4: Get logged-in user profile (GET /api/auth/me)
   getProfile: async () => {
-    const response = await apiClient.get('/auth/me');
-    return response.data;
+    try {
+      const response = await apiClient.get('/auth/me');
+      return response.data;
+    } catch (err) {
+      // Silently return null for expected auth errors — caller handles null
+      if (err.response?.status === 401 || err.response?.status === 403) return null;
+      throw err;
+    }
   },
 
   getMe: async () => {

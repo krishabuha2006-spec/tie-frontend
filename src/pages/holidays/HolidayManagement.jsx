@@ -28,7 +28,7 @@ import Select from '../../components/common/Select';
 import { extractApiData } from '../../utils/apiUtils';
 
 export const HolidayManagement = () => {
-  const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager } = useAuth();
+  const { user, isSuperAdmin, isHrAdmin, isDirector, isBranchManager, branch: globalBranch } = useAuth();
   const isManagerOrAdmin = isSuperAdmin || isHrAdmin || isDirector || isBranchManager;
   const { showToast } = useToast();
   const confirm = useConfirm();
@@ -129,19 +129,23 @@ export const HolidayManagement = () => {
       const params = {};
       if (selectedYear) params.year = selectedYear;
       if (typeFilter && typeFilter !== 'ALL') params.type = typeFilter;
-      params.scope = 'COMPANY';
       const res = await holidayApi.getHolidays(params);
       const list = toList(res, 'holidays');
       // Sort chronologically
       list.sort((a, b) => new Date(a.date) - new Date(b.date));
-      setHolidays(list);
+      // If a branch is selected, filter out holidays that belong to a different specific branch
+      const activeBranchId = globalBranch?._id || globalBranch?.id || (typeof globalBranch === 'string' ? globalBranch : '');
+      const filteredList = (activeBranchId && activeBranchId !== 'ALL')
+        ? list.filter((h) => !h.branch || String(h.branch?._id || h.branch) === String(activeBranchId) || h.scope === 'COMPANY')
+        : list;
+      setHolidays(filteredList);
     } catch (err) {
       console.error('Error loading holidays:', err);
       setHolidays([]);
     } finally {
       setLoadingHolidays(false);
     }
-  }, [selectedYear, typeFilter]);
+  }, [selectedYear, typeFilter, globalBranch]);
 
   // 2. Load Upcoming Holidays (GET /holidays/upcoming)
   const loadUpcoming = useCallback(async () => {
@@ -184,6 +188,16 @@ export const HolidayManagement = () => {
     if (activeTab === 'calendar') loadHolidays();
     else if (activeTab === 'weekly_off') loadWeeklyOffConfigs();
   }, [activeTab, loadHolidays, loadWeeklyOffConfigs]);
+
+  // Sync with global header branch switcher
+  useEffect(() => {
+    const handleContext = () => {
+      loadHolidays();
+      loadWeeklyOffConfigs();
+    };
+    window.addEventListener('tie:context-changed', handleContext);
+    return () => window.removeEventListener('tie:context-changed', handleContext);
+  }, [loadHolidays, loadWeeklyOffConfigs]);
 
   // Create or Update Holiday (POST /holidays or PUT /holidays/:id)
   const handleSaveHoliday = async (e) => {

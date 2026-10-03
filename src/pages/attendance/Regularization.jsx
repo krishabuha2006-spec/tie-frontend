@@ -30,9 +30,12 @@ import ModuleSubNav from '../../components/common/ModuleSubNav';
 import { attendanceNav } from '../../routes/moduleNavConfig';
 
 export const Regularization = () => {
-  const { isSuperAdmin, isHrAdmin, user } = useAuth();
+  const { isSuperAdmin, isHrAdmin, user, branch: globalBranch } = useAuth();
   const { showToast } = useToast();
   const canReview = isSuperAdmin || isHrAdmin;
+
+  const activeBranchId = globalBranch?._id || globalBranch?.id;
+  const isAllBranches = !activeBranchId || activeBranchId === 'ALL';
 
   // Active Tab
   const [activeTab, setActiveTab] = useState(canReview ? 'pending' : 'my_requests'); // 'pending' | 'my_requests' | 'employee_history'

@@ -4,10 +4,13 @@ import masterApi from '../../api/masterApi';
 import employeeApi from '../../api/employeeApi';
 import { useToast } from '../../context/ToastContext';
 import { useConfirm } from '../../context/ConfirmContext';
+import { useAuth } from '../../context/AuthContext';
+import { formatDateOnlyIST, getErrorMessage } from '../../utils/formatters';
 import {
   getEmployeeName,
   getEmployeeCode,
   formatEmployeeOption,
+  filterEmployeesByBranch,
   extractEmployeeList,
 } from '../../utils/employeeUtils';
 import {
@@ -39,6 +42,7 @@ import { operationsNav } from '../../routes/moduleNavConfig';
 import { extractApiData } from '../../utils/apiUtils';
 
 export const ProjectsSites = () => {
+  const { branch: globalBranch } = useAuth();
   // Navigation Tabs
   const [activeTab, setActiveTab] = useState('projects'); // 'projects' | 'tasks'
 
@@ -111,10 +115,15 @@ export const ProjectsSites = () => {
   const loadData = async () => {
     setLoading(true);
     try {
+      const empParams = { limit: 100 };
+      const branchId = globalBranch?._id || globalBranch?.id;
+      if (branchId && branchId !== 'ALL') {
+        empParams.branch = branchId;
+      }
       const [pRes, cRes, eRes] = await Promise.allSettled([
         projectTaskApi.getProjects(),
         masterApi.getCompanies(),
-        employeeApi.getEmployees({ limit: 100 }),
+        employeeApi.getEmployees(empParams),
       ]);
 
       if (pRes.status === 'fulfilled') {
@@ -126,7 +135,10 @@ export const ProjectsSites = () => {
         setCompanies(cList);
       }
       if (eRes.status === 'fulfilled') {
-        const eList = extractEmployeeList(eRes.value);
+        let eList = extractEmployeeList(eRes.value);
+        if (branchId && branchId !== 'ALL') {
+          eList = filterEmployeesByBranch(eList, branchId);
+        }
         setEmployees(eList);
       }
     } catch (err) {
@@ -159,7 +171,16 @@ export const ProjectsSites = () => {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [globalBranch]);
+
+  useEffect(() => {
+    const handleContextChange = () => {
+      loadData();
+      if (activeTab === 'tasks') loadTasks();
+    };
+    window.addEventListener('tie:context-changed', handleContextChange);
+    return () => window.removeEventListener('tie:context-changed', handleContextChange);
+  }, [globalBranch, activeTab]);
 
   useEffect(() => {
     if (activeTab === 'tasks') {

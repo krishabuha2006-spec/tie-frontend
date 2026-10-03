@@ -1,8 +1,3 @@
-/* ==========================================================================
-   Header Component Styles - TIE Corporation HRMS Portal
-   Enterprise Responsive: Seamless Desktop single-bar & Mobile two-tier strip
-   ========================================================================== */
-
 .app-header {
   height: var(--header-height, 64px);
   background: #ffffff;
@@ -183,6 +178,7 @@
     opacity: 0;
     transform: translateY(-4px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -382,9 +378,15 @@
 /* ==========================================================================
    Responsive Breakpoints
    ========================================================================== */
-@media (max-width: 991px) {
+@media (min-width: 769px) and (max-width: 1024px) {
   .header-menu-btn {
-    display: inline-flex;
+    display: inline-flex !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .header-menu-btn {
+    display: none !important;
   }
 }
 

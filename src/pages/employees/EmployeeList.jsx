@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import employeeApi from '../../api/employeeApi';
 import masterApi from '../../api/masterApi';
 import faceApi from '../../api/faceApi';
+import userApi from '../../api/userApi';
 import { useToast } from '../../context/ToastContext';
 import { useConfirm } from '../../context/ConfirmContext';
 import { validateEmail, validatePhone } from '../../utils/validation';
@@ -14,7 +14,6 @@ import {
   Eye,
   Edit2,
   Trash2,
-  Filter,
   ScanFace,
   CheckCircle2,
   Clock,
@@ -465,6 +464,114 @@ const MultiRolePicker = ({ roles = [], selectedIds = [], onChange, error }) => {
   );
 };
 
+const normalizeText = (txt) => String(txt || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+const doesEmployeeMatchFilters = (
+  emp,
+  { branch, department, status, workType, search },
+  branchesList = [],
+  departmentsList = []
+) => {
+  if (!emp) return false;
+
+  // 1. Strict Branch Filter
+  if (branch && branch !== 'ALL') {
+    const targetBranchObj = (branchesList || []).find(
+      (b) => String(b._id || b.id) === String(branch) || b.name === branch
+    );
+    const targetBranchId = targetBranchObj ? String(targetBranchObj._id || targetBranchObj.id) : String(branch);
+    const targetBranchName = targetBranchObj?.name || (typeof branch === 'string' ? branch : '');
+
+    const empBranch = emp.employmentInfo?.branch || emp.branch;
+    const empBranchId = typeof empBranch === 'object' ? String(empBranch?._id || empBranch?.id || '') : String(empBranch || '');
+    const empBranchName = typeof empBranch === 'object'
+      ? (empBranch?.name || empBranch?.title || '')
+      : ((branchesList || []).find((b) => String(b._id || b.id) === empBranchId || b.name === empBranchId)?.name || empBranch || '');
+
+    const normEmp = normalizeText(empBranchName);
+    const normTarget = normalizeText(targetBranchName);
+
+    const branchMatched =
+      (empBranchId && targetBranchId && empBranchId === targetBranchId) ||
+      (normEmp && normTarget && (normEmp === normTarget || normEmp.includes(normTarget) || normTarget.includes(normEmp)));
+
+    if (!branchMatched) return false;
+  }
+
+  // 2. Strict Department Filter
+  if (department && department !== 'ALL') {
+    const targetDeptObj = (departmentsList || []).find(
+      (d) => String(d._id || d.id) === String(department) || d.name === department
+    );
+    const targetDeptId = targetDeptObj ? String(targetDeptObj._id || targetDeptObj.id) : String(department);
+    const targetDeptName = targetDeptObj?.name || (typeof department === 'string' ? department : '');
+
+    const empDept = emp.employmentInfo?.department || emp.department;
+    const empDeptId = typeof empDept === 'object' ? String(empDept?._id || empDept?.id || '') : String(empDept || '');
+    const empDeptName = typeof empDept === 'object'
+      ? (empDept?.name || empDept?.title || '')
+      : ((departmentsList || []).find((d) => String(d._id || d.id) === empDeptId || d.name === empDeptId)?.name || empDept || '');
+
+    const normEmpDept = normalizeText(empDeptName);
+    const normTargetDept = normalizeText(targetDeptName);
+
+    const deptMatched =
+      (empDeptId && targetDeptId && empDeptId === targetDeptId) ||
+      (normEmpDept && normTargetDept && (normEmpDept === normTargetDept || normEmpDept.includes(normTargetDept) || normTargetDept.includes(normEmpDept)));
+
+    if (!deptMatched) return false;
+  }
+
+  // 3. Strict Status Filter
+  if (status && status !== 'ALL') {
+    const rawSt = emp.employmentInfo?.employeeStatus || emp.status || emp.employeeStatus || (emp.isActive !== false ? 'ACTIVE' : 'INACTIVE');
+    const st = (typeof rawSt === 'string' ? rawSt : (rawSt?.name || rawSt?.status || 'ACTIVE')).toUpperCase();
+    const targetStatus = status.toUpperCase();
+
+    if (targetStatus === 'ON_LEAVE') {
+      if (!['ON_LEAVE', 'LEAVE', 'SUSPENDED'].includes(st)) return false;
+    } else if (targetStatus === 'ACTIVE') {
+      if (st !== 'ACTIVE') return false;
+    } else if (st !== targetStatus) {
+      return false;
+    }
+  }
+
+  // 4. Strict Work Type Filter
+  if (workType && workType !== 'ALL') {
+    const rawWt = String(emp.employmentInfo?.workType || emp.workType || 'OFFICE').toUpperCase();
+    const targetWt = workType.toUpperCase();
+    if (targetWt === 'FIELD') {
+      if (rawWt !== 'FIELD' && rawWt !== 'HYBRID' && rawWt !== 'SITE') return false;
+    } else if (targetWt === 'OFFICE') {
+      if (rawWt !== 'OFFICE') return false;
+    } else if (rawWt !== targetWt) {
+      return false;
+    }
+  }
+
+  // 5. Strict Search Query Filter (Name, Code, Email, Mobile, Designation)
+  if (search && search.trim()) {
+    const q = search.trim().toLowerCase();
+    const fullName = String(emp.basicInfo?.fullName || emp.name || '').toLowerCase();
+    const empCode = String(emp.basicInfo?.employeeCode || emp.employeeCode || '').toLowerCase();
+    const email = String(emp.basicInfo?.email || emp.email || '').toLowerCase();
+    const mobile = String(emp.basicInfo?.mobileNumber || emp.phone || emp.mobileNumber || emp.mobile || '').toLowerCase();
+    const desName = String(emp.employmentInfo?.designation?.name || emp.employmentInfo?.designation?.title || emp.designation || '').toLowerCase();
+
+    const matchesSearch =
+      fullName.includes(q) ||
+      empCode.includes(q) ||
+      email.includes(q) ||
+      mobile.includes(q) ||
+      desName.includes(q);
+
+    if (!matchesSearch) return false;
+  }
+
+  return true;
+};
+
 export const EmployeeList = () => {
   const confirm = useConfirm();
   const [employees, setEmployees] = useState([]);
@@ -483,6 +590,9 @@ export const EmployeeList = () => {
   const [designations, setDesignations] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [roles, setRoles] = useState([]);
+  const [allEmployeesData, setAllEmployeesData] = useState([]);
+  const [branchCounts, setBranchCounts] = useState({});
+  const [deptCounts, setDeptCounts] = useState({});
 
   // Pagination state
   const [page, setPage] = useState(1);
@@ -564,23 +674,6 @@ export const EmployeeList = () => {
   const [editSection, setEditSection] = useState(null); // 'basic' | 'employment' | 'government' | 'emergency'
   const [editFormData, setEditFormData] = useState({});
   const [savingSection, setSavingSection] = useState(false);
-
-  // Scoped branches for the currently viewed employee's company
-  const currentEmpCompanyId =
-    currentEmployeeDetail?.company?._id ||
-    currentEmployeeDetail?.company ||
-    currentEmployeeDetail?.employmentInfo?.branch?.company?._id ||
-    currentEmployeeDetail?.employmentInfo?.branch?.company ||
-    '';
-
-  const scopedBranchesForDetail = useMemo(() => {
-    if (!currentEmpCompanyId) return branches;
-    const filtered = branches.filter((b) => {
-      const bComp = b.company?._id || b.company;
-      return !bComp || String(bComp) === String(currentEmpCompanyId);
-    });
-    return filtered.length > 0 ? filtered : branches;
-  }, [branches, currentEmpCompanyId]);
 
   // Documents State
   const [employeeDocs, setEmployeeDocs] = useState([]);
@@ -693,9 +786,14 @@ export const EmployeeList = () => {
   const [updatingStatus, setUpdatingStatus] = useState(false);
 
   const { showToast } = useToast();
-  const navigate = useNavigate();
-  const { isSuperAdmin, isHrAdmin } = useAuth();
+  const { user, isSuperAdmin, isDirector, isHrAdmin, branch: globalBranch, company: activeCompany, selectBranch } = useAuth();
   const canEnrollFace = isSuperAdmin || isHrAdmin;
+
+  const activeBranchId = useMemo(() => {
+    if (!globalBranch) return '';
+    const bId = globalBranch._id || globalBranch.id;
+    return (!bId || bId === 'ALL') ? '' : String(bId);
+  }, [globalBranch]);
 
   // Robust Designation Fetcher
   const fetchDesignations = async (deptFilter) => {
@@ -759,51 +857,147 @@ export const EmployeeList = () => {
   // Load Employees with Filter & Pagination (GET /employees)
   const loadEmployees = async () => {
     setLoading(true);
-    // Auto-update global stats summary along with employee fetch
     loadStatsSummary();
     try {
+      // Determine effective branch to filter on
+      const isSuper = Boolean(isSuperAdmin || isDirector);
+      const userAssignedBranchId = user?.branch?._id || user?.branch?.id || (typeof user?.branch === 'string' ? user?.branch : '');
+      const currentTargetBranch = isSuper ? (selectedBranch !== '' ? selectedBranch : activeBranchId) : (userAssignedBranchId || activeBranchId);
+      let cleanBranch = (currentTargetBranch === 'ALL' || !currentTargetBranch) ? '' : currentTargetBranch;
+
+      if (cleanBranch && branches?.length > 0) {
+        const foundB = branches.find(
+          (b) => String(b._id || b.id) === String(cleanBranch) || b.name === cleanBranch || b.code === cleanBranch
+        );
+        if (foundB) cleanBranch = foundB._id || foundB.id;
+      }
+
+      let cleanDept = selectedDept;
+      if (cleanDept && departments?.length > 0) {
+        const foundD = departments.find(
+          (d) => String(d._id || d.id) === String(cleanDept) || d.name === cleanDept || d.code === cleanDept
+        );
+        if (foundD) cleanDept = foundD._id || foundD.id;
+      }
+
       const params = {
-        page,
-        limit: 10,
-        search: search || undefined,
-        department: selectedDept || undefined,
-        branch: selectedBranch || undefined,
-        status: selectedStatus || undefined,
-        workType: selectedWorkType || undefined,
+        limit: 100,
+        search: search ? search.trim() : undefined,
+        department: cleanDept || undefined,
+        branch: cleanBranch || undefined,
+        status: (selectedStatus && selectedStatus !== 'ALL') ? selectedStatus : undefined,
+        workType: (selectedWorkType && selectedWorkType !== 'ALL') ? selectedWorkType : undefined,
       };
       const res = await employeeApi.getEmployees(params);
-      const list = extractApiData(res, 'employees', 'data');
+      let list = extractApiData(res, 'employees', 'data') || [];
 
-      // Immediately show employees without blocking network on parallel face calls
-      setEmployees(list);
-      const count = res?.total || res?.totalCount || res?.count || (Array.isArray(list) ? list.length : 0);
-      setTotalCount(count);
-      const calculatedPages = Math.max(1, Math.ceil((count || list.length) / 10));
-      setTotalPages(res?.totalPages || calculatedPages);
+      // Bridge database users into employee directory if missing
+      try {
+        const usersRes = await userApi.getUsers({ limit: 100 }).catch(() => ({ data: [] }));
+        const rawUsers = extractApiData(usersRes, 'users', 'data') || (Array.isArray(usersRes) ? usersRes : []);
+        const candidateUsers = Array.isArray(rawUsers) ? [...rawUsers] : [];
+        if (user && !candidateUsers.some((u) => u._id === user._id || (u.email && u.email.toLowerCase() === user.email?.toLowerCase()))) {
+          candidateUsers.unshift(user);
+        }
 
-      // Asynchronously enrich face status in background using batched calls
-      const empIds = list.map((e) => e._id || e.id).filter(Boolean);
-      if (empIds.length > 0) {
-        faceApi.getBulkFaceStatus(empIds).then((statusMap) => {
-          if (!statusMap || Object.keys(statusMap).length === 0) return;
-          setEmployees((prev) =>
-            prev.map((emp) => {
-              const empId = emp._id || emp.id;
-              const sData = statusMap[empId];
-              if (!sData) return emp;
-              const status = sData?.status || sData?.data?.status || 'UNREGISTERED';
-              const isEnrolled = status === 'ENROLLED' || status === 'REGISTERED' || status === 'ACTIVE' || sData?.isRegistered === true;
-              return { ...emp, _faceStatus: status, isFaceEnrolled: isEnrolled };
-            })
-          );
-        }).catch(() => {});
+        const existingEmails = new Set(
+          list.map((e) => (e.basicInfo?.email || e.email || '').toLowerCase()).filter(Boolean)
+        );
+
+        candidateUsers.forEach((u) => {
+          const uEmail = (u.email || '').toLowerCase();
+          if (!uEmail || existingEmails.has(uEmail)) return;
+
+          const uBranchId = u.branch?._id || u.branch?.id || (typeof u.branch === 'string' ? u.branch : '');
+          const uRoleStr = String(u.role?.name || u.role?.displayName || u.role || '').toLowerCase();
+          const isSuperAdminOrGlobal = u.isSuperAdmin || /super_admin|director/i.test(uRoleStr);
+
+          const matchedBranchObj = branches.find((b) => String(b._id || b.id) === String(uBranchId) || b.name === uBranchId);
+          const targetBranchObj = matchedBranchObj || (typeof u.branch === 'object' && u.branch?.name ? u.branch : null) || globalBranch;
+          const assignedCode = u.employeeCode || (isSuperAdminOrGlobal ? 'ADMIN-01' : `EMP-${String(u._id || Date.now()).slice(-4).toUpperCase()}`);
+
+          const bridgedEmp = {
+            _id: u._id || `user-bridge-${uEmail}`,
+            isUserBridge: true,
+            employeeCode: assignedCode,
+            name: u.name || 'Staff User',
+            email: u.email,
+            phone: u.phone || u.mobileNumber || u.mobile || '-',
+            basicInfo: {
+              fullName: u.name || 'Staff User',
+              email: u.email,
+              mobileNumber: u.phone || u.mobileNumber || u.mobile || '-',
+              employeeCode: assignedCode,
+              photograph: u.photo || u.photograph || u.avatar || null,
+            },
+            employmentInfo: {
+              company: u.company || activeCompany?._id || activeCompany || null,
+              branch: targetBranchObj || globalBranch,
+              department: u.department || 'Administration & Management',
+              designation: u.designation || u.role?.displayName || u.role?.name || (isSuperAdminOrGlobal ? 'Super Admin' : 'Employee'),
+              employeeRole: u.role || 'Super Admin',
+              employeeStatus: u.isActive !== false ? 'ACTIVE' : 'INACTIVE',
+              workType: 'OFFICE',
+              joiningDate: u.createdAt || new Date().toISOString(),
+            },
+            status: u.isActive !== false ? 'ACTIVE' : 'INACTIVE',
+            isActive: u.isActive !== false,
+          };
+
+          list.unshift(bridgedEmp);
+          existingEmails.add(uEmail);
+        });
+      } catch (bridgeErr) {
+        console.warn('Database users bridge sync note:', bridgeErr?.message);
       }
+
+      // Strict client-side filter pass over all employees (backend records + bridged users)
+      const currentFilters = {
+        branch: isSuper ? cleanBranch : (userAssignedBranchId || cleanBranch),
+        department: cleanDept,
+        status: selectedStatus,
+        workType: selectedWorkType,
+        search: search ? search.trim() : '',
+      };
+
+      const filteredList = list.filter((emp) =>
+        doesEmployeeMatchFilters(emp, currentFilters, branches, departments)
+      );
+
+      const totalFiltered = filteredList.length;
+      setTotalCount(totalFiltered);
+      setTotalPages(Math.max(1, Math.ceil(totalFiltered / 10)));
+
+      // Apply pagination to filtered results
+      const startIndex = (page - 1) * 10;
+      const paginatedList = filteredList.slice(startIndex, startIndex + 10);
+
+      // Enrich each employee with persisted face enrollment status from localStorage
+      // This ensures face status survives page refreshes without needing an API call
+      const enrichedList = paginatedList.map((emp) => {
+        const empId = emp._id || emp.id || '';
+        const empCode = emp.basicInfo?.employeeCode || emp.employeeCode || '';
+        const isLocalEnrolled =
+          localStorage.getItem(`tie_face_enrolled_${empId}`) === 'true' ||
+          !!localStorage.getItem(`tie_reg_selfie_${empId}`) ||
+          !!localStorage.getItem(`tie_face_binary_${empId}`) ||
+          (empCode && (
+            localStorage.getItem(`tie_face_enrolled_${empCode}`) === 'true' ||
+            !!localStorage.getItem(`tie_reg_selfie_${empCode}`)
+          ));
+        // Also check backend field if present (faceVectorStored from API response)
+        const backendEnrolled = emp.faceVectorStored === true || emp.isFaceEnrolled === true;
+        return { ...emp, isFaceEnrolled: isLocalEnrolled || backendEnrolled };
+      });
+      setEmployees(enrichedList);
     } catch (err) {
       console.error('Failed to load employees:', err);
       setEmployees([]);
+      setTotalCount(0);
+      setTotalPages(1);
       if (err.response?.status === 403) {
         showToast('Access Forbidden (403): Please log in as Super Admin to manage employees', 'error');
-      } else {
+      } else if (err.response?.status !== 404) {
         showToast('Failed to load employee directory from backend', 'error');
       }
     } finally {
@@ -812,20 +1006,70 @@ export const EmployeeList = () => {
   };
 
   const [statsSummary, setStatsSummary] = useState(null);
+  const lastStatsFetchRef = useRef(0);
 
   // Dynamic workforce statistics calculation across all employees
   const loadStatsSummary = async () => {
+    if (Date.now() - lastStatsFetchRef.current < 15000 && statsSummary) {
+      return;
+    }
+    lastStatsFetchRef.current = Date.now();
     try {
       const res = await employeeApi.getEmployees({ limit: 1000 });
-      const allEmps = extractApiData(res, 'employees', 'data') || [];
+      let allEmps = extractApiData(res, 'employees', 'data') || [];
       if (Array.isArray(allEmps)) {
-        const total = res?.total || res?.totalCount || res?.count || allEmps.length;
+        try {
+          const usersRes = await userApi.getUsers({ limit: 100 }).catch(() => ({ data: [] }));
+          const rawUsers = extractApiData(usersRes, 'users', 'data') || (Array.isArray(usersRes) ? usersRes : []);
+          const candidateUsers = Array.isArray(rawUsers) ? [...rawUsers] : [];
+          if (user && !candidateUsers.some((u) => u._id === user._id || (u.email && u.email.toLowerCase() === user.email?.toLowerCase()))) {
+            candidateUsers.unshift(user);
+          }
+          const existingEmails = new Set(allEmps.map((e) => (e.basicInfo?.email || e.email || '').toLowerCase()).filter(Boolean));
+          candidateUsers.forEach((u) => {
+            const uEmail = (u.email || '').toLowerCase();
+            if (uEmail && !existingEmails.has(uEmail)) {
+              const uBranchId = u.branch?._id || u.branch?.id || (typeof u.branch === 'string' ? u.branch : '');
+              const matchedB = branches.find((b) => String(b._id || b.id) === String(uBranchId) || b.name === uBranchId);
+              const branchObj = matchedB || (typeof u.branch === 'object' && u.branch?.name ? u.branch : null) || globalBranch;
+              allEmps.unshift({
+                ...u,
+                employeeCode: u.employeeCode || (u.isSuperAdmin ? 'ADMIN-01' : `EMP-${String(u._id || Date.now()).slice(-4).toUpperCase()}`),
+                basicInfo: {
+                  fullName: u.name || 'Staff User',
+                  email: u.email,
+                  mobileNumber: u.phone || u.mobileNumber || u.mobile || '-',
+                  employeeCode: u.employeeCode || (u.isSuperAdmin ? 'ADMIN-01' : `EMP-${String(u._id || Date.now()).slice(-4).toUpperCase()}`),
+                  photograph: u.photo || u.photograph || u.avatar || null,
+                },
+                employmentInfo: {
+                  company: u.company || activeCompany?._id || activeCompany || null,
+                  branch: branchObj,
+                  department: u.department || 'Administration & Management',
+                  designation: u.designation || u.role?.displayName || u.role?.name || 'Super Admin',
+                  employeeRole: u.role || 'Super Admin',
+                  employeeStatus: u.isActive !== false ? 'ACTIVE' : 'INACTIVE',
+                  workType: 'OFFICE',
+                  joiningDate: u.createdAt || new Date().toISOString(),
+                },
+                status: u.isActive !== false ? 'ACTIVE' : 'INACTIVE',
+                isActive: u.isActive !== false,
+              });
+              existingEmails.add(uEmail);
+            }
+          });
+        } catch {}
+
+        setAllEmployeesData(allEmps);
+        const total = allEmps.length;
         let active = 0;
         let onLeave = 0;
         let fieldOrSite = 0;
+        const bCounts = {};
+        const dCounts = {};
 
         allEmps.forEach((e) => {
-          const rawSt = e.employmentInfo?.employeeStatus || e.status || e.employeeStatus || 'ACTIVE';
+          const rawSt = e.employmentInfo?.employeeStatus || e.status || e.employeeStatus || (e.isActive !== false ? 'ACTIVE' : 'INACTIVE');
           const st = (typeof rawSt === 'string' ? rawSt : (rawSt?.name || rawSt?.status || 'ACTIVE')).toUpperCase();
           if (st === 'ACTIVE') {
             active++;
@@ -837,12 +1081,34 @@ export const EmployeeList = () => {
           if (rawWt === 'FIELD' || rawWt === 'HYBRID' || rawWt === 'SITE') {
             fieldOrSite++;
           }
+
+          // Branch tally
+          const bObj = e.employmentInfo?.branch || e.branch;
+          const bId = typeof bObj === 'object' ? (bObj?._id || bObj?.id) : bObj;
+          const bName = typeof bObj === 'object' ? bObj?.name : bObj;
+          const matchedBranch = branches.find((b) => String(b._id || b.id) === String(bId) || b.name === bName || (bId && b.name === bId));
+          const finalBId = matchedBranch ? (matchedBranch._id || matchedBranch.id) : bId;
+          if (finalBId) {
+            bCounts[finalBId] = (bCounts[finalBId] || 0) + 1;
+          }
+
+          // Department tally
+          const dObj = e.employmentInfo?.department || e.department;
+          const dId = typeof dObj === 'object' ? (dObj?._id || dObj?.id) : dObj;
+          const dName = typeof dObj === 'object' ? dObj?.name : dObj;
+          const matchedDept = departments.find((d) => String(d._id || d.id) === String(dId) || d.name === dName || (dId && d.name === dId));
+          const finalDId = matchedDept ? (matchedDept._id || matchedDept.id) : dId;
+          if (finalDId) {
+            dCounts[finalDId] = (dCounts[finalDId] || 0) + 1;
+          }
         });
 
         if (active === 0 && total > 0 && onLeave === 0) {
           active = total;
         }
 
+        setBranchCounts(bCounts);
+        setDeptCounts(dCounts);
         setStatsSummary({ total, active, onLeave, fieldOrSite });
       }
     } catch (err) {
@@ -850,14 +1116,14 @@ export const EmployeeList = () => {
     }
   };
 
-  // Real-time automatic sync: polling interval (every 8s) & window focus/visibility/custom event
+  // Real-time automatic sync: polling interval (every 12s) & window focus/visibility/custom event
   useEffect(() => {
     loadFilterMasters();
     loadStatsSummary();
 
     const intervalTimer = setInterval(() => {
       loadStatsSummary();
-    }, 8000);
+    }, 12000);
 
     const handleFocusSync = () => {
       if (document.visibilityState === 'visible') {
@@ -879,14 +1145,30 @@ export const EmployeeList = () => {
   }, []);
 
   useEffect(() => {
+    setSelectedBranch(activeBranchId);
+    setPage(1);
+  }, [activeBranchId]);
+
+  useEffect(() => {
+    const handleContextChange = (e) => {
+      const bId = e.detail?.branchId;
+      const clean = (!bId || bId === 'ALL') ? '' : String(bId);
+      setSelectedBranch(clean);
+      setPage(1);
+    };
+    window.addEventListener('tie:context-changed', handleContextChange);
+    return () => window.removeEventListener('tie:context-changed', handleContextChange);
+  }, []);
+
+  useEffect(() => {
     loadEmployees();
-  }, [page, selectedDept, selectedBranch, selectedStatus, selectedWorkType]);
+  }, [page, selectedDept, selectedBranch, activeBranchId, selectedStatus, selectedWorkType]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
       setPage(1);
       loadEmployees();
-    }, 350);
+    }, 300);
     return () => clearTimeout(timer);
   }, [search]);
 
@@ -896,18 +1178,74 @@ export const EmployeeList = () => {
     loadEmployees();
   };
 
-  // Quick Statistics calculation — dynamic, accurate & responsive
+  const hasActiveFilters = Boolean(
+    search ||
+    (selectedDept && selectedDept !== 'ALL') ||
+    (selectedBranch && selectedBranch !== 'ALL') ||
+    (selectedStatus && selectedStatus !== 'ALL') ||
+    (selectedWorkType && selectedWorkType !== 'ALL')
+  );
+
+  // Quick Statistics calculation — dynamic, accurate & responsive to active branch and filters
   const stats = useMemo(() => {
-    if (statsSummary && typeof statsSummary.total === 'number') {
-      return statsSummary;
-    }
-    const total = totalCount || employees.length;
+    const currentTargetBranch = selectedBranch !== '' ? selectedBranch : activeBranchId;
+    const cleanBranch = (!currentTargetBranch || currentTargetBranch === 'ALL') ? '' : currentTargetBranch;
+
+    const baseList = allEmployeesData.length > 0 ? allEmployeesData : employees;
+
+    const scopedList = baseList.filter((emp) => {
+      if (cleanBranch && cleanBranch !== 'ALL') {
+        const targetBranchObj = branches.find((b) => String(b._id || b.id) === String(cleanBranch) || b.name === cleanBranch);
+        const targetBranchId = targetBranchObj ? String(targetBranchObj._id || targetBranchObj.id) : String(cleanBranch);
+        const targetBranchName = targetBranchObj?.name || (typeof cleanBranch === 'string' ? cleanBranch : '');
+
+        const empBranch = emp.employmentInfo?.branch || emp.branch;
+        const empBranchId = typeof empBranch === 'object' ? String(empBranch?._id || empBranch?.id || '') : String(empBranch || '');
+        const empBranchName = typeof empBranch === 'object'
+          ? (empBranch?.name || empBranch?.title || '')
+          : ((branches || []).find((b) => String(b._id || b.id) === empBranchId || b.name === empBranchId)?.name || empBranch || '');
+
+        const normEmp = normalizeText(empBranchName);
+        const normTarget = normalizeText(targetBranchName);
+
+        const branchMatched =
+          (empBranchId && targetBranchId && empBranchId === targetBranchId) ||
+          (normEmp && normTarget && (normEmp === normTarget || normEmp.includes(normTarget) || normTarget.includes(normEmp)));
+
+        if (!branchMatched) return false;
+      }
+
+      if (selectedDept && selectedDept !== 'ALL') {
+        const targetDeptObj = departments.find((d) => String(d._id || d.id) === String(selectedDept) || d.name === selectedDept);
+        const targetDeptId = targetDeptObj ? String(targetDeptObj._id || targetDeptObj.id) : String(selectedDept);
+        const targetDeptName = targetDeptObj?.name || (typeof selectedDept === 'string' ? selectedDept : '');
+
+        const empDept = emp.employmentInfo?.department || emp.department;
+        const empDeptId = typeof empDept === 'object' ? String(empDept?._id || empDept?.id || '') : String(empDept || '');
+        const empDeptName = typeof empDept === 'object'
+          ? (empDept?.name || empDept?.title || '')
+          : ((departments || []).find((d) => String(d._id || d.id) === empDeptId || d.name === empDeptId)?.name || empDept || '');
+
+        const normEmpDept = normalizeText(empDeptName);
+        const normTargetDept = normalizeText(targetDeptName);
+
+        const deptMatched =
+          (empDeptId && targetDeptId && empDeptId === targetDeptId) ||
+          (normEmpDept && normTargetDept && (normEmpDept === normTargetDept || normEmpDept.includes(normTargetDept) || normTargetDept.includes(normEmpDept)));
+
+        if (!deptMatched) return false;
+      }
+
+      return true;
+    });
+
+    const total = scopedList.length;
     let active = 0;
     let onLeave = 0;
     let fieldOrSite = 0;
 
-    employees.forEach((e) => {
-      const rawSt = e.employmentInfo?.employeeStatus || e.status || e.employeeStatus || 'ACTIVE';
+    scopedList.forEach((e) => {
+      const rawSt = e.employmentInfo?.employeeStatus || e.status || e.employeeStatus || (e.isActive !== false ? 'ACTIVE' : 'INACTIVE');
       const st = (typeof rawSt === 'string' ? rawSt : (rawSt?.name || rawSt?.status || 'ACTIVE')).toUpperCase();
       if (st === 'ACTIVE') {
         active++;
@@ -926,9 +1264,7 @@ export const EmployeeList = () => {
     }
 
     return { total, active, onLeave, fieldOrSite };
-  }, [statsSummary, employees, totalCount]);
-
-  const hasActiveFilters = Boolean(search || selectedDept || selectedBranch || selectedStatus || selectedWorkType);
+  }, [allEmployeesData, employees, selectedBranch, activeBranchId, selectedDept, branches, departments]);
 
   const clearAllFilters = () => {
     setSearch('');
@@ -937,6 +1273,9 @@ export const EmployeeList = () => {
     setSelectedStatus('');
     setSelectedWorkType('');
     setPage(1);
+    if (selectBranch) {
+      selectBranch('ALL');
+    }
   };
 
   // Designations memoized options — `name` is the primary field per swagger schema
@@ -1858,11 +2197,52 @@ export const EmployeeList = () => {
     {
       header: 'Branch',
       key: 'branch',
-      minWidth: 120,
+      minWidth: 140,
       render: (r) => {
         const b = r.employmentInfo?.branch || r.branch;
-        const branchName = typeof b === 'object' ? (b.name || b.title || '-') : (branches.find((item) => item._id === b || item.id === b)?.name || b || '-');
-        return <span style={{ fontSize: '0.82rem', color: 'var(--text-main)' }}>{branchName}</span>;
+        const branchId = typeof b === 'object' ? (b?._id || b?.id) : b;
+        const branchName = typeof b === 'object' ? (b.name || b.title || '-') : (branches.find((item) => (item._id || item.id) === b)?.name || b || '-');
+        const isSurat = String(branchName).toLowerCase().includes('surat');
+        const isAhmedabad = String(branchName).toLowerCase().includes('ahmedabad');
+        return (
+          <button
+            type="button"
+            onClick={() => {
+              if (branchId) {
+                setSelectedBranch(branchId);
+                setPage(1);
+              }
+            }}
+            title={`Click to filter by ${branchName}`}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              cursor: branchId ? 'pointer' : 'default',
+              display: 'inline-flex',
+              alignItems: 'center',
+            }}
+          >
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                padding: '3px 8px',
+                borderRadius: 6,
+                backgroundColor: isSurat ? '#f0fdf4' : isAhmedabad ? '#eff6ff' : '#f8fafc',
+                color: isSurat ? '#166534' : isAhmedabad ? '#1e40af' : 'var(--text-main)',
+                border: isSurat ? '1px solid #bbf7d0' : isAhmedabad ? '1px solid #bfdbfe' : '1px solid #e2e8f0',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <MapPin size={12} />
+              {branchName}
+            </span>
+          </button>
+        );
       },
     },
     {
@@ -2390,7 +2770,59 @@ export const EmployeeList = () => {
             />
           </div>
 
-          <div className="filter-item" style={{ width: 170, minWidth: 140 }}>
+          {/* Branch Filter: Dropdown for Super Admin / Director, locked pill for branch staff */}
+          {(isSuperAdmin || isDirector) ? (
+            <div className="filter-item" style={{ width: 180, minWidth: 150 }}>
+              <Select
+                placeholder="All Branches"
+                value={selectedBranch}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedBranch(val);
+                  setPage(1);
+                  if (selectBranch) {
+                    selectBranch(val || 'ALL');
+                  }
+                }}
+                options={[
+                  { value: '', label: `All Branches (${statsSummary?.total ?? allEmployeesData.length ?? employees.length})` },
+                  ...branches.map((b) => {
+                    const bId = b._id || b.id;
+                    const count = branchCounts[bId];
+                    return {
+                      value: bId,
+                      label: count !== undefined ? `${b.name} (${count})` : b.name,
+                    };
+                  }),
+                ]}
+                style={{ height: 38, fontSize: '0.84rem', marginBottom: 0 }}
+              />
+            </div>
+          ) : (
+            <div className="filter-item" style={{ minWidth: 140 }}>
+              <div
+                style={{
+                  height: 38,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '0 12px',
+                  borderRadius: 6,
+                  backgroundColor: '#f8fafc',
+                  color: '#334155',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  border: '1px solid #cbd5e1',
+                }}
+                title="Your assigned branch"
+              >
+                <MapPin size={13} color="var(--primary, #2e7b85)" />
+                <span>{globalBranch?.name || user?.branch?.name || 'Assigned Branch'}</span>
+              </div>
+            </div>
+          )}
+
+          <div className="filter-item" style={{ width: 180, minWidth: 150 }}>
             <Select
               placeholder="All Departments"
               value={selectedDept}
@@ -2399,28 +2831,20 @@ export const EmployeeList = () => {
                 setPage(1);
               }}
               options={[
-                { value: '', label: 'All Departments' },
-                ...departments.map((d) => ({ value: d.name || d._id, label: d.name })),
+                { value: '', label: `All Departments (${statsSummary?.total ?? allEmployeesData.length})` },
+                ...departments.map((d) => {
+                  const dId = d._id || d.id;
+                  const count = deptCounts[dId];
+                  return {
+                    value: dId,
+                    label: count !== undefined ? `${d.name} (${count})` : d.name,
+                  };
+                }),
               ]}
               style={{ height: 38, fontSize: '0.84rem', marginBottom: 0 }}
             />
           </div>
 
-          <div className="filter-item" style={{ width: 170, minWidth: 140 }}>
-            <Select
-              placeholder="All Branches"
-              value={selectedBranch}
-              onChange={(e) => {
-                setSelectedBranch(e.target.value);
-                setPage(1);
-              }}
-              options={[
-                { value: '', label: 'All Branches' },
-                ...branches.map((b) => ({ value: b._id, label: b.name })),
-              ]}
-              style={{ height: 38, fontSize: '0.84rem', marginBottom: 0 }}
-            />
-          </div>
 
           <div className="filter-item" style={{ width: 150, minWidth: 130 }}>
             <Select
@@ -2480,7 +2904,23 @@ export const EmployeeList = () => {
           columns={columns}
           data={employees}
           loading={loading}
-          emptyMessage="No employees found matching criteria."
+          emptyMessage={
+            (selectedBranch || activeBranchId) ? (
+              <div style={{ padding: '28px 0', textAlign: 'center' }}>
+                <Building size={32} color="#94a3b8" style={{ marginBottom: 8 }} />
+                <div style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.95rem' }}>
+                  No employees found in {branches.find((b) => (b._id || b.id) === (selectedBranch || activeBranchId))?.name || globalBranch?.name || 'selected branch'}
+                </div>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 4 }}>
+                  There are currently 0 employees assigned to this branch in the system. Switch branch from the top header to view other branches.
+                </div>
+              </div>
+            ) : hasActiveFilters ? (
+              'No employees match the selected filter criteria.'
+            ) : (
+              'No employees found in the directory.'
+            )
+          }
           style={{ border: 'none', borderRadius: 0 }}
         />
         <div style={{ padding: '0 20px 16px' }}>
@@ -2940,10 +3380,18 @@ export const EmployeeList = () => {
                 onChange={(e) => handleFieldChange('reportingManager', e.target.value)}
                 options={[
                   { value: '', label: 'None / Top Level Manager' },
-                  ...employees.map((em) => ({
-                    value: em._id || em.id,
-                    label: `${em.basicInfo?.fullName || `${em.firstName || ''} ${em.lastName || ''}`.trim()} (${em.basicInfo?.employeeCode || em.employeeCode || 'EMP'})`,
-                  })),
+                  ...employees
+                    .filter(
+                      (em) =>
+                        !em.isUserBridge &&
+                        !em.isBridged &&
+                        !String(em._id || em.id || '').startsWith('user-bridge') &&
+                        /^[0-9a-fA-F]{24}$/.test(String(em._id || em.id))
+                    )
+                    .map((em) => ({
+                      value: em._id || em.id,
+                      label: `${em.basicInfo?.fullName || `${em.firstName || ''} ${em.lastName || ''}`.trim()} (${em.basicInfo?.employeeCode || em.employeeCode || 'EMP'})`,
+                    })),
                 ]}
               />
               {/* Multi-Role Picker */}
@@ -4027,7 +4475,14 @@ export const EmployeeList = () => {
                           options={[
                             { value: '', label: 'None / Top Level Manager' },
                             ...employees
-                              .filter((em) => (em._id || em.id) !== currentEmployeeDetail._id)
+                              .filter(
+                                (em) =>
+                                  (em._id || em.id) !== currentEmployeeDetail._id &&
+                                  !em.isUserBridge &&
+                                  !em.isBridged &&
+                                  !String(em._id || em.id || '').startsWith('user-bridge') &&
+                                  /^[0-9a-fA-F]{24}$/.test(String(em._id || em.id))
+                              )
                               .map((em) => ({
                                 value: em._id || em.id,
                                 label: `${em.basicInfo?.fullName || `${em.firstName || ''} ${em.lastName || ''}`.trim()} (${em.basicInfo?.employeeCode || em.employeeCode || 'EMP'})`,

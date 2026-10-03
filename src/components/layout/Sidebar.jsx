@@ -139,6 +139,7 @@ export const Sidebar = ({ isMobileOpen, onCloseMobile }) => {
         { path: '/masters/departments', label: 'Departments', icon: Building2, module: 'departments' },
         { path: '/masters/designations', label: 'Designations', icon: Award, module: 'designations' },
         { path: '/masters/roles', label: 'Roles & RBAC', icon: ShieldCheck, module: 'roles' },
+        { path: '/masters/users', label: 'Users & Logins', icon: UserCheck, module: 'users' },
       ],
     },
   ];

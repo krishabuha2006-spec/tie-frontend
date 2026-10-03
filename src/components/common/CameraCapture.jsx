@@ -180,7 +180,7 @@ export const CameraCapture = ({
         }
       }
 
-      // 2. Fallback / Complementary: Optical Luminance & Oval Presence Analyzer
+      // 2. Optical Facial Presence & Chromatic Analyzer (Checks skin-tone & whole face oval presence)
       if (!detected) {
         try {
           const tempCanvas = document.createElement('canvas');
@@ -189,11 +189,12 @@ export const CameraCapture = ({
           const ctx = tempCanvas.getContext('2d');
           ctx.drawImage(video, 0, 0, 160, 120);
 
-          // Sample center oval pixels (x: 40-120, y: 30-90)
+          // Sample center oval face region (x: 40-120, y: 25-95)
           const imgData = ctx.getImageData(40, 25, 80, 70).data;
           let brightnessSum = 0;
           let contrastVar = 0;
-          const len = imgData.length / 4;
+          let skinPixelCount = 0;
+          const totalPixels = imgData.length / 4;
 
           for (let i = 0; i < imgData.length; i += 4) {
             const r = imgData[i];
@@ -201,21 +202,26 @@ export const CameraCapture = ({
             const b = imgData[i + 2];
             const lum = 0.299 * r + 0.587 * g + 0.114 * b;
             brightnessSum += lum;
-          }
-          const avgLum = brightnessSum / len;
 
-          // Check if frame is illuminated and has non-zero subject variance (not pure black/covered)
+            // Chromatic human skin check
+            if (r > 40 && g > 25 && b > 15 && r >= g && r >= b && (r - g) >= 6 && Math.abs(r - g) < 120) {
+              skinPixelCount++;
+            }
+          }
+          const avgLum = brightnessSum / totalPixels;
+          const skinRatio = skinPixelCount / totalPixels;
+
           for (let i = 0; i < imgData.length; i += 16) {
             const lum = 0.299 * imgData[i] + 0.587 * imgData[i + 1] + 0.114 * imgData[i + 2];
             contrastVar += Math.abs(lum - avgLum);
           }
 
-          // Sufficient lighting & human presence contrast threshold
-          if (avgLum > 35 && avgLum < 240 && contrastVar > 800) {
+          // Must have valid lighting, human skin tones, and facial feature contrast
+          if (avgLum > 35 && avgLum < 240 && skinRatio >= 0.12 && contrastVar > 600) {
             detected = true;
           }
         } catch {
-          detected = true;
+          detected = false;
         }
       }
 

@@ -38,20 +38,12 @@ export const projectTaskApi = {
     return res.data;
   },
 
-  // Site Tasks (Module 9 & 11 - GET & POST /projects/tasks and /tasks)
+  // Site Tasks (Module 11 - GET & POST /tasks)
   getSiteTasks: async (params) => {
     try {
-      const res = await apiClient.get('/projects/tasks', { params });
+      const res = await apiClient.get('/tasks', { params });
       return res.data;
-    } catch (err) {
-      if (err.response?.status === 404 || err.response?.status === 400) {
-        try {
-          const fallback = await apiClient.get('/tasks', { params });
-          return fallback.data;
-        } catch {
-          return { success: true, data: [], tasks: [] };
-        }
-      }
+    } catch {
       return { success: true, data: [], tasks: [] };
     }
   },
@@ -86,16 +78,8 @@ export const projectTaskApi = {
       description: data.description || '',
     };
 
-    try {
-      const res = await apiClient.post('/projects/tasks', payload);
-      return res.data;
-    } catch (err) {
-      if (err.response?.status === 404 || err.response?.status === 400) {
-        const fallback = await apiClient.post('/tasks', payload);
-        return fallback.data;
-      }
-      throw err;
-    }
+    const res = await apiClient.post('/tasks', payload);
+    return res.data;
   },
 
   // Site Activity Logs (Module 10)

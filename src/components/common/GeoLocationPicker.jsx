@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MapPin, RefreshCw, AlertTriangle, CheckCircle2, Navigation, Compass } from 'lucide-react';
+import { MapPin, RefreshCw, AlertTriangle, CheckCircle2, Navigation, Compass, Info } from 'lucide-react';
 import Button from './Button';
 import { calculateDistanceMeters } from '../../utils/geoUtils';
 
@@ -204,8 +204,8 @@ export const GeoLocationPicker = ({ onLocationChange, targetLocation = null }) =
             )}
           </div>
           {isSimulated && (
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
-              ℹ️ Using office coordinates (GPS unavailable on this browser)
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <Info size={12} color="var(--primary)" /> Using office coordinates (GPS unavailable on this browser)
             </div>
           )}
         </div>
